@@ -53,5 +53,37 @@
       {"name": "expected_attach_type", "offset": 68, "size": 4},
       {"name": "prog_btf_fd", "offset": 72, "size": 4}
     ]
+  },
+  "obj_info": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "bpf_fd", "offset": 0, "size": 4},
+      {"name": "info_len", "offset": 4, "size": 4},
+      {"name": "info", "offset": 8, "size": 8}
+    ]
+  },
+  "map_info": {
+    "attr_size": 104,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "id", "offset": 4, "size": 4},
+      {"name": "key_size", "offset": 8, "size": 4},
+      {"name": "value_size", "offset": 12, "size": 4},
+      {"name": "max_entries", "offset": 16, "size": 4},
+      {"name": "map_flags", "offset": 20, "size": 4},
+      {"name": "name", "offset": 24, "size": 16},
+      {"name": "btf_key_type_id", "offset": 68, "size": 4},
+      {"name": "btf_value_type_id", "offset": 72, "size": 4}
+    ]
+  },
+  "prog_info": {
+    "attr_size": 232,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "id", "offset": 4, "size": 4},
+      {"name": "jited_prog_len", "offset": 16, "size": 4},
+      {"name": "xlated_prog_len", "offset": 20, "size": 4},
+      {"name": "name", "offset": 64, "size": 16}
+    ]
   }
 }
