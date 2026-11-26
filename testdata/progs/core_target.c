@@ -15,5 +15,12 @@ struct core_sample {
 	int second;
 };
 
+struct core_flex {
+	int count;
+	int pad;
+	int values[];
+};
+
 struct core_sample target_sample;
+struct core_flex target_flex;
 enum core_enum target_enum;
