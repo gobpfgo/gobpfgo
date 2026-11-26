@@ -7,6 +7,7 @@ package sys
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -88,5 +89,31 @@ func TestMapCreateAttr(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("attribute mismatch\n got %x\nwant %x", got, want)
+	}
+}
+
+func TestMapElemAttr(t *testing.T) {
+	attr := &MapElemAttr{
+		MapFD: 7,
+		Key:   0x1122334455667788,
+		Value: 0x99aabbccddeeff00,
+		Flags: 3,
+	}
+
+	got := attr.Marshal()
+	if len(got) != MapElemAttrSize {
+		t.Fatalf("marshaled %d bytes, want %d", len(got), MapElemAttrSize)
+	}
+	if v := binary.NativeEndian.Uint32(got[0:]); v != attr.MapFD {
+		t.Errorf("map_fd = %#x, want %#x", v, attr.MapFD)
+	}
+	if v := binary.NativeEndian.Uint64(got[8:]); v != attr.Key {
+		t.Errorf("key = %#x, want %#x", v, attr.Key)
+	}
+	if v := binary.NativeEndian.Uint64(got[16:]); v != attr.Value {
+		t.Errorf("value = %#x, want %#x", v, attr.Value)
+	}
+	if v := binary.NativeEndian.Uint64(got[24:]); v != attr.Flags {
+		t.Errorf("flags = %#x, want %#x", v, attr.Flags)
 	}
 }

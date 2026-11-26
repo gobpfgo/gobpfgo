@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path, bpf_map__fd
+// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path, bpf_map__fd, bpf_map__lookup_elem
 
 package libbpf
+
+import (
+	"github.com/golbpfgo/golbpfgo/internal/sys"
+	"golang.org/x/sys/unix"
+)
 
 // BpfMap is a map parsed from an object. It carries the definition metadata
 // from the ELF and BTF sections; the load step adds the kernel descriptor.
@@ -107,4 +112,32 @@ func BpfMapPinPath(m *BpfMap) string {
 		return ""
 	}
 	return m.pinPath
+}
+
+// BpfMapLookupElem reads the value for key from a loaded map and copies it
+// into value.
+//
+// key and value must match the map key and value sizes. A different length is
+// rejected with EINVAL, because the kernel would otherwise copy the map value
+// size past the end of the value slice. flags is passed to the kernel
+// unchanged; BPF_F_LOCK is the flag element lookups use today.
+//
+// The caller must load the map with BpfObjectLoad first. A failed lookup
+// returns an *Error with the kernel errno, for example ENOENT when the key is
+// absent.
+func BpfMapLookupElem(m *BpfMap, key, value []byte, flags uint64) error {
+	if m == nil {
+		return &Error{Op: "bpf_map__lookup_elem", Errno: unix.EINVAL}
+	}
+	if m.fd < 0 {
+		return &Error{Op: "bpf_map__lookup_elem", Errno: unix.EBADF}
+	}
+	if len(key) != int(m.keySize) || len(value) != int(m.valueSize) {
+		return &Error{Op: "bpf_map__lookup_elem", Errno: unix.EINVAL}
+	}
+
+	if err := sys.MapLookupElem(m.fd, key, value, flags); err != nil {
+		return &Error{Op: "bpf_map__lookup_elem", Errno: errnoFromError(err)}
+	}
+	return nil
 }
