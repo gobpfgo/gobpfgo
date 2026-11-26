@@ -45,7 +45,7 @@ Phase 1, in progress.
 
 Phase 2, in progress.
 
-- `internal/btf.ParseExt` reads the `.BTF.ext` CO-RE records; `ParseCoreSpec` resolves field, type and enum access specs against the local BTF, matching libbpf's spec for the test object (`0:1`, bit offset 32, two accessors). The `core` oracle scenario checks it and runs in CI and on 5.10.
+- `internal/btf.ParseExt` reads the `.BTF.ext` CO-RE records; `ParseCoreSpec` resolves field, type and enum access specs against the local BTF, matching libbpf's spec for the test object (`0:1`, bit offset 32, two accessors). The `core` oracle scenario checks it and runs in CI and on 5.10 ([`#23`](https://github.com/gobpfgo/gobpfgo/pull/23)).
 - Next: CO-RE target matching and instruction patching.
 
 Open:
