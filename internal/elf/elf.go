@@ -22,6 +22,12 @@ const (
 	R_BPF_64_32 = 10
 )
 
+// Re-exported so callers do not need to import debug/elf as well.
+const (
+	EM_BPF   = elf.EM_BPF
+	STT_FUNC = elf.STT_FUNC
+)
+
 // Reloc is one relocation entry.
 type Reloc struct {
 	Section string
