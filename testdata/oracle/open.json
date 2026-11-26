@@ -1,0 +1,14 @@
+{
+  "case": "open",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "kprobe.bpf.o",
+  "object_name": "kprobe",
+  "maps": [
+    {"name": "counts", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11, "pin_path": ""}
+  ],
+  "programs": [
+    {"name": "handle_open", "type": 2, "expected_attach_type": 0, "section": "kprobe/do_sys_open", "insn_cnt": 12}
+  ]
+}
