@@ -14,7 +14,7 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 ## D-003: No unsafe
 
-2026-11-26. The library does not import `unsafe`. UAPI attribute structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go values; mmap memory is read through `[]byte`. The one unavoidable address conversion for the `bpf()` syscall is isolated in `internal/sys/addr.go` and uses `reflect.ValueOf(buf).Pointer()` with `runtime.KeepAlive`. If the operator rejects `reflect` as well, the alternative is a per-architecture assembly stub.
+2026-11-26. The library does not import `unsafe`. UAPI attribute structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go values; mmap memory is read through `[]byte`. The one unavoidable address conversion for the `bpf()` syscall is isolated in `internal/sys/addr.go` and uses `reflect.ValueOf(buf).Pointer()` with `runtime.KeepAlive`. If the operator rejects `reflect` as well, the alternative is a per-architecture assembly stub. Accepted after the cost comparison: explicit `encoding/binary` writes plus the `reflect` address helper; an `unsafe` overlay and reflect struct marshaling are rejected.
 
 ## D-004: Pure-Go dependencies
 

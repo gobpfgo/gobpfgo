@@ -11,6 +11,7 @@ Rules learned from the operator. Newest last. Every entry carries the date, the 
 - **No unsafe.** Do not import `unsafe`. Serialize UAPI structs into `[]byte` with `encoding/binary`; parse BTF into Go types; read mmap rings through `[]byte`. The only address conversion for a syscall lives in `internal/sys` and is documented in [DECISIONS.md](DECISIONS.md).
 - **Dependencies.** Prefer existing pure-Go packages when they fit. No cgo, at any point. Pin versions with `go.mod` and `go.sum`, and check the license before adding.
 - **Naming.** CamelCase for functions and types; UAPI constants exactly as in the kernel headers (`BPF_MAP_TYPE_RINGBUF`, `BTF_KIND_STRUCT`). [API-MAP.md](API-MAP.md) is the decoder ring.
+- **UAPI encoding.** Explicit fixed-offset `encoding/binary` writes for UAPI structs; one `reflect` call only for the syscall buffer address. No `unsafe`, no reflect struct marshaling, no `binary.Write` on structs.
 - **Pull requests.** Every change starts with a pull request. Open it early, commit to its branch, and let CI run. "Commit the pull request" is read as pushing commits to the PR branch; merging still needs an explicit word. Correct this entry if that reading is wrong.
 - **Learning.** This file is the log. A correction is not complete until it is written here and in the affected document.
 
