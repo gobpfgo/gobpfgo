@@ -49,7 +49,7 @@ Phase 2, in progress.
 - `CalcCoreRelo` matches a field access against a target BTF and computes the local and target values; `patchCoreInsn` rewrites the load instruction. The `core-reloc` oracle scenario matches libbpf when `second` moves from offset 4 to 8 in the target ([`#24`](https://github.com/gobpfgo/gobpfgo/pull/24)).
 - The load path parses `.BTF.ext`, finds the target type in `/sys/kernel/btf/vmlinux`, applies the field relocation, and loads `core_kernel.bpf.o` with the kernel `pt_regs.sp` offset patched. The root test passes on 5.10 and 6.18 ([`#25`](https://github.com/gobpfgo/gobpfgo/pull/25)).
 - The `core-reloc` oracle now covers field offsets, type ids, type existence, type size and enum values; the engine adds type/enum target matching and 64-bit immediate patching. The Go result and patched instructions match libbpf on 5.10 and 6.18 ([`#26`](https://github.com/gobpfgo/gobpfgo/pull/26)).
-- Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18.
+- Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18 ([`#27`](https://github.com/gobpfgo/gobpfgo/pull/27)).
 - Next: module BTFs, TYPE_MATCHES and poison-on-missing-root.
 
 Open:
