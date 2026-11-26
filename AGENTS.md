@@ -26,6 +26,7 @@ golbpfgo is a pure-Go port of libbpf, close to 1:1 in behavior and API shape. Th
 - No cgo. `CGO_ENABLED=0 go build ./...` must pass.
 - No `unsafe` import. UAPI structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go types; mmap data is read through `[]byte`. The single syscall address helper lives in `internal/sys` and is documented in [docs/DECISIONS.md](docs/DECISIONS.md).
 - C sources are formatted with `clang-format`; `make format-check` must pass. Go stays with `gofmt`.
+- Provenance lives in the file header metadata (`libbpf-source`, `libbpf-commit`, `libbpf-symbols`, or `golbpfgo-origin`); godocs describe the Go behavior, not the C mapping.
 - No cilium/ebpf code, tests or generated files. Design ideas only, recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 - The libbpf checkout at `../libbpf` is read-only reference. Never modify it.
 - LGPL-2.1-only. Every Go file carries the SPDX header. Dependencies must be license-compatible; flag Apache-2.0 before adding one.
@@ -58,7 +59,8 @@ When the operator corrects a choice, append a dated entry to [docs/PREFERENCES.m
 A ported symbol is done when:
 
 - the Go code exists and builds with `CGO_ENABLED=0`;
-- the doc comment names the C symbol and source file;
+- the file header carries the provenance metadata, or `golbpfgo-origin` for original code;
+- the godoc describes the Go behavior, ownership and errors, not the C mapping;
 - there is a unit test;
 - there is an oracle parity test where the behavior is observable;
 - [docs/API-MAP.md](docs/API-MAP.md) carries its status;

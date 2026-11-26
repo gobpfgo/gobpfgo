@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original Go ELF reader
+// libbpf-source: src/elf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: bpf_object__elf_init, bpf_object__elf_collect, bpf_object__elf_finish
 
-// Package elf reads the parts of an ELF file that libbpf needs: sections,
-// symbols, relocations, the map and BTF payloads, and the executable program
-// sections.
+// Package elf reads the parts of a 64-bit BPF ELF object that the loader
+// needs: sections, symbols, relocations, the .maps, .BTF and .BTF.ext payloads
+// and the executable program sections.
+//
+// The reader is independent of libelf. It keeps the section bytes in memory;
+// the caller parses the BTF and map definitions from them.
 package elf
 
 import (
@@ -28,7 +34,9 @@ const (
 	STT_FUNC = elf.STT_FUNC
 )
 
-// Reloc is one relocation entry.
+// Reloc is one relocation entry. Section is the target section name, Symbol
+// the referenced symbol, Type the ELF relocation type and Addend the RELA
+// addend.
 type Reloc struct {
 	Section string
 	Offset  uint64
@@ -37,7 +45,7 @@ type Reloc struct {
 	Addend  int64
 }
 
-// Symbol is one symbol table entry.
+// Symbol is one symbol table entry, with its section name resolved.
 type Symbol struct {
 	Name         string
 	SectionIndex elf.SectionIndex
@@ -49,7 +57,8 @@ type Symbol struct {
 	Bind         elf.SymBind
 }
 
-// Section is one ELF section header plus its data.
+// Section is one ELF section header plus its bytes. SHT_NOBITS sections have
+// no data.
 type Section struct {
 	Name  string
 	Index int
@@ -59,7 +68,8 @@ type Section struct {
 	Data  []byte
 }
 
-// Program is one executable section, holding BPF instructions.
+// Program is an executable section with its instruction bytes and
+// relocations. The section name carries the SEC prefix.
 type Program struct {
 	Name         string
 	SectionIndex int
@@ -67,7 +77,9 @@ type Program struct {
 	Relocs       []Reloc
 }
 
-// Object is the parsed ELF view used by the object loader.
+// Object is the parsed ELF view used by the object loader. Sections holds
+// every section with its bytes; Symbols and Relocations hold the symbol table
+// and relocation entries; Programs are the executable PROGBITS sections.
 type Object struct {
 	Class       elf.Class
 	Machine     elf.Machine
@@ -84,7 +96,8 @@ type Object struct {
 	BTFExt  []byte
 }
 
-// Open reads path and parses it as an ELF object.
+// Open reads path and parses it as a 64-bit ELF object. The file is read into
+// memory; the returned sections own their bytes.
 func Open(path string) (*Object, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -93,7 +106,8 @@ func Open(path string) (*Object, error) {
 	return OpenBytes(data)
 }
 
-// OpenBytes parses an in-memory ELF object.
+// OpenBytes parses a 64-bit ELF object from data. The input is read during the
+// call; the returned sections own their bytes.
 func OpenBytes(data []byte) (*Object, error) {
 	f, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {

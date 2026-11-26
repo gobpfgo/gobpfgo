@@ -4,7 +4,7 @@
 
 ## 2026-11-26
 
-Phase 0: syscalls, ELF, BTF and object open.
+Phase 0 done: syscalls, ELF, BTF, object open and the test harness.
 
 Done:
 
@@ -14,15 +14,18 @@ Done:
 - [`#4`](https://github.com/golbpfgo/golbpfgo/pull/4) merged: the ELF reader and the kprobe test object.
 - [`#5`](https://github.com/golbpfgo/golbpfgo/pull/5) merged: the BTF wire parser.
 - [`#6`](https://github.com/golbpfgo/golbpfgo/pull/6) merged: object open and the open oracle.
+- [`#7`](https://github.com/golbpfgo/golbpfgo/pull/7) merged: the kernel floor is 5.10.
+- [`#8`](https://github.com/golbpfgo/golbpfgo/pull/8) merged: the load oracle, generated under `sudo`.
+- [`#9`](https://github.com/golbpfgo/golbpfgo/pull/9) merged: the C clang-format rules and the CI format gate.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.
 - `internal/btf`: header, type table, string table, all type kinds and `SizeOf`.
-- `oracle`: `layout`, `attr` and `open`; `open` links the pinned libbpf built from a copy under `oracle/build`.
+- `oracle`: `layout`, `attr`, `open` and `load`; the linked scenarios build the pinned libbpf under `oracle/build`.
 - `libbpf.BpfObjectOpenFile`, `BpfObjectOpenMem`, the map and program metadata accessors, and the SEC table for the kprobe path.
 - The open test compares the object name, map fields and program fields with `testdata/oracle/open.json`.
-- `oracle/load.c` loads the kprobe object with the pinned libbpf under `sudo` and writes `testdata/oracle/load.json`: map id 716, program id 300, 18 xlated instructions, 100 jited bytes.
-- Kernel floor set to 5.10. The 4.9-era fallbacks are out of scope.
+- The load fixture records map id 716, program id 300, 18 xlated instructions and 100 jited bytes on 6.18.
+- File provenance now lives in the `libbpf-source`, `libbpf-commit` and `libbpf-symbols` headers; godocs describe the Go API.
 
-Next:
+Next: phase 1.
 
 - Go load path: BTF load, map create with the BTF ids, map-FD relocation, program load, and the loaded info comparison.
 - Kprobe attach after load.
