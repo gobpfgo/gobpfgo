@@ -39,3 +39,22 @@ func TestBpfMapCreateOptsSize(t *testing.T) {
 		t.Fatal("NewBpfMapCreateOpts returned Sz zero")
 	}
 }
+
+func TestBpfMapLookupElemChecks(t *testing.T) {
+	if err := BpfMapLookupElem(nil, nil, nil, 0); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("nil map: got %v, want EINVAL", err)
+	}
+
+	m := &BpfMap{fd: -1, keySize: 4, valueSize: 8}
+	if err := BpfMapLookupElem(m, make([]byte, 4), make([]byte, 8), 0); !errors.Is(err, unix.EBADF) {
+		t.Fatalf("unloaded map: got %v, want EBADF", err)
+	}
+
+	m.fd = 0
+	if err := BpfMapLookupElem(m, make([]byte, 3), make([]byte, 8), 0); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("short key: got %v, want EINVAL", err)
+	}
+	if err := BpfMapLookupElem(m, make([]byte, 4), make([]byte, 7), 0); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("short value: got %v, want EINVAL", err)
+	}
+}

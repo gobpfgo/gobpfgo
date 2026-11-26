@@ -52,3 +52,25 @@ func MapCreate(attr *MapCreateAttr, exclHash []byte) (int, error) {
 	}
 	return int(fd), nil
 }
+
+// MapLookupElem calls BPF_MAP_LOOKUP_ELEM and copies the map value into value.
+//
+// key and value are the raw key and value buffers. value must be at least the
+// map value size: the kernel writes that many bytes into it. The slices are
+// kept alive until the syscall returns.
+func MapLookupElem(fd int, key, value []byte, flags uint64) error {
+	if fd < 0 || len(key) == 0 || len(value) == 0 {
+		return unix.EINVAL
+	}
+
+	attr := &MapElemAttr{
+		MapFD: uint32(fd),
+		Key:   uint64(addr(key)),
+		Value: uint64(addr(value)),
+		Flags: flags,
+	}
+	err := BPF(BPF_MAP_LOOKUP_ELEM, attr.Marshal())
+	runtime.KeepAlive(key)
+	runtime.KeepAlive(value)
+	return err
+}

@@ -54,6 +54,15 @@
       {"name": "prog_btf_fd", "offset": 72, "size": 4}
     ]
   },
+  "map_elem": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "map_fd", "offset": 0, "size": 4},
+      {"name": "key", "offset": 8, "size": 8},
+      {"name": "value", "offset": 16, "size": 8},
+      {"name": "flags", "offset": 24, "size": 8}
+    ]
+  },
   "obj_info": {
     "attr_size": 16,
     "fields": [
