@@ -71,6 +71,7 @@ The generated table has these columns:
 | `bpf_core_parse_spec` | `ParseCoreSpec` (internal) | `internal/btf/core.go` | parity tested (field access spec) |
 | `bpf_core_calc_relo_insn` | `CalcCoreRelo` (internal) | `internal/btf/core.go` | parity tested (field relocation, synthetic target) |
 | `bpf_core_patch_insn` | `patchCoreInsn` (internal) | `libbpf/core_reloc.go` | parity tested (field relocation, synthetic target) |
+| `bpf_object__relocate_core` | `relocateCore` (internal) | `libbpf/core_load.go` | parity tested (`pt_regs.sp`, kernel BTF, 5.10/6.18) |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
 | `btf__parse` | `BtfParse` | `libbpf/btf.go` | not started |
 | `btf_dump__new` | `BtfDumpNew` | `libbpf/btf_dump.go` | not started |

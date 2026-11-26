@@ -47,11 +47,12 @@ Phase 2, in progress.
 
 - `internal/btf.ParseExt` reads the `.BTF.ext` CO-RE records; `ParseCoreSpec` resolves field, type and enum access specs against the local BTF, matching libbpf's spec for the test object (`0:1`, bit offset 32, two accessors). The `core` oracle scenario checks it and runs in CI and on 5.10 ([`#23`](https://github.com/gobpfgo/gobpfgo/pull/23)).
 - `CalcCoreRelo` matches a field access against a target BTF and computes the local and target values; `patchCoreInsn` rewrites the load instruction. The `core-reloc` oracle scenario matches libbpf when `second` moves from offset 4 to 8 in the target ([`#24`](https://github.com/gobpfgo/gobpfgo/pull/24)).
-- Next: wire the CO-RE engine into `BpfObjectLoad` against the kernel BTF.
+- The load path parses `.BTF.ext`, finds the target type in `/sys/kernel/btf/vmlinux`, applies the field relocation, and loads `core_kernel.bpf.o` with the kernel `pt_regs.sp` offset patched. The root test passes on 5.10 and 6.18.
+- Next: CO-RE type and enum target matching, module BTFs, flexible arrays and 64-bit immediate patching.
 
 Open:
 
 - The arm64 half of the 5.10 tier has not run.
 - kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.
 - Link pinning and the remaining attach types are not ported.
-- CO-RE target matching, instruction patching and flexible array members are not ported.
+- CO-RE type and enum target matching, module BTFs, flexible array members and 64-bit immediate patching are not ported.
