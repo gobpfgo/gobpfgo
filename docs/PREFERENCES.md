@@ -15,6 +15,7 @@ Rules learned from the operator. Newest last. Every entry carries the date, the 
 - **Kernel floor.** Target Linux 5.10 and newer. Do not spend time on 4.9-era fallbacks.
 - **C formatting.** Use the repository [`.clang-format`](../.clang-format): 4-column tabs, attached braces, no include sorting, no wrapping below 1000 columns, aligned consecutive assignments. Put one blank line before and after a control block. C only; Go stays gofmt.
 - **Docs and provenance.** Keep the libbpf source, commit and symbols as file metadata (`libbpf-source`, `libbpf-commit`, `libbpf-symbols`). Godocs describe the Go behavior, ownership and errors; do not write "mirrors X". Original files use `golbpfgo-origin`.
+- **Clean code, always.** Code is for humans, including tests, the oracle and tools. No throwaway dumps: small functions, shared helpers, clear names and the formatter. The oracle rewrite is the standard.
 - **Pull requests.** Every change starts with a pull request. Open it early, commit to its branch, and let CI run before the merge.
 - **Merge and continue.** The agent may merge its own PRs one at a time after CI is green, fix failing CI, and move to the next slice without asking, until a decision needs the operator. GitHub rejects self-approval; merge without it when branch protection allows, using rebase and merge. The operator authorized this on 2026-11-26.
 - **Learning.** This file is the log. A correction is not complete until it is written here and in the affected document.
