@@ -22,6 +22,7 @@ type BpfMap struct {
 	btfKeyTypeID   uint32
 	btfValueTypeID uint32
 	pinPath        string
+	pinned         bool
 	fd             int
 	id             uint32
 }

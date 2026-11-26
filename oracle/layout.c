@@ -62,6 +62,12 @@ int oracle_layout(void) {
 		F(value),
 		F(flags),
 	};
+	static const struct oracle_field obj_pin_fields[] = {
+		F(pathname),
+		F(bpf_fd),
+		F(file_flags),
+		F(path_fd),
+	};
 	static const struct oracle_field obj_info_fields[] = {
 		{"bpf_fd", offsetof(union bpf_attr, info), 4},
 		{"info_len", offsetof(union bpf_attr, info) + 4, 4},
@@ -96,6 +102,7 @@ int oracle_layout(void) {
 	oracle_field_block(&j, "btf_load", btf_load_fields, ORACLE_ARRAY_SIZE(btf_load_fields), ORACLE_OFFSETOFEND(union bpf_attr, btf_token_fd));
 	oracle_field_block(&j, "prog_load", prog_load_fields, ORACLE_ARRAY_SIZE(prog_load_fields), ORACLE_OFFSETOFEND(union bpf_attr, keyring_id));
 	oracle_field_block(&j, "map_elem", map_elem_fields, ORACLE_ARRAY_SIZE(map_elem_fields), ORACLE_OFFSETOFEND(union bpf_attr, flags));
+	oracle_field_block(&j, "obj_pin", obj_pin_fields, ORACLE_ARRAY_SIZE(obj_pin_fields), ORACLE_OFFSETOFEND(union bpf_attr, path_fd));
 	oracle_field_block(&j, "obj_info", obj_info_fields, ORACLE_ARRAY_SIZE(obj_info_fields), ORACLE_OFFSETOFEND(union bpf_attr, info));
 	oracle_field_block(&j, "map_info", map_info_fields, ORACLE_ARRAY_SIZE(map_info_fields), sizeof(struct bpf_map_info));
 	oracle_field_block(&j, "prog_info", prog_info_fields, ORACLE_ARRAY_SIZE(prog_info_fields), sizeof(struct bpf_prog_info));

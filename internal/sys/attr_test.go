@@ -92,6 +92,32 @@ func TestMapCreateAttr(t *testing.T) {
 	}
 }
 
+func TestObjPinAttr(t *testing.T) {
+	attr := &ObjPinAttr{
+		Pathname:  0x1122334455667788,
+		BPFFD:     7,
+		FileFlags: 3,
+		PathFD:    9,
+	}
+
+	got := attr.Marshal()
+	if len(got) != ObjPinAttrSize {
+		t.Fatalf("marshaled %d bytes, want %d", len(got), ObjPinAttrSize)
+	}
+	if v := binary.NativeEndian.Uint64(got[0:]); v != attr.Pathname {
+		t.Errorf("pathname = %#x, want %#x", v, attr.Pathname)
+	}
+	if v := binary.NativeEndian.Uint32(got[8:]); v != attr.BPFFD {
+		t.Errorf("bpf_fd = %#x, want %#x", v, attr.BPFFD)
+	}
+	if v := binary.NativeEndian.Uint32(got[12:]); v != attr.FileFlags {
+		t.Errorf("file_flags = %#x, want %#x", v, attr.FileFlags)
+	}
+	if v := binary.NativeEndian.Uint32(got[16:]); v != uint32(attr.PathFD) {
+		t.Errorf("path_fd = %#x, want %#x", v, uint32(attr.PathFD))
+	}
+}
+
 func TestMapElemAttr(t *testing.T) {
 	attr := &MapElemAttr{
 		MapFD: 7,
