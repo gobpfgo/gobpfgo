@@ -1,0 +1,301 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Original golbpfgo code.
+
+// Package btf parses the BTF wire format used by BPF object files.
+package btf
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
+
+// Header is the BTF header.
+type Header struct {
+	Magic   uint16
+	Version uint8
+	Flags   uint8
+	HdrLen  uint32
+	TypeOff uint32
+	TypeLen uint32
+	StrOff  uint32
+	StrLen  uint32
+}
+
+// Spec is a parsed BTF object.
+type Spec struct {
+	Header    Header
+	ByteOrder binary.ByteOrder
+	Types     []Type
+	Strings   []byte
+}
+
+// Parse parses a BTF blob. Types[0] is the void placeholder, so a type ID is
+// also its index in Types.
+func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
+	if len(data) < 24 {
+		return nil, fmt.Errorf("btf: header too short: %d bytes", len(data))
+	}
+
+	hdr := Header{
+		Magic:   order.Uint16(data[0:]),
+		Version: data[2],
+		Flags:   data[3],
+		HdrLen:  order.Uint32(data[4:]),
+		TypeOff: order.Uint32(data[8:]),
+		TypeLen: order.Uint32(data[12:]),
+		StrOff:  order.Uint32(data[16:]),
+		StrLen:  order.Uint32(data[20:]),
+	}
+	if hdr.Magic != 0xeb9f {
+		return nil, fmt.Errorf("btf: bad magic 0x%x", hdr.Magic)
+	}
+	if hdr.Version != 1 {
+		return nil, fmt.Errorf("btf: unsupported version %d", hdr.Version)
+	}
+	if hdr.HdrLen < 24 || uint64(hdr.HdrLen) > uint64(len(data)) {
+		return nil, fmt.Errorf("btf: bad header length %d", hdr.HdrLen)
+	}
+
+	typeStart := uint64(hdr.HdrLen) + uint64(hdr.TypeOff)
+	typeEnd := typeStart + uint64(hdr.TypeLen)
+	strStart := uint64(hdr.HdrLen) + uint64(hdr.StrOff)
+	strEnd := strStart + uint64(hdr.StrLen)
+	if typeEnd > uint64(len(data)) {
+		return nil, fmt.Errorf("btf: type section out of bounds")
+	}
+	if strEnd > uint64(len(data)) {
+		return nil, fmt.Errorf("btf: string section out of bounds")
+	}
+
+	s := &Spec{
+		Header:    hdr,
+		ByteOrder: order,
+		Strings:   data[strStart:strEnd],
+		Types:     []Type{{Kind: KindVoid}},
+	}
+
+	raw := data[typeStart:typeEnd]
+	for pos := 0; pos < len(raw); {
+		t, n, err := parseType(raw[pos:], uint32(len(s.Types)), order)
+		if err != nil {
+			return nil, err
+		}
+		s.Types = append(s.Types, t)
+		pos += n
+	}
+
+	for i := range s.Types {
+		if err := s.resolveNames(&s.Types[i]); err != nil {
+			return nil, err
+		}
+	}
+
+	return s, nil
+}
+
+func parseType(b []byte, id uint32, order binary.ByteOrder) (Type, int, error) {
+	if len(b) < 12 {
+		return Type{}, 0, fmt.Errorf("btf: type %d: header out of bounds", id)
+	}
+
+	t := Type{
+		ID:         id,
+		NameOff:    order.Uint32(b[0:]),
+		Info:       order.Uint32(b[4:]),
+		SizeOrType: order.Uint32(b[8:]),
+	}
+	t.Kind = Kind((t.Info >> 24) & 0x1f)
+	t.KindFlag = t.Info>>31 != 0
+	t.Vlen = t.Info & 0xffff
+
+	n := 12
+	switch t.Kind {
+	case KindInt:
+		if len(b) < n+4 {
+			return Type{}, 0, fmt.Errorf("btf: type %d: int payload out of bounds", id)
+		}
+		t.Int = &Int{Encoding: order.Uint32(b[n:])}
+		n += 4
+
+	case KindArray:
+		if len(b) < n+12 {
+			return Type{}, 0, fmt.Errorf("btf: type %d: array payload out of bounds", id)
+		}
+		t.Array = &Array{
+			Type:      order.Uint32(b[n:]),
+			IndexType: order.Uint32(b[n+4:]),
+			Nelems:    order.Uint32(b[n+8:]),
+		}
+		n += 12
+
+	case KindStruct, KindUnion:
+		size := int(t.Vlen) * 12
+		if len(b) < n+size {
+			return Type{}, 0, fmt.Errorf("btf: type %d: members out of bounds", id)
+		}
+		t.Members = make([]Member, t.Vlen)
+		for i := range t.Members {
+			m := &t.Members[i]
+			m.NameOff = order.Uint32(b[n:])
+			m.Type = order.Uint32(b[n+4:])
+			rawOffset := order.Uint32(b[n+8:])
+			if t.KindFlag {
+				m.Offset = rawOffset & 0xffffff
+				m.BitfieldSize = uint8(rawOffset >> 24)
+			} else {
+				m.Offset = rawOffset
+			}
+			n += 12
+		}
+
+	case KindEnum:
+		size := int(t.Vlen) * 8
+		if len(b) < n+size {
+			return Type{}, 0, fmt.Errorf("btf: type %d: enum values out of bounds", id)
+		}
+		t.Enums = make([]Enum, t.Vlen)
+		for i := range t.Enums {
+			t.Enums[i].NameOff = order.Uint32(b[n:])
+			t.Enums[i].Value = int32(order.Uint32(b[n+4:]))
+			n += 8
+		}
+
+	case KindFuncProto:
+		size := int(t.Vlen) * 8
+		if len(b) < n+size {
+			return Type{}, 0, fmt.Errorf("btf: type %d: params out of bounds", id)
+		}
+		t.Params = make([]Param, t.Vlen)
+		for i := range t.Params {
+			t.Params[i].NameOff = order.Uint32(b[n:])
+			t.Params[i].Type = order.Uint32(b[n+4:])
+			n += 8
+		}
+
+	case KindVar:
+		if len(b) < n+4 {
+			return Type{}, 0, fmt.Errorf("btf: type %d: var payload out of bounds", id)
+		}
+		t.Var = &Var{Linkage: order.Uint32(b[n:])}
+		n += 4
+
+	case KindDatasec:
+		size := int(t.Vlen) * 12
+		if len(b) < n+size {
+			return Type{}, 0, fmt.Errorf("btf: type %d: data section out of bounds", id)
+		}
+		t.DataSec = make([]VarSecInfo, t.Vlen)
+		for i := range t.DataSec {
+			t.DataSec[i].Type = order.Uint32(b[n:])
+			t.DataSec[i].Offset = order.Uint32(b[n+4:])
+			t.DataSec[i].Size = order.Uint32(b[n+8:])
+			n += 12
+		}
+
+	case KindDeclTag:
+		if len(b) < n+4 {
+			return Type{}, 0, fmt.Errorf("btf: type %d: decl tag out of bounds", id)
+		}
+		t.DeclTag = &DeclTag{ComponentIdx: int32(order.Uint32(b[n:]))}
+		n += 4
+
+	case KindEnum64:
+		size := int(t.Vlen) * 12
+		if len(b) < n+size {
+			return Type{}, 0, fmt.Errorf("btf: type %d: enum64 values out of bounds", id)
+		}
+		t.Enum64s = make([]Enum64, t.Vlen)
+		for i := range t.Enum64s {
+			t.Enum64s[i].NameOff = order.Uint32(b[n:])
+			lo := order.Uint32(b[n+4:])
+			hi := order.Uint32(b[n+8:])
+			t.Enum64s[i].Value = uint64(hi)<<32 | uint64(lo)
+			n += 12
+		}
+
+	case KindVoid, KindPtr, KindFwd, KindTypedef, KindVolatile, KindConst,
+		KindRestrict, KindFunc, KindFloat, KindTypeTag:
+		// No payload.
+
+	default:
+		return Type{}, 0, fmt.Errorf("btf: type %d: unknown kind %d", id, t.Kind)
+	}
+
+	return t, n, nil
+}
+
+func (s *Spec) resolveNames(t *Type) error {
+	var err error
+	if t.Name, err = s.String(t.NameOff); err != nil {
+		return err
+	}
+	for i := range t.Members {
+		if t.Members[i].Name, err = s.String(t.Members[i].NameOff); err != nil {
+			return err
+		}
+	}
+	for i := range t.Enums {
+		if t.Enums[i].Name, err = s.String(t.Enums[i].NameOff); err != nil {
+			return err
+		}
+	}
+	for i := range t.Enum64s {
+		if t.Enum64s[i].Name, err = s.String(t.Enum64s[i].NameOff); err != nil {
+			return err
+		}
+	}
+	for i := range t.Params {
+		if t.Params[i].Name, err = s.String(t.Params[i].NameOff); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// String returns the NUL-terminated string at off.
+func (s *Spec) String(off uint32) (string, error) {
+	if off == 0 {
+		return "", nil
+	}
+	if int(off) >= len(s.Strings) {
+		return "", fmt.Errorf("btf: string offset %d out of range", off)
+	}
+	b := s.Strings[off:]
+	i := bytes.IndexByte(b, 0)
+	if i < 0 {
+		return "", fmt.Errorf("btf: unterminated string at %d", off)
+	}
+	return string(b[:i]), nil
+}
+
+// TypeByID returns the type with the given ID. ID 0 is the void type.
+func (s *Spec) TypeByID(id uint32) (*Type, error) {
+	if id >= uint32(len(s.Types)) {
+		return nil, fmt.Errorf("btf: type id %d out of range", id)
+	}
+	return &s.Types[id], nil
+}
+
+// Find returns the first type with the given name and kind, or nil.
+func (s *Spec) Find(name string, kind Kind) *Type {
+	for i := 1; i < len(s.Types); i++ {
+		if s.Types[i].Name == name && s.Types[i].Kind == kind {
+			return &s.Types[i]
+		}
+	}
+	return nil
+}
+
+// Member returns the named member of a struct or union, or nil.
+func (s *Spec) Member(t *Type, name string) *Member {
+	if t == nil {
+		return nil
+	}
+	for i := range t.Members {
+		if t.Members[i].Name == name {
+			return &t.Members[i]
+		}
+	}
+	return nil
+}
