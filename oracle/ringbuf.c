@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #define RINGBUF_MAP "events"
+#define RINGBUF_MAP2 "events2"
 #define RINGBUF_PROG "handle_ringbuf"
 #define RINGBUF_SAMPLE 0x12345678
 #define RINGBUF_MAX 8
@@ -45,11 +46,12 @@ static bool trigger_open(void) {
 }
 
 int oracle_ringbuf(const char *path) {
-	struct oracle_meta meta   = {.case_name = "ringbuf", .version = true};
-	struct sample_ctx samples = {};
+	struct oracle_meta meta    = {.case_name = "ringbuf", .version = true};
+	struct sample_ctx samples  = {};
+	struct sample_ctx samples2 = {};
 	struct bpf_object *obj;
 	struct bpf_program *prog;
-	struct bpf_map *map;
+	struct bpf_map *map, *map2;
 	struct bpf_link *link;
 	struct ring_buffer *rb;
 	struct json j;
@@ -72,7 +74,8 @@ int oracle_ringbuf(const char *path) {
 
 	prog = bpf_object__find_program_by_name(obj, RINGBUF_PROG);
 	map  = bpf_object__find_map_by_name(obj, RINGBUF_MAP);
-	if (!prog || !map) {
+	map2 = bpf_object__find_map_by_name(obj, RINGBUF_MAP2);
+	if (!prog || !map || !map2) {
 		fprintf(stderr, "program or map not found\n");
 		bpf_object__close(obj);
 		return 1;
@@ -94,6 +97,13 @@ int oracle_ringbuf(const char *path) {
 		bpf_object__close(obj);
 		return 1;
 	}
+	if (ring_buffer__add(rb, bpf_map__fd(map2), sample_cb, &samples2) < 0) {
+		fprintf(stderr, "ring_buffer__add: %s\n", strerror(errno));
+		ring_buffer__free(rb);
+		bpf_link__destroy(link);
+		bpf_object__close(obj);
+		return 1;
+	}
 
 	if (!trigger_open()) {
 		fprintf(stderr, "open /dev/null: %s\n", strerror(errno));
@@ -109,7 +119,7 @@ int oracle_ringbuf(const char *path) {
 		bpf_object__close(obj);
 		return 1;
 	}
-	if (samples.cnt == 0 || samples.values[0] != RINGBUF_SAMPLE) {
+	if (samples.cnt == 0 || samples.values[0] != RINGBUF_SAMPLE || samples2.cnt == 0 || samples2.values[0] != RINGBUF_SAMPLE) {
 		fprintf(stderr, "unexpected ringbuf samples\n");
 		ring_buffer__free(rb);
 		bpf_link__destroy(link);
@@ -123,9 +133,14 @@ int oracle_ringbuf(const char *path) {
 	json_str(&j, "object_name", bpf_object__name(obj));
 	json_str(&j, "program", bpf_program__name(prog));
 	json_str(&j, "map", RINGBUF_MAP);
+	json_str(&j, "map2", RINGBUF_MAP2);
 	json_arr_begin(&j, "samples");
 	for (__u32 i = 0; i < samples.cnt; i++)
 		json_u32(&j, NULL, samples.values[i]);
+	json_arr_end(&j);
+	json_arr_begin(&j, "samples2");
+	for (__u32 i = 0; i < samples2.cnt; i++)
+		json_u32(&j, NULL, samples2.values[i]);
 	json_arr_end(&j);
 	json_obj_end(&j);
 	fputc('\n', stdout);

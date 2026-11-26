@@ -125,6 +125,13 @@ type Param struct {
 	Type    uint32
 }
 
+// Variable linkage values from linux/btf.h.
+const (
+	VarStatic          uint32 = 0
+	VarGlobalAllocated uint32 = 1
+	VarGlobalExtern    uint32 = 2
+)
+
 // Var is the BTF_KIND_VAR payload. Linkage is one of the BTF_VAR_* values.
 type Var struct {
 	Linkage uint32

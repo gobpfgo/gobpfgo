@@ -165,6 +165,9 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	if err := spec.FixupDatasecSizes(sectionSizes(e)); err != nil {
 		return nil, openError(path, err)
 	}
+	if err := spec.FixupDatasecOffsets(variableOffsets(e)); err != nil {
+		return nil, openError(path, err)
+	}
 	maps, err := parseMaps(spec)
 	if err != nil {
 		return nil, openError(path, err)
@@ -205,6 +208,25 @@ func sectionSizes(e *elf.Object) map[string]uint32 {
 		sizes[s.Name] = uint32(s.Size)
 	}
 	return sizes
+}
+
+// variableOffsets maps the global and weak object symbol names to their
+// offsets in the object, for the BTF DATASEC fixup.
+func variableOffsets(e *elf.Object) map[string]uint32 {
+	offsets := make(map[string]uint32)
+	for _, sym := range e.Symbols {
+		if sym.Name == "" || sym.Type != elf.SymObject {
+			continue
+		}
+		if sym.Bind != elf.BindGlobal && sym.Bind != elf.BindWeak {
+			continue
+		}
+		if _, ok := offsets[sym.Name]; ok {
+			continue
+		}
+		offsets[sym.Name] = uint32(sym.Value)
+	}
+	return offsets
 }
 
 // parseMaps turns the .maps BTF data section into map specs. Each variable's

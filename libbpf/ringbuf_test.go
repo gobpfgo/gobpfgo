@@ -19,7 +19,9 @@ type ringbufFixture struct {
 	ObjectName string   `json:"object_name"`
 	Program    string   `json:"program"`
 	Map        string   `json:"map"`
+	Map2       string   `json:"map2"`
 	Samples    []uint32 `json:"samples"`
+	Samples2   []uint32 `json:"samples2"`
 }
 
 func loadRingbufFixture(t *testing.T) ringbufFixture {
@@ -33,7 +35,7 @@ func loadRingbufFixture(t *testing.T) ringbufFixture {
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("parse ringbuf fixture: %v", err)
 	}
-	if len(f.Samples) == 0 {
+	if len(f.Samples) == 0 || len(f.Samples2) == 0 {
 		t.Fatal("ringbuf fixture has no samples")
 	}
 	return f
@@ -50,14 +52,10 @@ func TestRingBuffer(t *testing.T) {
 
 	prog := BpfObjectFindProgramByName(obj, f.Program)
 	ringMap := BpfObjectFindMapByName(obj, f.Map)
-	if prog == nil || ringMap == nil {
-		t.Fatal("program or ring buffer map not found")
+	ringMap2 := BpfObjectFindMapByName(obj, f.Map2)
+	if prog == nil || ringMap == nil || ringMap2 == nil {
+		t.Fatal("program or ring buffer maps not found")
 	}
-	secondFD, err := BpfMapCreate(BPF_MAP_TYPE_RINGBUF, "events2", 0, 0, 4096, nil)
-	if err != nil {
-		t.Fatalf("create second ring buffer: %v", err)
-	}
-	defer unix.Close(secondFD)
 
 	link, err := BpfProgramAttachKprobe(prog, false, "do_sys_openat2")
 	if err != nil {
@@ -88,7 +86,7 @@ func TestRingBuffer(t *testing.T) {
 	}
 	defer RingBufferFree(rb)
 
-	if err := RingBufferAdd(rb, secondFD, sampleFn(&second), nil); err != nil {
+	if err := RingBufferAdd(rb, BpfMapFD(ringMap2), sampleFn(&second), nil); err != nil {
 		t.Fatalf("RingBufferAdd: %v", err)
 	}
 	if fd := RingBufferEpollFD(rb); fd < 0 {
@@ -100,22 +98,22 @@ func TestRingBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RingBufferPoll: %v", err)
 	}
-	if count < 1 || len(first) == 0 {
-		t.Fatalf("poll consumed %d records, first ring has %d", count, len(first))
+	if count < 2 || len(first) == 0 || len(second) == 0 {
+		t.Fatalf("poll consumed %d records, first ring has %d, second has %d", count, len(first), len(second))
 	}
 	if first[0] != f.Samples[0] {
 		t.Fatalf("first sample = %#x, want %#x", first[0], f.Samples[0])
 	}
-	if len(second) != 0 {
-		t.Fatalf("second ring has unexpected samples: %v", second)
+	if second[0] != f.Samples2[0] {
+		t.Fatalf("second sample = %#x, want %#x", second[0], f.Samples2[0])
 	}
 
 	triggerOpen(t)
 	if count, err = RingBufferConsume(rb); err != nil {
 		t.Fatalf("RingBufferConsume: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("consume count = %d, want 1", count)
+	if count != 2 {
+		t.Fatalf("consume count = %d, want 2", count)
 	}
 
 	triggerOpen(t)

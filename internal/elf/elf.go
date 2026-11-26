@@ -45,6 +45,13 @@ type Reloc struct {
 	Addend  int64
 }
 
+// Symbol type and binding values used by the object loader.
+const (
+	SymObject  = elf.STT_OBJECT
+	BindGlobal = elf.STB_GLOBAL
+	BindWeak   = elf.STB_WEAK
+)
+
 // Symbol is one symbol table entry, with its section name resolved.
 type Symbol struct {
 	Name         string

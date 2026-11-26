@@ -6,7 +6,11 @@
   "object_name": "ringbuf",
   "program": "handle_ringbuf",
   "map": "events",
+  "map2": "events2",
   "samples": [
+    305419896
+  ],
+  "samples2": [
     305419896
   ]
 }
