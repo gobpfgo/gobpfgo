@@ -63,6 +63,15 @@
       {"name": "flags", "offset": 24, "size": 8}
     ]
   },
+  "obj_pin": {
+    "attr_size": 20,
+    "fields": [
+      {"name": "pathname", "offset": 0, "size": 8},
+      {"name": "bpf_fd", "offset": 8, "size": 4},
+      {"name": "file_flags", "offset": 12, "size": 4},
+      {"name": "path_fd", "offset": 16, "size": 4}
+    ]
+  },
   "obj_info": {
     "attr_size": 16,
     "fields": [

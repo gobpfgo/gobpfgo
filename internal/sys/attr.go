@@ -129,6 +129,40 @@ func (a *MapElemAttr) Marshal() []byte {
 	return buf
 }
 
+// ObjPinAttrSize is offsetofend(union bpf_attr, path_fd) on 64-bit Linux. It
+// is the size libbpf passes to BPF_OBJ_PIN and BPF_OBJ_GET.
+const ObjPinAttrSize = 20
+
+// Offsets inside union bpf_attr for the BPF_OBJ_* commands, from
+// offsetof(union bpf_attr, field) on 64-bit Linux.
+const (
+	objPinOffPathname  = 0
+	objPinOffBPFFD     = 8
+	objPinOffFileFlags = 12
+	objPinOffPathFD    = 16
+)
+
+// ObjPinAttr is the BPF_OBJ_PIN view of union bpf_attr. Pathname is the
+// address of a NUL-terminated path on bpffs; ObjPin fills it in.
+type ObjPinAttr struct {
+	Pathname  uint64
+	BPFFD     uint32
+	FileFlags uint32
+	PathFD    int32
+}
+
+// Marshal returns the bytes passed to bpf(BPF_OBJ_PIN, ...).
+func (a *ObjPinAttr) Marshal() []byte {
+	buf := make([]byte, ObjPinAttrSize)
+
+	binary.NativeEndian.PutUint64(buf[objPinOffPathname:], a.Pathname)
+	binary.NativeEndian.PutUint32(buf[objPinOffBPFFD:], a.BPFFD)
+	binary.NativeEndian.PutUint32(buf[objPinOffFileFlags:], a.FileFlags)
+	binary.NativeEndian.PutUint32(buf[objPinOffPathFD:], uint32(a.PathFD))
+
+	return buf
+}
+
 type fieldLayout struct {
 	Name   string
 	Offset int
@@ -168,5 +202,16 @@ func mapElemFieldLayout() []fieldLayout {
 		{"key", mapElemOffKey, 8},
 		{"value", mapElemOffValue, 8},
 		{"flags", mapElemOffFlags, 8},
+	}
+}
+
+// objPinFieldLayout is the Go claim about the C layout of the BPF_OBJ_PIN
+// fields. The layout test compares it with the oracle output.
+func objPinFieldLayout() []fieldLayout {
+	return []fieldLayout{
+		{"pathname", objPinOffPathname, 8},
+		{"bpf_fd", objPinOffBPFFD, 4},
+		{"file_flags", objPinOffFileFlags, 4},
+		{"path_fd", objPinOffPathFD, 4},
 	}
 }

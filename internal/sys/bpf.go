@@ -53,6 +53,31 @@ func MapCreate(attr *MapCreateAttr, exclHash []byte) (int, error) {
 	return int(fd), nil
 }
 
+// ObjPin calls BPF_OBJ_PIN and pins the object fd at path.
+//
+// path must be a NUL-free path whose parent directory is on bpffs. The
+// kernel returns EPERM when the caller lacks CAP_SYS_ADMIN and EINVAL when
+// the parent is not a BPF filesystem. The path is kept alive until the
+// syscall returns.
+func ObjPin(fd int, path string, fileFlags uint32) error {
+	if fd < 0 || path == "" {
+		return unix.EINVAL
+	}
+
+	pathBytes, err := unix.ByteSliceFromString(path)
+	if err != nil {
+		return err
+	}
+	attr := &ObjPinAttr{
+		Pathname:  uint64(addr(pathBytes)),
+		BPFFD:     uint32(fd),
+		FileFlags: fileFlags,
+	}
+	err = BPF(BPF_OBJ_PIN, attr.Marshal())
+	runtime.KeepAlive(pathBytes)
+	return err
+}
+
 // MapLookupElem calls BPF_MAP_LOOKUP_ELEM and copies the map value into value.
 //
 // key and value are the raw key and value buffers. value must be at least the
