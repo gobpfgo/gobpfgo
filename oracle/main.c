@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <object>\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <object>|core <object>\n", prog);
 }
 
 int main(int argc, char **argv) {
@@ -26,6 +26,8 @@ int main(int argc, char **argv) {
 		return oracle_load(argv[2]);
 	if (strcmp(argv[1], "attach") == 0 && argc == 3)
 		return oracle_attach(argv[2]);
+	if (strcmp(argv[1], "core") == 0 && argc == 3)
+		return oracle_core(argv[2]);
 
 	usage(argv[0]);
 	return 2;

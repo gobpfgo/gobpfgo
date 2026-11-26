@@ -12,7 +12,7 @@ DEBUG_DIR ?= /build/gobpfgo/testdata/progs
 
 .PHONY: all clean
 
-all: kprobe.bpf.o
+all: kprobe.bpf.o core.bpf.o
 
 kprobe.bpf.o: kprobe.bpf.c
 	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
@@ -20,5 +20,11 @@ kprobe.bpf.o: kprobe.bpf.c
 		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
 		-c $< -o $@
 
+core.bpf.o: core.bpf.c
+	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
+		-fdebug-compilation-dir=$(DEBUG_DIR) \
+		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
+		-c $< -o $@
+
 clean:
-	rm -f kprobe.bpf.o
+	rm -f kprobe.bpf.o core.bpf.o

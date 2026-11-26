@@ -1,0 +1,13 @@
+{
+  "case": "core",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 11, "kind": 0, "access": "0:1", "root_type_id": 11, "bit_offset": 32, "spec": "<byte_off> [11] struct core_sample.second (0:1 @ offset 4)", "accessors": [
+        {"type_id": 11, "idx": 0, "name": ""},
+        {"type_id": 11, "idx": 1, "name": "second"}
+      ]}
+  ]
+}
