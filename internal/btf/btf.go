@@ -14,6 +14,9 @@
 // The type model is a Go value per type with a kind-specific payload. It stays
 // close to the wire format so later stages such as CO-RE can walk it without
 // re-parsing.
+//
+// Parse keeps a private copy of the blob. FixupDatasecSizes patches the
+// DATASEC sizes to the ELF section sizes before BPF_BTF_LOAD.
 package btf
 
 import (
@@ -36,12 +39,17 @@ type Header struct {
 }
 
 // Spec is a parsed BTF object. Types[0] is the void placeholder, so a type ID
-// is also its index in Types. Strings is the NUL-separated string table.
+// is also its index in Types. Strings is the NUL-separated string table. The
+// spec owns a private copy of the blob, so FixupDatasecSizes can patch it
+// before BPF_BTF_LOAD.
 type Spec struct {
 	Header    Header
 	ByteOrder binary.ByteOrder
 	Types     []Type
 	Strings   []byte
+
+	raw       []byte
+	typeStart int
 }
 
 // Parse validates and decodes a BTF blob. order is the byte order of the ELF
@@ -53,6 +61,7 @@ func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 	if len(data) < 24 {
 		return nil, fmt.Errorf("btf: header too short: %d bytes", len(data))
 	}
+	data = append([]byte(nil), data...)
 
 	hdr := Header{
 		Magic:   order.Uint16(data[0:]),
@@ -88,16 +97,19 @@ func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 	s := &Spec{
 		Header:    hdr,
 		ByteOrder: order,
-		Strings:   data[strStart:strEnd],
+		Strings:   data[int(strStart):int(strEnd)],
 		Types:     []Type{{Kind: KindVoid}},
+		raw:       data,
+		typeStart: int(typeStart),
 	}
 
-	raw := data[typeStart:typeEnd]
-	for pos := 0; pos < len(raw); {
-		t, n, err := parseType(raw[pos:], uint32(len(s.Types)), order)
+	typeData := data[int(typeStart):int(typeEnd)]
+	for pos := 0; pos < len(typeData); {
+		t, n, err := parseType(typeData[pos:], uint32(len(s.Types)), order)
 		if err != nil {
 			return nil, err
 		}
+		t.rawOff = uint32(pos)
 		s.Types = append(s.Types, t)
 		pos += n
 	}
@@ -294,6 +306,38 @@ func (s *Spec) TypeByID(id uint32) (*Type, error) {
 		return nil, fmt.Errorf("btf: type id %d out of range", id)
 	}
 	return &s.Types[id], nil
+}
+
+// Raw returns the BTF bytes owned by the spec. Pass it to BPF_BTF_LOAD after
+// FixupDatasecSizes; the caller must not modify the slice.
+func (s *Spec) Raw() []byte {
+	return s.raw
+}
+
+// FixupDatasecSizes patches every DATASEC size to the matching ELF section
+// size and updates the parsed types.
+//
+// The kernel rejects a DATASEC with size 0, while clang emits the section
+// variables with a zero size in the BTF. libbpf applies the same fixup before
+// loading BTF. Pass the result of Raw to BPF_BTF_LOAD.
+func (s *Spec) FixupDatasecSizes(sectionSizes map[string]uint32) error {
+	for i := range s.Types {
+		t := &s.Types[i]
+		if t.Kind != KindDatasec || t.ID == 0 {
+			continue
+		}
+		size, ok := sectionSizes[t.Name]
+		if !ok || size == 0 || t.SizeOrType == size {
+			continue
+		}
+		off := s.typeStart + int(t.rawOff) + 8
+		if off+4 > len(s.raw) {
+			return fmt.Errorf("btf: datasec %s: size field out of bounds", t.Name)
+		}
+		s.ByteOrder.PutUint32(s.raw[off:], size)
+		t.SizeOrType = size
+	}
+	return nil
 }
 
 // Find returns the first type with the given name and kind, or nil. Names are

@@ -44,7 +44,8 @@ The generated table has these columns:
 |---|---|---|---|
 | `bpf_object__open_file` | `BpfObjectOpenFile` | `libbpf/object.go` | parity tested (kprobe object) |
 | `bpf_object__open_mem` | `BpfObjectOpenMem` | `libbpf/object.go` | parity tested (metadata; default memory name differs) |
-| `bpf_map_create` | `BpfMapCreate` | `libbpf/map.go` | in progress (map create; `LogOpts` and the name feature probe deferred) |
+| `bpf_map_create` | `BpfMapCreate` | `libbpf/map.go` | in progress (basic create and root test; `LogOpts` deferred) |
+| `bpf_btf_load` | `BtfLoad` (internal; public wrapper later) | `internal/sys/btf.go` | in progress (layout and root load) |
 | `bpf_object__load` | `BpfObjectLoad` | `libbpf/object.go` | not started |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
 | `btf__parse` | `BtfParse` | `libbpf/btf.go` | not started |

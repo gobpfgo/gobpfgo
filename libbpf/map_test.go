@@ -13,7 +13,7 @@ import (
 )
 
 func TestBpfMapCreateArray(t *testing.T) {
-	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "golbpfgo-test", 4, 8, 16, nil)
+	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "golbpfgo_test", 4, 8, 16, nil)
 	if err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
 			t.Skipf("bpf() not permitted: %v", err)
