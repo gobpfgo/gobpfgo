@@ -85,6 +85,52 @@ func TestParseCoreSpec(t *testing.T) {
 	}
 }
 
+func TestCalcCoreRelo(t *testing.T) {
+	localO, err := elf.Open("../../testdata/progs/core.bpf.o")
+	if err != nil {
+		t.Fatalf("open local object: %v", err)
+	}
+	local, err := Parse(localO.BTF, localO.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse local BTF: %v", err)
+	}
+	ext, err := ParseExt(localO.BTFExt, local, localO.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse local BTF.ext: %v", err)
+	}
+
+	targetO, err := elf.Open("../../testdata/progs/core_target.bpf.o")
+	if err != nil {
+		t.Fatalf("open target object: %v", err)
+	}
+	target, err := Parse(targetO.BTF, targetO.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse target BTF: %v", err)
+	}
+
+	targetType := target.Find("core_sample", KindStruct)
+	if targetType == nil {
+		t.Fatal("target core_sample not found")
+	}
+	if len(ext.CoreRelos) != 1 || len(ext.CoreRelos[0].Relos) != 1 {
+		t.Fatalf("unexpected core relos: %+v", ext.CoreRelos)
+	}
+
+	res, err := local.CalcCoreRelo(ext.CoreRelos[0].Relos[0], target, targetType.ID)
+	if err != nil {
+		t.Fatalf("CalcCoreRelo: %v", err)
+	}
+	if res.OrigVal != 4 || res.NewVal != 8 {
+		t.Fatalf("values = %d/%d, want 4/8", res.OrigVal, res.NewVal)
+	}
+	if res.OrigSize != 4 || res.NewSize != 4 {
+		t.Fatalf("sizes = %d/%d, want 4/4", res.OrigSize, res.NewSize)
+	}
+	if !res.Validate || res.Poison || res.FailMemSizeAdjust {
+		t.Fatalf("flags = validate:%v poison:%v memsz:%v", res.Validate, res.Poison, res.FailMemSizeAdjust)
+	}
+}
+
 func coreFixtureAccessors(accessors []CoreAccessor) []coreFixtureAccessor {
 	out := make([]coreFixtureAccessor, 0, len(accessors))
 	for _, acc := range accessors {
