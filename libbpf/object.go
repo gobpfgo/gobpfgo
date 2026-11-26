@@ -284,6 +284,32 @@ func fillMapDef(spec *btf.Spec, st *btf.Type, m *BpfMap) error {
 		}
 	}
 
+	// Maps that store descriptors or raw values declare key_size and
+	// value_size instead of BTF key and value types.
+	if keySize := spec.Member(st, "key_size"); keySize != nil {
+		if v, err = mapUintValue(spec, keySize.Type); err != nil {
+			return fmt.Errorf("key_size: %w", err)
+		}
+		if m.keySize != 0 && m.keySize != v {
+			return fmt.Errorf("conflicting key size %d != %d", m.keySize, v)
+		}
+		m.keySize = v
+	}
+	if valueSize := spec.Member(st, "value_size"); valueSize != nil {
+		if v, err = mapUintValue(spec, valueSize.Type); err != nil {
+			return fmt.Errorf("value_size: %w", err)
+		}
+		if m.valueSize != 0 && m.valueSize != v {
+			return fmt.Errorf("conflicting value size %d != %d", m.valueSize, v)
+		}
+		m.valueSize = v
+	}
+
+	if !mapTakesBTF(m.mapType) {
+		m.btfKeyTypeID = 0
+		m.btfValueTypeID = 0
+	}
+
 	if flags := spec.Member(st, "map_flags"); flags != nil {
 		if v, err = mapUintValue(spec, flags.Type); err != nil {
 			return fmt.Errorf("map_flags: %w", err)

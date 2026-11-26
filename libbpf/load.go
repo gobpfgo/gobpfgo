@@ -21,6 +21,30 @@ import (
 
 const bpfPseudoMapFD = 1
 
+// mapTakesBTF reports whether BPF_MAP_CREATE accepts the object BTF and the
+// key and value type ids for a map type. The kernel rejects them for maps that
+// store descriptors or raw values instead of BTF-described elements.
+func mapTakesBTF(mapType BpfMapType) bool {
+	switch mapType {
+	case BPF_MAP_TYPE_PERF_EVENT_ARRAY,
+		BPF_MAP_TYPE_CGROUP_ARRAY,
+		BPF_MAP_TYPE_STACK_TRACE,
+		BPF_MAP_TYPE_ARRAY_OF_MAPS,
+		BPF_MAP_TYPE_HASH_OF_MAPS,
+		BPF_MAP_TYPE_DEVMAP,
+		BPF_MAP_TYPE_DEVMAP_HASH,
+		BPF_MAP_TYPE_CPUMAP,
+		BPF_MAP_TYPE_XSKMAP,
+		BPF_MAP_TYPE_SOCKMAP,
+		BPF_MAP_TYPE_SOCKHASH,
+		BPF_MAP_TYPE_QUEUE,
+		BPF_MAP_TYPE_STACK,
+		BPF_MAP_TYPE_ARENA:
+		return false
+	}
+	return true
+}
+
 // BpfObjectLoad loads the object into the kernel. It validates and loads the
 // BTF, creates the maps with their BTF type ids, relocates the map references
 // in each program and loads the programs.
@@ -88,6 +112,13 @@ func BpfObjectLoad(obj *BpfObject) error {
 			BtfFD:          uint32(btfFD),
 			BtfKeyTypeID:   m.btfKeyTypeID,
 			BtfValueTypeID: m.btfValueTypeID,
+		}
+		if !mapTakesBTF(m.mapType) {
+			attr.BtfFD = 0
+			attr.BtfKeyTypeID = 0
+			attr.BtfValueTypeID = 0
+			m.btfKeyTypeID = 0
+			m.btfValueTypeID = 0
 		}
 		attr.SetMapName(m.name)
 

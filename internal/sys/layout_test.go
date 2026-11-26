@@ -24,20 +24,24 @@ type fixtureBlock struct {
 }
 
 type layoutFixture struct {
-	LibbpfCommit  string       `json:"libbpf_commit"`
-	Arch          string       `json:"arch"`
-	Kernel        string       `json:"kernel"`
-	MapCreate     fixtureBlock `json:"map_create"`
-	MapElem       fixtureBlock `json:"map_elem"`
-	ObjPin        fixtureBlock `json:"obj_pin"`
-	BtfLoad       fixtureBlock `json:"btf_load"`
-	ProgLoad      fixtureBlock `json:"prog_load"`
-	LinkCreate    fixtureBlock `json:"link_create"`
-	LinkUpdate    fixtureBlock `json:"link_update"`
-	RawTracepoint fixtureBlock `json:"raw_tracepoint"`
-	ObjInfo       fixtureBlock `json:"obj_info"`
-	MapInfo       fixtureBlock `json:"map_info"`
-	ProgInfo      fixtureBlock `json:"prog_info"`
+	LibbpfCommit    string       `json:"libbpf_commit"`
+	Arch            string       `json:"arch"`
+	Kernel          string       `json:"kernel"`
+	MapCreate       fixtureBlock `json:"map_create"`
+	MapElem         fixtureBlock `json:"map_elem"`
+	ObjPin          fixtureBlock `json:"obj_pin"`
+	BtfLoad         fixtureBlock `json:"btf_load"`
+	ProgLoad        fixtureBlock `json:"prog_load"`
+	LinkCreate      fixtureBlock `json:"link_create"`
+	LinkUpdate      fixtureBlock `json:"link_update"`
+	RawTracepoint   fixtureBlock `json:"raw_tracepoint"`
+	ObjInfo         fixtureBlock `json:"obj_info"`
+	MapInfo         fixtureBlock `json:"map_info"`
+	ProgInfo        fixtureBlock `json:"prog_info"`
+	PerfEvent       fixtureBlock `json:"perf_event"`
+	PerfEventHeader fixtureBlock `json:"perf_event_header"`
+	PerfSample      fixtureBlock `json:"perf_sample"`
+	PerfLost        fixtureBlock `json:"perf_lost"`
 }
 
 func loadLayoutFixture(t *testing.T) layoutFixture {
@@ -126,6 +130,26 @@ func TestLinkUpdateLayout(t *testing.T) {
 func TestRawTracepointLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "raw_tracepoint", f.RawTracepoint, RawTracepointAttrSize, rawTracepointFieldLayout())
+}
+
+func TestPerfEventLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "perf_event", f.PerfEvent, PerfEventDataTailEnd, perfEventFieldLayout())
+}
+
+func TestPerfEventHeaderLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "perf_event_header", f.PerfEventHeader, PerfEventHeaderSize, perfEventHeaderFieldLayout())
+}
+
+func TestPerfSampleLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "perf_sample", f.PerfSample, PerfSampleSizeEnd, perfSampleFieldLayout())
+}
+
+func TestPerfLostLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "perf_lost", f.PerfLost, PerfLostSize, perfLostFieldLayout())
 }
 
 func TestObjInfoLayout(t *testing.T) {

@@ -16,6 +16,8 @@ package sys
 const (
 	BPF_MAP_CREATE          = 0
 	BPF_MAP_LOOKUP_ELEM     = 1
+	BPF_MAP_UPDATE_ELEM     = 2
+	BPF_MAP_DELETE_ELEM     = 3
 	BPF_PROG_LOAD           = 5
 	BPF_OBJ_PIN             = 6
 	BPF_OBJ_GET             = 7

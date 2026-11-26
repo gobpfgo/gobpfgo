@@ -13,7 +13,7 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	core_module.bpf.o core_module_target.bpf.o core_target.bpf.o \
 	tracepoint.bpf.o tracepoint_alt.bpf.o uprobe.bpf.o fentry.bpf.o \
 	raw_tp.bpf.o cookie.bpf.o kprobe_multi.bpf.o lsm.bpf.o dump.bpf.o \
-	ringbuf.bpf.o
+	ringbuf.bpf.o perfbuf.bpf.o
 
 .PHONY: all clean
 
