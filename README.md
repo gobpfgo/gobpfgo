@@ -26,7 +26,6 @@ internal/elf/    ELF reader
 internal/mmap/   mmap and ring memory
 cmd/bpfgen/      Go skeleton generator
 oracle/          C harness for parity tests, never part of go build
-docs/            preferences, decisions, style, parity, API map
 ```
 
 ## Build
@@ -35,17 +34,6 @@ docs/            preferences, decisions, style, parity, API map
 CGO_ENABLED=0 go build ./...
 CGO_ENABLED=0 go test ./...
 ```
-
-## Documents
-
-- [AGENTS.md](AGENTS.md) rules for the agent working in this repo
-- [docs/PREFERENCES.md](docs/PREFERENCES.md) learned preferences
-- [docs/DECISIONS.md](docs/DECISIONS.md) locked decisions
-- [docs/STYLE.md](docs/STYLE.md) code style
-- [docs/PARITY.md](docs/PARITY.md) module matrix and status
-- [docs/TESTING.md](docs/TESTING.md) oracle scenarios and test tiers
-- [docs/API-MAP.md](docs/API-MAP.md) C to Go symbol map
-- [docs/DEVIATIONS.md](docs/DEVIATIONS.md) intentional differences
 
 ## License
 
