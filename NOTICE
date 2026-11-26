@@ -1,0 +1,8 @@
+golbpfgo is a Go port of libbpf.
+
+libbpf is dual-licensed under BSD-2-Clause and LGPL-2.1-only. This project elects LGPL-2.1-only.
+
+Upstream: https://github.com/libbpf/libbpf
+Ported from: https://github.com/libbpf/libbpf/commit/4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+
+The libbpf documentation is published at https://libbpf.readthedocs.io/.
