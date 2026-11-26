@@ -72,6 +72,7 @@ int oracle_layout(void) {
 		F(log_level),
 		F(log_size),
 		F(log_buf),
+		F(kern_version),
 		F(prog_flags),
 		F(prog_name),
 		F(prog_ifindex),

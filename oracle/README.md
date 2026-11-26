@@ -13,12 +13,13 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 - `core-reloc <object> <target>` takes the local CO-RE record and a target BTF, resolves the field, flexible array element, type or enum value against the target with libbpf, and prints the local and target values plus the patched instruction.
 - `ringbuf <object>` attaches a ring buffer writer, polls the ring and prints the sample bytes.
 - `perfbuf <object>` attaches a perf event array writer, polls the per-CPU buffers and prints the sample bytes, loss count and buffer count.
+- `probe` runs the program, map and helper probes and prints the result for each case.
 
 ## Layout
 
 - `json.c` and `json.h` are a small JSON writer that owns commas, indentation and escaping.
 - `oracle.c` and `oracle.h` hold the shared metadata and the UAPI field block.
-- `layout.c`, `attr.c`, `open.c`, `load.c`, `attach.c`, `core.c`, `ringbuf.c` and `perfbuf.c` are the scenarios.
+- `layout.c`, `attr.c`, `open.c`, `load.c`, `attach.c`, `core.c`, `ringbuf.c`, `perfbuf.c` and `probe.c` are the scenarios.
 - `main.c` dispatches the subcommands.
 
 ## Regenerate
@@ -34,6 +35,7 @@ make -C oracle load-fixture
 make -C oracle attach-fixture
 make -C oracle ringbuf-fixture
 make -C oracle perfbuf-fixture
+make -C oracle probe-fixture
 ```
 
-These run the `load`, `attach`, `ringbuf` and `perfbuf` scenarios under `sudo -n`. The map and program ids in `load.json` change per run; the Go test compares the stable fields. Review the diff before committing: a change here is a change in the kernel ABI, in the pinned libbpf headers or in the loaded metadata.
+These run the `load`, `attach`, `ringbuf`, `perfbuf` and `probe` scenarios under `sudo -n`. The map and program ids in `load.json` change per run; the Go test compares the stable fields. Review the diff before committing: a change here is a change in the kernel ABI, in the pinned libbpf headers or in the loaded metadata.

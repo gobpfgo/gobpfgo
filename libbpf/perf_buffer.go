@@ -10,10 +10,6 @@ package libbpf
 import (
 	"encoding/binary"
 	"errors"
-	"os"
-	"strconv"
-	"strings"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/gobpfgo/gobpfgo/internal/mmap"
@@ -414,89 +410,9 @@ func (pb *PerfBuffer) processRecord(cpuBuf *perfBufferCPUBuf, record []byte) err
 	return nil
 }
 
-// libbpfNumPossibleCPUs returns the number of possible CPUs, or a negative
-// errno. The result is cached like the C library's static.
-func libbpfNumPossibleCPUs() int {
-	if count := atomic.LoadInt32(&possibleCPUs); count > 0 {
-		return int(count)
-	}
-
-	mask, err := readCPUMaskFile("/sys/devices/system/cpu/possible")
-	if err != nil {
-		return -int(errnoFromError(err))
-	}
-
-	count := 0
-	for _, cpu := range mask {
-		if cpu {
-			count++
-		}
-	}
-	atomic.StoreInt32(&possibleCPUs, int32(count))
-	return count
-}
-
-// readCPUMaskFile reads a kernel CPU list such as "0-31" or "0,2-3".
-func readCPUMaskFile(path string) ([]bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return parseCPUMask(string(data))
-}
-
-// parseCPUMask parses the comma and newline separated CPU ranges the kernel
-// prints in /sys/devices/system/cpu/{possible,online}.
-func parseCPUMask(s string) ([]bool, error) {
-	var mask []bool
-
-	for _, token := range strings.FieldsFunc(s, func(r rune) bool {
-		return r == ',' || r == '\n' || r == ' ' || r == '\t'
-	}) {
-		start, end, err := parseCPURange(token)
-		if err != nil {
-			return nil, err
-		}
-		if end >= len(mask) {
-			mask = append(mask, make([]bool, end+1-len(mask))...)
-		}
-		for cpu := start; cpu <= end; cpu++ {
-			mask[cpu] = true
-		}
-	}
-	if len(mask) == 0 {
-		return nil, unix.EINVAL
-	}
-	return mask, nil
-}
-
-// parseCPURange parses "N" or "N-M".
-func parseCPURange(s string) (int, int, error) {
-	parts := strings.Split(s, "-")
-	if len(parts) > 2 {
-		return 0, 0, unix.EINVAL
-	}
-
-	start, err := strconv.Atoi(parts[0])
-	if err != nil || start < 0 {
-		return 0, 0, unix.EINVAL
-	}
-	end := start
-	if len(parts) == 2 {
-		end, err = strconv.Atoi(parts[1])
-		if err != nil || end < start {
-			return 0, 0, unix.EINVAL
-		}
-	}
-	return start, end, nil
-}
-
 // uint32Bytes returns a native-endian 32-bit map key or value.
 func uint32Bytes(v int) []byte {
 	buf := make([]byte, 4)
 	binary.NativeEndian.PutUint32(buf, uint32(v))
 	return buf
 }
-
-// possibleCPUs caches libbpf_num_possible_cpus; zero means not read yet.
-var possibleCPUs int32

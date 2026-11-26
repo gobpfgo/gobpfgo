@@ -8,52 +8,84 @@ package libbpf
 // BpfMapType is a map type from enum bpf_map_type.
 type BpfMapType uint32
 
-// BPF_MAP_TYPE_ARRAY is the array map type. The kernel allocates a fixed-size
-// array of max_entries values and indexes it by key.
-const BPF_MAP_TYPE_ARRAY BpfMapType = 2
-
-// BPF_MAP_TYPE_PERF_EVENT_ARRAY maps a CPU index to a perf event descriptor.
-// The perf buffer writes one entry per online CPU.
-const BPF_MAP_TYPE_PERF_EVENT_ARRAY BpfMapType = 4
-
-// Additional map types used by the BTF creation rule. The kernel accepts no
-// BTF key or value ids for them, so libbpf clears the object BTF and both ids
-// before creating the map.
+// Map types from enum bpf_map_type.
 const (
-	BPF_MAP_TYPE_STACK_TRACE   BpfMapType = 7
-	BPF_MAP_TYPE_CGROUP_ARRAY  BpfMapType = 8
-	BPF_MAP_TYPE_ARRAY_OF_MAPS BpfMapType = 12
-	BPF_MAP_TYPE_HASH_OF_MAPS  BpfMapType = 13
-	BPF_MAP_TYPE_DEVMAP        BpfMapType = 14
-	BPF_MAP_TYPE_SOCKMAP       BpfMapType = 15
-	BPF_MAP_TYPE_CPUMAP        BpfMapType = 16
-	BPF_MAP_TYPE_XSKMAP        BpfMapType = 17
-	BPF_MAP_TYPE_SOCKHASH      BpfMapType = 18
-	BPF_MAP_TYPE_QUEUE         BpfMapType = 22
-	BPF_MAP_TYPE_STACK         BpfMapType = 23
-	BPF_MAP_TYPE_DEVMAP_HASH   BpfMapType = 25
-	BPF_MAP_TYPE_ARENA         BpfMapType = 33
+	BPF_MAP_TYPE_UNSPEC                BpfMapType = 0
+	BPF_MAP_TYPE_HASH                  BpfMapType = 1
+	BPF_MAP_TYPE_ARRAY                 BpfMapType = 2
+	BPF_MAP_TYPE_PROG_ARRAY            BpfMapType = 3
+	BPF_MAP_TYPE_PERF_EVENT_ARRAY      BpfMapType = 4
+	BPF_MAP_TYPE_PERCPU_HASH           BpfMapType = 5
+	BPF_MAP_TYPE_PERCPU_ARRAY          BpfMapType = 6
+	BPF_MAP_TYPE_STACK_TRACE           BpfMapType = 7
+	BPF_MAP_TYPE_CGROUP_ARRAY          BpfMapType = 8
+	BPF_MAP_TYPE_LRU_HASH              BpfMapType = 9
+	BPF_MAP_TYPE_LRU_PERCPU_HASH       BpfMapType = 10
+	BPF_MAP_TYPE_LPM_TRIE              BpfMapType = 11
+	BPF_MAP_TYPE_ARRAY_OF_MAPS         BpfMapType = 12
+	BPF_MAP_TYPE_HASH_OF_MAPS          BpfMapType = 13
+	BPF_MAP_TYPE_DEVMAP                BpfMapType = 14
+	BPF_MAP_TYPE_SOCKMAP               BpfMapType = 15
+	BPF_MAP_TYPE_CPUMAP                BpfMapType = 16
+	BPF_MAP_TYPE_XSKMAP                BpfMapType = 17
+	BPF_MAP_TYPE_SOCKHASH              BpfMapType = 18
+	BPF_MAP_TYPE_CGROUP_STORAGE        BpfMapType = 19
+	BPF_MAP_TYPE_REUSEPORT_SOCKARRAY   BpfMapType = 20
+	BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE BpfMapType = 21
+	BPF_MAP_TYPE_QUEUE                 BpfMapType = 22
+	BPF_MAP_TYPE_STACK                 BpfMapType = 23
+	BPF_MAP_TYPE_SK_STORAGE            BpfMapType = 24
+	BPF_MAP_TYPE_DEVMAP_HASH           BpfMapType = 25
+	BPF_MAP_TYPE_STRUCT_OPS            BpfMapType = 26
+	BPF_MAP_TYPE_RINGBUF               BpfMapType = 27
+	BPF_MAP_TYPE_INODE_STORAGE         BpfMapType = 28
+	BPF_MAP_TYPE_TASK_STORAGE          BpfMapType = 29
+	BPF_MAP_TYPE_BLOOM_FILTER          BpfMapType = 30
+	BPF_MAP_TYPE_USER_RINGBUF          BpfMapType = 31
+	BPF_MAP_TYPE_CGRP_STORAGE          BpfMapType = 32
+	BPF_MAP_TYPE_ARENA                 BpfMapType = 33
+	BPF_MAP_TYPE_INSN_ARRAY            BpfMapType = 34
+	BPF_MAP_TYPE_RHASH                 BpfMapType = 35
 )
-
-// BPF_MAP_TYPE_RINGBUF is the BPF ring buffer map type. max_entries is the
-// data ring size in bytes and must be a power of two.
-const BPF_MAP_TYPE_RINGBUF BpfMapType = 27
 
 // BpfProgType is a program type from enum bpf_prog_type.
 type BpfProgType uint32
 
-// Program types used by the SEC table. The values match linux/bpf.h.
+// Program types from enum bpf_prog_type.
 const (
 	BPF_PROG_TYPE_UNSPEC                  BpfProgType = 0
 	BPF_PROG_TYPE_SOCKET_FILTER           BpfProgType = 1
 	BPF_PROG_TYPE_KPROBE                  BpfProgType = 2
 	BPF_PROG_TYPE_SCHED_CLS               BpfProgType = 3
+	BPF_PROG_TYPE_SCHED_ACT               BpfProgType = 4
 	BPF_PROG_TYPE_TRACEPOINT              BpfProgType = 5
 	BPF_PROG_TYPE_XDP                     BpfProgType = 6
+	BPF_PROG_TYPE_PERF_EVENT              BpfProgType = 7
+	BPF_PROG_TYPE_CGROUP_SKB              BpfProgType = 8
+	BPF_PROG_TYPE_CGROUP_SOCK             BpfProgType = 9
+	BPF_PROG_TYPE_LWT_IN                  BpfProgType = 10
+	BPF_PROG_TYPE_LWT_OUT                 BpfProgType = 11
+	BPF_PROG_TYPE_LWT_XMIT                BpfProgType = 12
+	BPF_PROG_TYPE_SOCK_OPS                BpfProgType = 13
+	BPF_PROG_TYPE_SK_SKB                  BpfProgType = 14
+	BPF_PROG_TYPE_CGROUP_DEVICE           BpfProgType = 15
+	BPF_PROG_TYPE_SK_MSG                  BpfProgType = 16
 	BPF_PROG_TYPE_RAW_TRACEPOINT          BpfProgType = 17
+	BPF_PROG_TYPE_CGROUP_SOCK_ADDR        BpfProgType = 18
+	BPF_PROG_TYPE_LWT_SEG6LOCAL           BpfProgType = 19
+	BPF_PROG_TYPE_LIRC_MODE2              BpfProgType = 20
+	BPF_PROG_TYPE_SK_REUSEPORT            BpfProgType = 21
+	BPF_PROG_TYPE_FLOW_DISSECTOR          BpfProgType = 22
+	BPF_PROG_TYPE_CGROUP_SYSCTL           BpfProgType = 23
 	BPF_PROG_TYPE_RAW_TRACEPOINT_WRITABLE BpfProgType = 24
+	BPF_PROG_TYPE_CGROUP_SOCKOPT          BpfProgType = 25
 	BPF_PROG_TYPE_TRACING                 BpfProgType = 26
+	BPF_PROG_TYPE_STRUCT_OPS              BpfProgType = 27
+	BPF_PROG_TYPE_EXT                     BpfProgType = 28
 	BPF_PROG_TYPE_LSM                     BpfProgType = 29
+	BPF_PROG_TYPE_SK_LOOKUP               BpfProgType = 30
+	BPF_PROG_TYPE_SYSCALL                 BpfProgType = 31
+	BPF_PROG_TYPE_NETFILTER               BpfProgType = 32
 )
 
 // BpfAttachType is an attach type from enum bpf_attach_type.
@@ -62,14 +94,34 @@ type BpfAttachType uint32
 // Attach types used by the SEC table and by link creation. The values match
 // linux/bpf.h.
 const (
-	BPF_ATTACH_TYPE_UNSPEC BpfAttachType = 0
-	BPF_TRACE_RAW_TP       BpfAttachType = 23
-	BPF_TRACE_FENTRY       BpfAttachType = 24
-	BPF_TRACE_FEXIT        BpfAttachType = 25
-	BPF_MODIFY_RETURN      BpfAttachType = 26
-	BPF_LSM_MAC            BpfAttachType = 27
-	BPF_PERF_EVENT         BpfAttachType = 41
-	BPF_TRACE_KPROBE_MULTI BpfAttachType = 42
+	BPF_ATTACH_TYPE_UNSPEC   BpfAttachType = 0
+	BPF_CGROUP_INET4_CONNECT BpfAttachType = 10
+	BPF_LIRC_MODE2           BpfAttachType = 16
+	BPF_CGROUP_GETSOCKOPT    BpfAttachType = 21
+	BPF_TRACE_RAW_TP         BpfAttachType = 23
+	BPF_TRACE_FENTRY         BpfAttachType = 24
+	BPF_TRACE_FEXIT          BpfAttachType = 25
+	BPF_MODIFY_RETURN        BpfAttachType = 26
+	BPF_LSM_MAC              BpfAttachType = 27
+	BPF_SK_LOOKUP            BpfAttachType = 36
+	BPF_PERF_EVENT           BpfAttachType = 41
+	BPF_TRACE_KPROBE_MULTI   BpfAttachType = 42
+	BPF_NETFILTER            BpfAttachType = 45
+)
+
+// BpfFuncID is a helper id from enum bpf_func_id.
+type BpfFuncID uint32
+
+// Helper ids used by the probe tests and the feature matrix.
+const (
+	BPF_FUNC_map_lookup_elem      BpfFuncID = 1
+	BPF_FUNC_probe_read           BpfFuncID = 4
+	BPF_FUNC_ktime_get_ns         BpfFuncID = 5
+	BPF_FUNC_trace_printk         BpfFuncID = 6
+	BPF_FUNC_get_current_pid_tgid BpfFuncID = 14
+	BPF_FUNC_redirect             BpfFuncID = 23
+	BPF_FUNC_perf_event_output    BpfFuncID = 25
+	BPF_FUNC_get_attach_cookie    BpfFuncID = 174
 )
 
 // BPF_F_SLEEPABLE marks a sleepable program when passed in prog_flags.

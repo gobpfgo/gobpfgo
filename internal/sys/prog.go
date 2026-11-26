@@ -27,6 +27,7 @@ const (
 	progLoadOffLogLevel           = 24
 	progLoadOffLogSize            = 28
 	progLoadOffLogBuf             = 32
+	progLoadOffKernVersion        = 40
 	progLoadOffProgFlags          = 44
 	progLoadOffProgName           = 48
 	progLoadOffProgIfindex        = 64
@@ -53,6 +54,7 @@ type ProgLoadAttr struct {
 	LogLevel           uint32
 	LogSize            uint32
 	LogBuf             uint64
+	KernVersion        uint32
 	ProgFlags          uint32
 	ProgName           [BPF_OBJ_NAME_LEN]byte
 	ProgIfindex        uint32
@@ -89,6 +91,7 @@ func (a *ProgLoadAttr) Marshal() []byte {
 	binary.NativeEndian.PutUint32(buf[progLoadOffLogLevel:], a.LogLevel)
 	binary.NativeEndian.PutUint32(buf[progLoadOffLogSize:], a.LogSize)
 	binary.NativeEndian.PutUint64(buf[progLoadOffLogBuf:], a.LogBuf)
+	binary.NativeEndian.PutUint32(buf[progLoadOffKernVersion:], a.KernVersion)
 	binary.NativeEndian.PutUint32(buf[progLoadOffProgFlags:], a.ProgFlags)
 	copy(buf[progLoadOffProgName:progLoadOffProgName+BPF_OBJ_NAME_LEN], a.ProgName[:])
 	binary.NativeEndian.PutUint32(buf[progLoadOffProgIfindex:], a.ProgIfindex)
@@ -115,6 +118,7 @@ func progLoadFieldLayout() []fieldLayout {
 		{"log_level", progLoadOffLogLevel, 4},
 		{"log_size", progLoadOffLogSize, 4},
 		{"log_buf", progLoadOffLogBuf, 8},
+		{"kern_version", progLoadOffKernVersion, 4},
 		{"prog_flags", progLoadOffProgFlags, 4},
 		{"prog_name", progLoadOffProgName, BPF_OBJ_NAME_LEN},
 		{"prog_ifindex", progLoadOffProgIfindex, 4},

@@ -48,6 +48,7 @@
       {"name": "log_level", "offset": 24, "size": 4},
       {"name": "log_size", "offset": 28, "size": 4},
       {"name": "log_buf", "offset": 32, "size": 8},
+      {"name": "kern_version", "offset": 40, "size": 4},
       {"name": "prog_flags", "offset": 44, "size": 4},
       {"name": "prog_name", "offset": 48, "size": 16},
       {"name": "prog_ifindex", "offset": 64, "size": 4},
