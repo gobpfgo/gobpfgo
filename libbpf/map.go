@@ -72,7 +72,9 @@ func NewBpfMapCreateOpts() *BpfMapCreateOpts {
 //
 // mapType, keySize, valueSize and maxEntries describe the map. name is the
 // optional object name; it is truncated to 15 bytes and NUL-terminated like
-// the kernel's object names. opts may be nil.
+// the kernel's object names. The kernel accepts letters, digits, '_' and '.'
+// in the name; other characters make the call fail with EINVAL. opts may be
+// nil.
 //
 // The caller owns the descriptor and must close it with unix.Close. A failed
 // call returns a negative descriptor and an *Error with the kernel errno.

@@ -3,6 +3,7 @@
 
 #include <linux/bpf.h>
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -46,8 +47,23 @@ static void json_string(const char *s) {
 	putchar('"');
 }
 
+static void print_field_block(const char *name, const struct field *fields, size_t count, size_t attr_size, bool comma) {
+	size_t i;
+
+	printf("  \"%s\": {\n", name);
+	printf("    \"attr_size\": %zu,\n", attr_size);
+	printf("    \"fields\": [\n");
+	for (i = 0; i < count; i++) {
+		printf("      {\"name\": ");
+		json_string(fields[i].name);
+		printf(", \"offset\": %zu, \"size\": %zu}%s\n", fields[i].offset, fields[i].size, i + 1 == count ? "" : ",");
+	}
+	printf("    ]\n");
+	printf("  }%s\n", comma ? "," : "");
+}
+
 static void print_layout(void) {
-	static const struct field fields[] = {
+	static const struct field map_fields[] = {
 		F(map_type),
 		F(key_size),
 		F(value_size),
@@ -67,9 +83,17 @@ static void print_layout(void) {
 		F(excl_prog_hash),
 		F(excl_prog_hash_size),
 	};
-	const size_t attr_size = offsetofend(union bpf_attr, excl_prog_hash_size);
+	static const struct field btf_fields[] = {
+		F(btf),
+		F(btf_log_buf),
+		F(btf_size),
+		F(btf_log_size),
+		F(btf_log_level),
+		F(btf_log_true_size),
+		F(btf_flags),
+		F(btf_token_fd),
+	};
 	struct utsname uts;
-	size_t i;
 
 	if (uname(&uts) != 0) {
 		perror("uname");
@@ -84,17 +108,8 @@ static void print_layout(void) {
 	printf("  \"kernel\": ");
 	json_string(uts.release);
 	printf(",\n");
-	printf("  \"map_create\": {\n");
-	printf("    \"attr_size\": %zu,\n", attr_size);
-	printf("    \"fields\": [\n");
-	for (i = 0; i < ARRAY_SIZE(fields); i++) {
-		printf("      {\"name\": ");
-		json_string(fields[i].name);
-		printf(", \"offset\": %zu, \"size\": %zu}%s\n", fields[i].offset, fields[i].size, i + 1 == ARRAY_SIZE(fields) ? "" : ",");
-	}
-
-	printf("    ]\n");
-	printf("  }\n");
+	print_field_block("map_create", map_fields, ARRAY_SIZE(map_fields), offsetofend(union bpf_attr, excl_prog_hash_size), true);
+	print_field_block("btf_load", btf_fields, ARRAY_SIZE(btf_fields), offsetofend(union bpf_attr, btf_token_fd), false);
 	printf("}\n");
 }
 
