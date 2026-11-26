@@ -7,8 +7,8 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-OPEN := $(BUILD)/open
-LOAD := $(BUILD)/load
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c
+ORACLE_HDRS := json.h oracle.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
 LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
@@ -17,9 +17,6 @@ LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 
 all: $(ORACLE)
 
-$(ORACLE): main.c | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $<
-
 $(LIBBPF_A): | $(BUILD)
 	rm -rf $(BUILD)/libbpf $(LIBBPF_OBJ)
 	mkdir -p $(BUILD)/libbpf
@@ -27,28 +24,23 @@ $(LIBBPF_A): | $(BUILD)
 	cp -a $(LIBBPF)/include $(BUILD)/libbpf/include
 	$(MAKE) -C $(LIBBPF_SRC) OBJDIR=$(abspath $(LIBBPF_OBJ)) BUILD_STATIC_ONLY=y
 
-$(OPEN): open.c $(LIBBPF_A)
+$(ORACLE): $(ORACLE_SRCS) $(ORACLE_HDRS) $(LIBBPF_A)
 	$(CC) $(CPPFLAGS) -I$(LIBBPF_SRC) -I$(BUILD)/libbpf/include/uapi \
-		$(CFLAGS) -o $@ open.c $(LIBBPF_A) \
-		$(shell pkg-config --libs libelf zlib)
-
-$(LOAD): load.c $(LIBBPF_A)
-	$(CC) $(CPPFLAGS) -I$(LIBBPF_SRC) -I$(BUILD)/libbpf/include/uapi \
-		$(CFLAGS) -o $@ load.c $(LIBBPF_A) \
+		$(CFLAGS) -o $@ $(ORACLE_SRCS) $(LIBBPF_A) \
 		$(shell pkg-config --libs libelf zlib)
 
 $(BUILD):
 	mkdir -p $@
 
-fixtures: $(ORACLE) $(OPEN)
+fixtures: $(ORACLE)
 	mkdir -p ../testdata/oracle
 	$(ORACLE) layout > ../testdata/oracle/layout.json
 	$(ORACLE) attr > ../testdata/oracle/attr.json
-	$(OPEN) ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
+	$(ORACLE) open ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
 
-load-fixture: $(LOAD)
+load-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
-	sudo -n $(LOAD) ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/load.json
+	sudo -n $(ORACLE) load ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/load.json
 
 clean:
 	rm -rf $(BUILD)

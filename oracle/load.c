@@ -1,163 +1,111 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // Original golbpfgo code.
 
+#include "oracle.h"
+
 #include "libbpf.h"
 #include "bpf.h"
-#include "libbpf_version.h"
 
 #include <linux/bpf.h>
 
 #include <errno.h>
-#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/utsname.h>
 
-static void json_string(const char *s) {
-	const unsigned char *p = (const unsigned char *)(s ? s : "");
-
-	putchar('"');
-	for (; *p; p++) {
-		switch (*p) {
-		case '"':
-		case '\\':
-			putchar('\\');
-			putchar(*p);
-			break;
-		case '\n':
-			fputs("\\n", stdout);
-			break;
-		default:
-			putchar(*p);
-			break;
-		}
-	}
-
-	putchar('"');
+static void copy_name(char *dst, const char *src) {
+	memcpy(dst, src, BPF_OBJ_NAME_LEN - 1);
+	dst[BPF_OBJ_NAME_LEN - 1] = '\0';
 }
 
-static void print_map(struct bpf_map *map) {
+static void map_json(struct json *j, struct bpf_map *map) {
 	struct bpf_map_info info = {};
 	char name[BPF_OBJ_NAME_LEN];
 	__u32 len = sizeof(info);
-	int fd    = bpf_map__fd(map);
 
-	if (bpf_obj_get_info_by_fd(fd, &info, &len) != 0) {
+	if (bpf_obj_get_info_by_fd(bpf_map__fd(map), &info, &len) != 0) {
 		fprintf(stderr, "map info %s: %s\n", bpf_map__name(map), strerror(errno));
 		exit(1);
 	}
+	copy_name(name, info.name);
 
-	memcpy(name, info.name, sizeof(name) - 1);
-	name[sizeof(name) - 1] = '\0';
-
-	printf("    {\"name\": ");
-	json_string(name);
-	printf(", \"type\": %u", info.type);
-	printf(", \"id\": %u", info.id);
-	printf(", \"key_size\": %u", info.key_size);
-	printf(", \"value_size\": %u", info.value_size);
-	printf(", \"max_entries\": %u", info.max_entries);
-	printf(", \"map_flags\": %u", info.map_flags);
-	printf(", \"btf_key_type_id\": %u", info.btf_key_type_id);
-	printf(", \"btf_value_type_id\": %u", info.btf_value_type_id);
-	printf("}");
+	json_obj_begin_compact(j, NULL);
+	json_str(j, "name", name);
+	json_u32(j, "type", info.type);
+	json_u32(j, "id", info.id);
+	json_u32(j, "key_size", info.key_size);
+	json_u32(j, "value_size", info.value_size);
+	json_u32(j, "max_entries", info.max_entries);
+	json_u32(j, "map_flags", info.map_flags);
+	json_u32(j, "btf_key_type_id", info.btf_key_type_id);
+	json_u32(j, "btf_value_type_id", info.btf_value_type_id);
+	json_obj_end(j);
 }
 
-static void print_program(struct bpf_program *prog) {
+static void program_json(struct json *j, struct bpf_program *prog) {
 	struct bpf_prog_info info = {};
 	char name[BPF_OBJ_NAME_LEN];
 	__u32 len = sizeof(info);
-	int fd    = bpf_program__fd(prog);
 
-	if (bpf_obj_get_info_by_fd(fd, &info, &len) != 0) {
+	if (bpf_obj_get_info_by_fd(bpf_program__fd(prog), &info, &len) != 0) {
 		fprintf(stderr, "prog info %s: %s\n", bpf_program__name(prog), strerror(errno));
 		exit(1);
 	}
+	copy_name(name, info.name);
 
-	memcpy(name, info.name, sizeof(name) - 1);
-	name[sizeof(name) - 1] = '\0';
-
-	printf("    {\"name\": ");
-	json_string(name);
-	printf(", \"type\": %u", info.type);
-	printf(", \"id\": %u", info.id);
-	printf(", \"section\": ");
-	json_string(bpf_program__section_name(prog));
-	printf(", \"insn_cnt\": %zu", bpf_program__insn_cnt(prog));
-	printf(", \"xlated_insn_cnt\": %u", info.xlated_prog_len / 8);
-	printf(", \"jited_prog_len\": %u", info.jited_prog_len);
-	printf("}");
+	json_obj_begin_compact(j, NULL);
+	json_str(j, "name", name);
+	json_u32(j, "type", info.type);
+	json_u32(j, "id", info.id);
+	json_str(j, "section", bpf_program__section_name(prog));
+	json_u64(j, "insn_cnt", bpf_program__insn_cnt(prog));
+	json_u32(j, "xlated_insn_cnt", info.xlated_prog_len / 8);
+	json_u32(j, "jited_prog_len", info.jited_prog_len);
+	json_obj_end(j);
 }
 
-int main(int argc, char **argv) {
+int oracle_load(const char *path) {
+	struct oracle_meta meta = {.case_name = "load", .version = true};
 	struct bpf_program *prog;
 	struct bpf_object *obj;
 	struct bpf_map *map;
-	struct utsname uts;
-	bool first;
+	struct json j;
 	long err;
 	int ret;
 
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s <object>\n", argv[0]);
-		return 2;
-	}
-
-	if (uname(&uts) != 0) {
-		perror("uname");
-		return 1;
-	}
-
-	obj = bpf_object__open_file(argv[1], NULL);
+	obj = bpf_object__open_file(path, NULL);
 	err = libbpf_get_error(obj);
 	if (err) {
-		fprintf(stderr, "open %s: %s\n", argv[1], strerror((int)-err));
+		fprintf(stderr, "open %s: %s\n", path, strerror((int)-err));
 		return 1;
 	}
 
 	ret = bpf_object__load(obj);
 	if (ret) {
-		fprintf(stderr, "load %s: %s\n", argv[1], strerror(-ret));
+		fprintf(stderr, "load %s: %s\n", path, strerror(-ret));
 		bpf_object__close(obj);
 		return 1;
 	}
 
-	printf("{\n");
-	printf("  \"case\": \"load\",\n");
-	printf("  \"libbpf_version\": \"%d.%d.%d\",\n", LIBBPF_MAJOR_VERSION, LIBBPF_MINOR_VERSION, 0);
-	printf("  \"arch\": ");
-	json_string(uts.machine);
-	printf(",\n");
-	printf("  \"kernel\": ");
-	json_string(uts.release);
-	printf(",\n");
-	printf("  \"object_name\": ");
-	json_string(bpf_object__name(obj));
-	printf(",\n");
+	json_init(&j, stdout);
+	json_obj_begin(&j, NULL);
+	oracle_meta(&j, &meta);
 
-	printf("  \"maps\": [\n");
-	first = true;
-	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map)) {
-		if (!first)
-			printf(",\n");
-		print_map(map);
-		first = false;
-	}
+	json_str(&j, "object_name", bpf_object__name(obj));
 
-	printf("\n  ],\n");
+	json_arr_begin(&j, "maps");
+	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map))
+		map_json(&j, map);
+	json_arr_end(&j);
 
-	printf("  \"programs\": [\n");
-	first = true;
-	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog)) {
-		if (!first)
-			printf(",\n");
-		print_program(prog);
-		first = false;
-	}
+	json_arr_begin(&j, "programs");
+	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog))
+		program_json(&j, prog);
+	json_arr_end(&j);
 
-	printf("\n  ]\n");
-	printf("}\n");
+	json_obj_end(&j);
+	fputc('\n', stdout);
 
 	bpf_object__close(obj);
 	return 0;
