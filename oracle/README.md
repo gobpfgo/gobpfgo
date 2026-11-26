@@ -1,17 +1,20 @@
 # Oracle
 
-The C harness that produces the golden files under `testdata/oracle/`. It is built against the libbpf UAPI headers at the commit recorded in [NOTICE](../NOTICE). Tests consume the checked-in JSON and never build this directory.
+The C harness that produces the golden files under `testdata/oracle/`. It is one binary with four subcommands and links the pinned libbpf for the `open` and `load` scenarios. Tests consume the checked-in JSON and never build this directory.
 
 ## Scenarios
 
-- `layout` prints `sizeof` and `offsetof` for every UAPI field the port uses.
-- `attr` prints the bytes of a `bpf_attr` for a known input.
-- `open` opens the kprobe object with the real libbpf and prints the object, map and program metadata. It is the first scenario linked against libbpf.
-- `load` opens and loads the kprobe object with the real libbpf and prints the loaded map and program info. It needs root or `CAP_BPF`; `make -C oracle load-fixture` uses `sudo -n`.
+- `layout` prints the UAPI struct sizes and field offsets used by the port.
+- `attr` prints the serialized bytes of a `bpf_attr` for a known input.
+- `open <object>` opens the object with libbpf and prints its maps and programs.
+- `load <object>` loads the object with libbpf and prints the loaded map and program info. It needs root or `CAP_BPF`.
 
-Later scenarios (`load`, `attach`, `core`, `dump`, `usdt`, `linker`, `ringbuf`, `probe`) link against the real libbpf and are added with the slice that needs them.
+## Layout
 
-The `open` target builds libbpf from a copy under `oracle/build/`, so the libbpf checkout stays read-only.
+- `json.c` and `json.h` are a small JSON writer that owns commas, indentation and escaping.
+- `oracle.c` and `oracle.h` hold the shared metadata and the UAPI field block.
+- `layout.c`, `attr.c`, `open.c` and `load.c` are the scenarios.
+- `main.c` dispatches the subcommands.
 
 ## Regenerate
 
@@ -19,10 +22,10 @@ The `open` target builds libbpf from a copy under `oracle/build/`, so the libbpf
 make -C oracle fixtures
 ```
 
-This writes `testdata/oracle/layout.json`, `attr.json` and `open.json`. The `load` fixture is separate because it needs privileges:
+This writes `layout.json`, `attr.json` and `open.json`.
 
 ```sh
 make -C oracle load-fixture
 ```
 
-It runs the oracle under `sudo -n` and writes `testdata/oracle/load.json`. Review the diff before committing: a change here is a change in the kernel ABI, in the pinned libbpf headers or in the loaded metadata, and the Go constants must follow.
+This runs the `load` scenario under `sudo -n` and writes `load.json`. The map and program ids change per run; the Go test compares the stable fields. Review the diff before committing: a change here is a change in the kernel ABI, in the pinned libbpf headers or in the loaded metadata.
