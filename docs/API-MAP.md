@@ -68,6 +68,7 @@ The generated table has these columns:
 | `bpf_object__unpin` | `BpfObjectUnpin` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_obj_pin` | `ObjPin` (internal; public through the map and program pins) | `internal/sys/bpf.go` | parity tested (layout and root pin test) |
 | `bpf_program__attach_kprobe` | `BpfProgramAttachKprobe` | `libbpf/link.go` | in progress (kprobe through tracefs; retprobe untested; kprobe multi not ported) |
+| `bpf_core_parse_spec` | `ParseCoreSpec` (internal) | `internal/btf/core.go` | in progress (field, type and enum specs; target matching and patching not ported) |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
 | `btf__parse` | `BtfParse` | `libbpf/btf.go` | not started |
 | `btf_dump__new` | `BtfDumpNew` | `libbpf/btf_dump.go` | not started |
