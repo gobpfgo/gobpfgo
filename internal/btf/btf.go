@@ -340,6 +340,52 @@ func (s *Spec) FixupDatasecSizes(sectionSizes map[string]uint32) error {
 	return nil
 }
 
+// FixupDatasecOffsets writes the DATASEC variable offsets from the ELF
+// symbol values, matching libbpf's btf_fixup_datasec. A variable whose offset
+// is already nonzero is left alone, because a statically linked object
+// carries the final offsets.
+//
+// offsets maps an ELF symbol name to its value. Static and extern variables
+// are skipped; a global variable without a symbol is an error.
+func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
+	for i := range s.Types {
+		t := &s.Types[i]
+		if t.Kind != KindDatasec || t.ID == 0 {
+			continue
+		}
+		for j := range t.DataSec {
+			vsi := &t.DataSec[j]
+			if vsi.Offset != 0 {
+				continue
+			}
+
+			varType, err := s.TypeByID(vsi.Type)
+			if err != nil {
+				return err
+			}
+			if varType.Kind != KindVar || varType.Var == nil {
+				return fmt.Errorf("btf: datasec %s: member %d is not a VAR", t.Name, j)
+			}
+			if varType.Var.Linkage == VarStatic || varType.Var.Linkage == VarGlobalExtern {
+				continue
+			}
+
+			value, ok := offsets[varType.Name]
+			if !ok {
+				return fmt.Errorf("btf: datasec %s: no ELF symbol for %s", t.Name, varType.Name)
+			}
+
+			off := s.typeStart + int(t.rawOff) + 12 + j*12 + 4
+			if off+4 > len(s.raw) {
+				return fmt.Errorf("btf: datasec %s: offset field out of bounds", t.Name)
+			}
+			s.ByteOrder.PutUint32(s.raw[off:], value)
+			vsi.Offset = value
+		}
+	}
+	return nil
+}
+
 // Find returns the first type with the given name and kind, or nil. Names are
 // compared exactly; an empty name matches only empty names.
 func (s *Spec) Find(name string, kind Kind) *Type {

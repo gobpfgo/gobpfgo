@@ -186,6 +186,44 @@ func TestFixupDatasecSizes(t *testing.T) {
 	}
 }
 
+func TestFixupDatasecOffsets(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/ringbuf.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := spec.FixupDatasecSizes(map[string]uint32{".maps": 32, "license": 4}); err != nil {
+		t.Fatalf("FixupDatasecSizes: %v", err)
+	}
+	if err := spec.FixupDatasecOffsets(map[string]uint32{"events": 0, "events2": 16, "LICENSE": 0}); err != nil {
+		t.Fatalf("FixupDatasecOffsets: %v", err)
+	}
+
+	maps := spec.Find(".maps", KindDatasec)
+	if maps == nil || len(maps.DataSec) != 2 {
+		t.Fatalf(".maps datasec = %+v, want two variables", maps)
+	}
+	for i, want := range []uint32{0, 16} {
+		v, err := spec.TypeByID(maps.DataSec[i].Type)
+		if err != nil {
+			t.Fatalf("type %d: %v", maps.DataSec[i].Type, err)
+		}
+		if v.Kind != KindVar {
+			t.Fatalf(".maps member %d kind = %v, want var", i, v.Kind)
+		}
+		if maps.DataSec[i].Offset != want {
+			t.Errorf("%s offset = %d, want %d", v.Name, maps.DataSec[i].Offset, want)
+		}
+		off := spec.typeStart + int(maps.rawOff) + 12 + i*12 + 4
+		if got := spec.ByteOrder.Uint32(spec.raw[off:]); got != want {
+			t.Errorf("%s raw offset = %d, want %d", v.Name, got, want)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	if _, err := Parse(nil, binary.LittleEndian); err == nil {
 		t.Fatal("Parse accepted an empty blob")
