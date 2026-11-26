@@ -12,6 +12,10 @@ type BpfMapType uint32
 // array of max_entries values and indexes it by key.
 const BPF_MAP_TYPE_ARRAY BpfMapType = 2
 
+// BPF_MAP_TYPE_RINGBUF is the BPF ring buffer map type. max_entries is the
+// data ring size in bytes and must be a power of two.
+const BPF_MAP_TYPE_RINGBUF BpfMapType = 27
+
 // BpfProgType is a program type from enum bpf_prog_type.
 type BpfProgType uint32
 

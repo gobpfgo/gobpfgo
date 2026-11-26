@@ -264,26 +264,24 @@ func fillMapDef(spec *btf.Spec, st *btf.Type, m *BpfMap) error {
 	}
 	m.maxEntries = v
 
-	keyMember := spec.Member(st, "key")
-	if keyMember == nil {
-		return fmt.Errorf("missing key member")
-	}
-	if m.btfKeyTypeID, err = mapTypeID(spec, keyMember.Type); err != nil {
-		return fmt.Errorf("key: %w", err)
-	}
-	if m.keySize, err = spec.SizeOf(m.btfKeyTypeID); err != nil {
-		return fmt.Errorf("key size: %w", err)
+	// Map types such as ringbuf and queue have no key or value. The kernel
+	// rejects a missing key or value where the type requires one.
+	if keyMember := spec.Member(st, "key"); keyMember != nil {
+		if m.btfKeyTypeID, err = mapTypeID(spec, keyMember.Type); err != nil {
+			return fmt.Errorf("key: %w", err)
+		}
+		if m.keySize, err = spec.SizeOf(m.btfKeyTypeID); err != nil {
+			return fmt.Errorf("key size: %w", err)
+		}
 	}
 
-	valueMember := spec.Member(st, "value")
-	if valueMember == nil {
-		return fmt.Errorf("missing value member")
-	}
-	if m.btfValueTypeID, err = mapTypeID(spec, valueMember.Type); err != nil {
-		return fmt.Errorf("value: %w", err)
-	}
-	if m.valueSize, err = spec.SizeOf(m.btfValueTypeID); err != nil {
-		return fmt.Errorf("value size: %w", err)
+	if valueMember := spec.Member(st, "value"); valueMember != nil {
+		if m.btfValueTypeID, err = mapTypeID(spec, valueMember.Type); err != nil {
+			return fmt.Errorf("value: %w", err)
+		}
+		if m.valueSize, err = spec.SizeOf(m.btfValueTypeID); err != nil {
+			return fmt.Errorf("value size: %w", err)
+		}
 	}
 
 	if flags := spec.Member(st, "map_flags"); flags != nil {
