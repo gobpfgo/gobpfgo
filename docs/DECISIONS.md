@@ -36,8 +36,11 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The repository is [`golbpfgo/golbpfgo`](https://github.com/golbpfgo/golbpfgo) under the `golbpfgo` organization, public, and the module path is `github.com/golbpfgo/golbpfgo`. The personal account is not used for the module path.
 
+## D-009: The agent merges its own PRs and continues
+
+2026-11-26. The operator authorized the agent to open, approve where possible, and merge its own PRs one at a time after CI is green, fix CI failures, and continue until a decision needs the operator. GitHub rejects self-approval, so the agent merges without an approval when branch protection allows it. The merge method is rebase and merge, matching [`#1`](https://github.com/golbpfgo/golbpfgo/pull/1); the branch is deleted after merge. This is a project-specific exception to the global never-merge rule.
+
 ## Open decisions
 
 - Kernel floor: 4.9 to match libbpf, or 5.10 to cut the probe matrix.
-- Merge method: squash or merge commit.
 - Whether the `reflect` address helper in `internal/sys/addr.go` is acceptable, or a per-architecture assembly stub is preferred.
