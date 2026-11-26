@@ -4,7 +4,7 @@ The port is correct only when it does what libbpf does. Source similarity is not
 
 ## The oracle
 
-`oracle/` is a single C binary with `layout`, `attr`, `open`, `load` and `attach` subcommands. The output goes through a small JSON writer in `json.c`; the scenarios live in `layout.c`, `attr.c`, `open.c`, `load.c` and `attach.c`, and the shared metadata and UAPI field block live in `oracle.c`. The `open`, `load` and `attach` scenarios link the libbpf commit recorded in [NOTICE](../NOTICE).
+`oracle/` is a single C binary with `layout`, `attr`, `open`, `load`, `attach` and `core` subcommands. The output goes through a small JSON writer in `json.c`; the scenarios live in `layout.c`, `attr.c`, `open.c`, `load.c`, `attach.c` and `core.c`, and the shared metadata and UAPI field block live in `oracle.c`. The `open`, `load`, `attach` and `core` scenarios link the libbpf commit recorded in [NOTICE](../NOTICE).
 
 Scenarios:
 
@@ -15,7 +15,7 @@ Scenarios:
 | `open` | object name, map specs, program specs, BTF type summary |
 | `load` | loaded map and program info |
 | `attach` | object, program and function, and whether the program counted a real call |
-| `core` | every CO-RE fixup: instruction index, kind, spec, access string, old and new value |
+| `core` | CO-RE access specs: section, instruction, kind, access string, bit offset and accessors |
 | `dump` | the exact `btf_dump` text |
 | `usdt` | provider, name, arguments, semaphore offset |
 | `linker` | linked object metadata and section layout |
@@ -26,7 +26,7 @@ The oracle is development-only. Tests consume checked-in JSON and never need C, 
 
 `layout` covers `BPF_MAP_CREATE`, `BPF_MAP_LOOKUP_ELEM`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open`, `load` and `attach` are implemented for the kprobe object and are linked against the pinned libbpf. `load` and `attach` have oracle fixtures generated with `sudo`.
 
-The BTF load test, the object load test, the kprobe attach test, the pin test and the reuse test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts and the loaded info comparison run in CI. The root object load test compares the map info and the program info with `load.json`. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test. The pin test creates a temporary directory on bpffs, pins and unpins the map and program, and removes the directory; it skips when bpffs is unavailable.
+The BTF load test, the object load test, the kprobe attach test, the pin test and the reuse test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts, the loaded info comparison and the CO-RE spec test run in CI. The root object load test compares the map info and the program info with `load.json`. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test. The pin test creates a temporary directory on bpffs, pins and unpins the map and program, and removes the directory; it skips when bpffs is unavailable.
 
 The loaded xlated instruction count and jited length are verifier and JIT outputs. The test compares them exactly on the kernel that produced `load.json` and requires them to be nonzero on any other kernel; the map geometry, BTF ids and program type are compared everywhere. The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding.
 
@@ -52,7 +52,7 @@ Tier 2 is running on Debian 11 with kernel `5.10.0-46-cloud-amd64` and on the 6.
 - **Attributes.** The Go serializer's bytes must equal the `attr` scenario, field by field.
 - **Object metadata.** Map and program names, types, key and value sizes, max entries, flags, BTF IDs and pin paths must match after open.
 - **Syscalls.** The command order and every attribute field must match after load. File descriptors, map IDs, program IDs, PIDs and timestamps are normalized away; everything else is compared.
-- **CO-RE.** The fixup list must match exactly. This is the strongest check that the relocation engine is the same.
+- **CO-RE access spec.** The section, instruction, kind, access string, bit offset and accessors must match. Target matching and the final fixup list come next.
 - **Text.** `btf_dump` output is compared byte for byte.
 - **Errors.** The errno and the failing operation are compared. Kernel log text is compared only on selected lines, because it changes between kernel versions.
 

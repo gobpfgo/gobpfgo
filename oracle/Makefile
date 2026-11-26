@@ -7,7 +7,7 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c core.c
 ORACLE_HDRS := json.h oracle.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
@@ -37,6 +37,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) layout > ../testdata/oracle/layout.json
 	$(ORACLE) attr > ../testdata/oracle/attr.json
 	$(ORACLE) open ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
+	$(ORACLE) core ../testdata/progs/core.bpf.o > ../testdata/oracle/core.json
 
 load-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle

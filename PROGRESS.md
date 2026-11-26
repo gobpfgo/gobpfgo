@@ -31,7 +31,7 @@ Done:
 - File provenance now lives in the `libbpf-source`, `libbpf-commit` and `libbpf-symbols` headers; godocs describe the Go API.
 - The project, module path, GitHub owner and provenance tag are renamed `gobpfgo` ([`#17`](https://github.com/gobpfgo/gobpfgo/pull/17)); the C oracle map names and the tracefs event prefix follow.
 
-Next: phase 1, in progress.
+Phase 1, in progress.
 
 - BTF load, map create with the BTF ids, the map-FD relocation, the program load and the loaded info comparison are done; the root load test passes.
 - `BpfMapLookupElem` reads a map element; the `BPF_MAP_LOOKUP_ELEM` layout comes from the test object.
@@ -42,10 +42,15 @@ Next: phase 1, in progress.
 - `BpfMapSetPinPath`, `BpfMapPin`, `BpfMapUnpin` and `BpfMapIsPinned` pin and unpin a loaded map on bpffs; `BpfProgramPin` and `BpfProgramUnpin` do the same for a program. The root test pins and unpins both on 5.10 and 6.18 ([`#20`](https://github.com/gobpfgo/gobpfgo/pull/20)).
 - `BpfObjectPinMaps`, `BpfObjectUnpinMaps`, `BpfObjectPinPrograms`, `BpfObjectUnpinPrograms`, `BpfObjectPin` and `BpfObjectUnpin` pin and unpin the whole object under one directory. The root test covers the object path on 5.10 and 6.18 ([`#21`](https://github.com/gobpfgo/gobpfgo/pull/21)).
 - `BpfMapReuseFD` makes an object map use an existing kernel map. The load path skips creating it, the relocation resolves maps by ELF symbol after the reused name replaces the object name, and the root test proves the program increments the reused map on 5.10 and 6.18 ([`#22`](https://github.com/gobpfgo/gobpfgo/pull/22)).
-- Next: phase 2, CO-RE relocation.
+
+Phase 2, in progress.
+
+- `internal/btf.ParseExt` reads the `.BTF.ext` CO-RE records; `ParseCoreSpec` resolves field, type and enum access specs against the local BTF, matching libbpf's spec for the test object (`0:1`, bit offset 32, two accessors). The `core` oracle scenario checks it and runs in CI and on 5.10.
+- Next: CO-RE target matching and instruction patching.
 
 Open:
 
 - The arm64 half of the 5.10 tier has not run.
 - kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.
 - Link pinning and the remaining attach types are not ported.
+- CO-RE target matching, instruction patching and flexible array members are not ported.
