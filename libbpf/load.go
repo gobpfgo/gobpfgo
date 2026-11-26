@@ -54,6 +54,20 @@ func BpfObjectLoad(obj *BpfObject) error {
 	obj.btfFD = btfFD
 
 	for _, m := range obj.maps {
+		if m.reused {
+			info, err := sys.MapInfoByFD(m.fd)
+			if err != nil {
+				obj.closeLoadFDs()
+				return &Error{
+					Op:    "bpf_obj_get_info_by_fd",
+					Errno: errnoFromError(err),
+					Log:   m.name,
+				}
+			}
+			m.id = info.ID
+			continue
+		}
+
 		attr := &sys.MapCreateAttr{
 			MapType:        uint32(m.mapType),
 			KeySize:        m.keySize,
@@ -148,7 +162,7 @@ func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
 			return fmt.Errorf("unsupported relocation type %d for %s", rel.Type, rel.Symbol)
 		}
 
-		m := BpfObjectFindMapByName(obj, rel.Symbol)
+		m := findMapBySymbol(obj, rel.Symbol)
 		if m == nil {
 			return fmt.Errorf("map %s not found", rel.Symbol)
 		}
