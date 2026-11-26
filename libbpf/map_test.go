@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 
 //go:build linux && (amd64 || arm64)
 
@@ -13,7 +13,7 @@ import (
 )
 
 func TestBpfMapCreateArray(t *testing.T) {
-	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "golbpfgo_test", 4, 8, 16, nil)
+	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "gobpfgo_test", 4, 8, 16, nil)
 	if err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
 			t.Skipf("bpf() not permitted: %v", err)
@@ -28,7 +28,7 @@ func TestBpfMapCreateArray(t *testing.T) {
 }
 
 func TestBpfMapCreateInvalidOpts(t *testing.T) {
-	_, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "golbpfgo-test", 4, 8, 16, &BpfMapCreateOpts{Sz: 1})
+	_, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "gobpfgo-test", 4, 8, 16, &BpfMapCreateOpts{Sz: 1})
 	if !errors.Is(err, unix.EINVAL) {
 		t.Fatalf("got %v, want EINVAL", err)
 	}

@@ -123,10 +123,10 @@ is a comma-separated list. Files with no libbpf counterpart use:
 
 <!-- anchors-ok: go | a code-fence language, not a source snippet -->
 ```go
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 ```
 
-A file that reimplements a C module uses both `golbpfgo-origin` and
+A file that reimplements a C module uses both `gobpfgo-origin` and
 `libbpf-source`. The commit is the one recorded in `NOTICE`. The API map
 generator reads these tags; do not move the mapping into the godoc.
 

@@ -1,4 +1,4 @@
-# golbpfgo agent rules
+# gobpfgo agent rules
 
 <!-- anchors-ok: LGPL-2 encoding/binary internal/sys | SPDX identifiers and package paths, not citations -->
 
@@ -19,14 +19,14 @@ Then check `git status` and run `CGO_ENABLED=0 go test ./...`.
 
 ## What this is
 
-golbpfgo is a pure-Go port of libbpf, close to 1:1 in behavior and API shape. The core package `libbpf` mirrors the C library with free functions over opaque types. The `bpf` package is a thin object layer over the core and is built last.
+gobpfgo is a pure-Go port of libbpf, close to 1:1 in behavior and API shape. The core package `libbpf` mirrors the C library with free functions over opaque types. The `bpf` package is a thin object layer over the core and is built last.
 
 ## Hard constraints
 
 - No cgo. `CGO_ENABLED=0 go build ./...` must pass.
 - No `unsafe` import. UAPI structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go types; mmap data is read through `[]byte`. The single syscall address helper lives in `internal/sys` and is documented in [docs/DECISIONS.md](docs/DECISIONS.md).
 - C sources are formatted with `clang-format`; `make format-check` must pass. Go stays with `gofmt`.
-- Provenance lives in the file header metadata (`libbpf-source`, `libbpf-commit`, `libbpf-symbols`, or `golbpfgo-origin`); godocs describe the Go behavior, not the C mapping.
+- Provenance lives in the file header metadata (`libbpf-source`, `libbpf-commit`, `libbpf-symbols`, or `gobpfgo-origin`); godocs describe the Go behavior, not the C mapping.
 - Write for humans. Tests, the oracle and tools are code too: small functions, shared helpers, clear names and the formatter. No throwaway dumps.
 - No cilium/ebpf code, tests or generated files. Design ideas only, recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 - The libbpf checkout at `../libbpf` is read-only reference. Never modify it.
@@ -60,7 +60,7 @@ When the operator corrects a choice, append a dated entry to [docs/PREFERENCES.m
 A ported symbol is done when:
 
 - the Go code exists and builds with `CGO_ENABLED=0`;
-- the file header carries the provenance metadata, or `golbpfgo-origin` for original code;
+- the file header carries the provenance metadata, or `gobpfgo-origin` for original code;
 - the godoc describes the Go behavior, ownership and errors, not the C mapping;
 - there is a unit test;
 - there is an oracle parity test where the behavior is observable;

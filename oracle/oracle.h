@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// Original gobpfgo code.
 
 #ifndef ORACLE_H
 #define ORACLE_H

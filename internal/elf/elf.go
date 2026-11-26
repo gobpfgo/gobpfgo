@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original Go ELF reader
+// gobpfgo-origin: original Go ELF reader
 // libbpf-source: src/elf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
 // libbpf-symbols: bpf_object__elf_init, bpf_object__elf_collect, bpf_object__elf_finish

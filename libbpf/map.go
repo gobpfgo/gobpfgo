@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"syscall"
 
-	"github.com/golbpfgo/golbpfgo/internal/sys"
+	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
 

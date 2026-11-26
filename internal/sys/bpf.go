@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original bpf() wrapper
+// gobpfgo-origin: original bpf() wrapper
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
 // libbpf-symbols: sys_bpf, bpf_map_create

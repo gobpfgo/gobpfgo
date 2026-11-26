@@ -14,8 +14,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/golbpfgo/golbpfgo/internal/btf"
-	"github.com/golbpfgo/golbpfgo/internal/elf"
+	"github.com/gobpfgo/gobpfgo/internal/btf"
+	"github.com/gobpfgo/gobpfgo/internal/elf"
 	"golang.org/x/sys/unix"
 )
 
@@ -118,7 +118,7 @@ func BpfObjectOpenFile(path string, opts *BpfObjectOpenOpts) (*BpfObject, error)
 // BpfObjectOpenMem parses a BPF ELF object from data. The object name is
 // "mem" unless opts.ObjectName is set. The caller must call BpfObjectClose.
 //
-// libbpf uses a pointer-based default name for memory buffers; golbpfgo uses
+// libbpf uses a pointer-based default name for memory buffers; gobpfgo uses
 // a stable name so diagnostics and pin paths are reproducible.
 func BpfObjectOpenMem(data []byte, opts *BpfObjectOpenOpts) (*BpfObject, error) {
 	if len(data) == 0 {

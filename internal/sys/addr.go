@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 
 //go:build linux && (amd64 || arm64)
 

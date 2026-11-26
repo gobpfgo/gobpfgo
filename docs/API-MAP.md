@@ -15,7 +15,7 @@ Every Go file starts with a provenance block. Ported files use:
 // libbpf-symbols: bpf_object__open_file, bpf_object__open_mem
 ```
 
-Original files use `// golbpfgo-origin: original`. A reimplementation of a C
+Original files use `// gobpfgo-origin: original`. A reimplementation of a C
 module uses both tags. `libbpf-source` may repeat; `libbpf-symbols` is a
 comma-separated list. The API map generator reads these tags, and the godocs
 describe the Go behavior instead of repeating the C mapping.
