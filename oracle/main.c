@@ -13,8 +13,7 @@
 #define LIBBPF_COMMIT "4f05fb027a08a8a66d03916cf6a68a91e2c720ea"
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
-#define offsetofend(TYPE, FIELD) \
-	(offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
+#define offsetofend(TYPE, FIELD) (offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
 
 struct field {
 	const char *name;
@@ -22,10 +21,9 @@ struct field {
 	size_t size;
 };
 
-#define F(name) { #name, offsetof(union bpf_attr, name), sizeof(((union bpf_attr *)0)->name) }
+#define F(name) {#name, offsetof(union bpf_attr, name), sizeof(((union bpf_attr *)0)->name)}
 
-static void json_string(const char *s)
-{
+static void json_string(const char *s) {
 	const unsigned char *p = (const unsigned char *)s;
 
 	putchar('"');
@@ -44,11 +42,11 @@ static void json_string(const char *s)
 			break;
 		}
 	}
+
 	putchar('"');
 }
 
-static void print_layout(void)
-{
+static void print_layout(void) {
 	static const struct field fields[] = {
 		F(map_type),
 		F(key_size),
@@ -92,19 +90,17 @@ static void print_layout(void)
 	for (i = 0; i < ARRAY_SIZE(fields); i++) {
 		printf("      {\"name\": ");
 		json_string(fields[i].name);
-		printf(", \"offset\": %zu, \"size\": %zu}%s\n",
-		       fields[i].offset, fields[i].size,
-		       i + 1 == ARRAY_SIZE(fields) ? "" : ",");
+		printf(", \"offset\": %zu, \"size\": %zu}%s\n", fields[i].offset, fields[i].size, i + 1 == ARRAY_SIZE(fields) ? "" : ",");
 	}
+
 	printf("    ]\n");
 	printf("  }\n");
 	printf("}\n");
 }
 
-static void print_attr(void)
-{
+static void print_attr(void) {
 	const size_t attr_size = offsetofend(union bpf_attr, excl_prog_hash_size);
-	const char *name = "golbpfgo-test";
+	const char *name       = "golbpfgo-test";
 	struct utsname uts;
 	union bpf_attr attr;
 	size_t i;
@@ -119,8 +115,9 @@ static void print_attr(void)
 	for (i = 0; i < sizeof(attr.map_name) - 1 && name[i]; i++)
 		attr.map_name[i] = name[i];
 	attr.map_name[i] = '\0';
-	attr.key_size = 4;
-	attr.value_size = 8;
+
+	attr.key_size    = 4;
+	attr.value_size  = 8;
 	attr.max_entries = 16;
 
 	printf("{\n");
@@ -156,12 +153,12 @@ static void print_attr(void)
 	printf("  \"hex\": \"");
 	for (i = 0; i < attr_size; i++)
 		printf("%02x", ((const unsigned char *)&attr)[i]);
+
 	printf("\"\n");
 	printf("}\n");
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s layout|attr\n", argv[0]);
 		return 2;

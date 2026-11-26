@@ -25,6 +25,7 @@ golbpfgo is a pure-Go port of libbpf, close to 1:1 in behavior and API shape. Th
 
 - No cgo. `CGO_ENABLED=0 go build ./...` must pass.
 - No `unsafe` import. UAPI structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go types; mmap data is read through `[]byte`. The single syscall address helper lives in `internal/sys` and is documented in [docs/DECISIONS.md](docs/DECISIONS.md).
+- C sources are formatted with `clang-format`; `make format-check` must pass. Go stays with `gofmt`.
 - No cilium/ebpf code, tests or generated files. Design ideas only, recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 - The libbpf checkout at `../libbpf` is read-only reference. Never modify it.
 - LGPL-2.1-only. Every Go file carries the SPDX header. Dependencies must be license-compatible; flag Apache-2.0 before adding one.
@@ -44,7 +45,7 @@ The operator authorized this merge loop for this repository on 2026-11-26. It is
 
 Never push directly to `main`. Never force-push a branch you do not own. One vertical slice per PR: code, tests, oracle diff, docs.
 
-Commit subjects use `libbpf:`, `bpf:`, `sys:`, `elf:`, `btf:`, `bpfgen:`, `docs:` or `ci:` followed by an imperative summary of at most 72 characters. The body says why, wrapped at 72. No markdown headings in a commit message.
+Commit subjects use `libbpf:`, `bpf:`, `sys:`, `elf:`, `btf:`, `bpfgen:`, `style:`, `docs:` or `ci:` followed by an imperative summary of at most 72 characters. The body says why, wrapped at 72. No markdown headings in a commit message.
 
 The PR body follows `.github/pull_request_template.md` and stays short: what changed and why, the libbpf C reference, the checks actually run, and any parity gap or deviation.
 
@@ -66,6 +67,7 @@ A ported symbol is done when:
 A phase is done when:
 
 - `CGO_ENABLED=0 go build ./...` passes;
+- `make format-check` passes for the C sources;
 - `go vet ./...` and the configured linters pass;
 - `CGO_ENABLED=0 go test ./...` passes;
 - integration tests pass on at least one kernel;

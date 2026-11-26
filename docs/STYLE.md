@@ -87,6 +87,20 @@ These rules are binding. The core is boring Go that mirrors boring C. If a revie
 - No commented-out code. No TODO without a phase or issue reference.
 - Code comments explain why; the C source explains what.
 
+## C formatting
+
+The C sources use the repository [`.clang-format`](../.clang-format), copied from the workspace style:
+
+- LLVM base, 4-column tabs, attached braces, no include sorting.
+- `ColumnLimit: 1000`, so lines are not wrapped automatically.
+- `AlignConsecutiveAssignments: true`.
+
+Run `make format` after editing a C file; CI runs `make format-check`.
+
+Put one blank line before and after a control block when another statement precedes or follows it. clang-format preserves those lines but does not add them.
+
+clang-format does not format Go. The Go files stay with gofmt, and the Go rules above still apply.
+
 ## License headers
 
 Every Go file starts with:

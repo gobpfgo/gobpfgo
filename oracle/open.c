@@ -9,8 +9,7 @@
 #include <string.h>
 #include <sys/utsname.h>
 
-static void json_string(const char *s)
-{
+static void json_string(const char *s) {
 	const unsigned char *p = (const unsigned char *)(s ? s : "");
 
 	putchar('"');
@@ -29,18 +28,17 @@ static void json_string(const char *s)
 			break;
 		}
 	}
+
 	putchar('"');
 }
 
-static const char *base_name(const char *path)
-{
+static const char *base_name(const char *path) {
 	const char *slash = strrchr(path, '/');
 
 	return slash ? slash + 1 : path;
 }
 
-static void print_map(const struct bpf_map *map)
-{
+static void print_map(const struct bpf_map *map) {
 	const char *pin = bpf_map__pin_path(map);
 
 	printf("    {\"name\": ");
@@ -57,8 +55,7 @@ static void print_map(const struct bpf_map *map)
 	printf("}");
 }
 
-static void print_program(const struct bpf_program *prog)
-{
+static void print_program(const struct bpf_program *prog) {
 	printf("    {\"name\": ");
 	json_string(bpf_program__name(prog));
 	printf(", \"type\": %u", (unsigned int)bpf_program__type(prog));
@@ -69,8 +66,7 @@ static void print_program(const struct bpf_program *prog)
 	printf("}");
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 	struct bpf_program *prog;
 	struct bpf_object *obj;
 	struct bpf_map *map;
@@ -82,6 +78,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: %s <object>\n", argv[0]);
 		return 2;
 	}
+
 	if (uname(&uts) != 0) {
 		perror("uname");
 		return 1;
@@ -96,8 +93,7 @@ int main(int argc, char **argv)
 
 	printf("{\n");
 	printf("  \"case\": \"open\",\n");
-	printf("  \"libbpf_version\": \"%d.%d.%d\",\n",
-	       LIBBPF_MAJOR_VERSION, LIBBPF_MINOR_VERSION, 0);
+	printf("  \"libbpf_version\": \"%d.%d.%d\",\n", LIBBPF_MAJOR_VERSION, LIBBPF_MINOR_VERSION, 0);
 	printf("  \"arch\": ");
 	json_string(uts.machine);
 	printf(",\n");
@@ -113,24 +109,24 @@ int main(int argc, char **argv)
 
 	printf("  \"maps\": [\n");
 	first = true;
-	for (map = bpf_object__next_map(obj, NULL); map;
-	     map = bpf_object__next_map(obj, map)) {
+	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map)) {
 		if (!first)
 			printf(",\n");
 		print_map(map);
 		first = false;
 	}
+
 	printf("\n  ],\n");
 
 	printf("  \"programs\": [\n");
 	first = true;
-	for (prog = bpf_object__next_program(obj, NULL); prog;
-	     prog = bpf_object__next_program(obj, prog)) {
+	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog)) {
 		if (!first)
 			printf(",\n");
 		print_program(prog);
 		first = false;
 	}
+
 	printf("\n  ]\n");
 	printf("}\n");
 
