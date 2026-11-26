@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/btf"
+	"github.com/gobpfgo/gobpfgo/internal/elf"
 	"golang.org/x/sys/unix"
 )
 
@@ -79,13 +80,102 @@ func TestCoreRelocLoad(t *testing.T) {
 	}
 
 	insns := append([]byte(nil), p.insns...)
-	if err := relocateCore(p, insns, ext, obj.btf, kernel); err != nil {
+	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{kernel}); err != nil {
 		t.Fatalf("relocateCore: %v", err)
 	}
 	insn := decodeBpfInsn(insns[relo.InsnOff:])
 	if uint64(insn.Off) != wantOff {
 		t.Fatalf("patched offset = %d, want %d", insn.Off, wantOff)
 	}
+
+	if err := BpfObjectLoad(obj); err != nil {
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+			t.Skipf("bpf() not permitted: %v", err)
+		}
+		t.Fatalf("BpfObjectLoad: %v", err)
+	}
+}
+
+func TestCoreModuleCandidate(t *testing.T) {
+	obj, err := BpfObjectOpenFile("../testdata/progs/core_module.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("BpfObjectOpenFile: %v", err)
+	}
+	defer BpfObjectClose(obj)
+
+	ext, err := btf.ParseExt(obj.elf.BTFExt, obj.btf, obj.elf.ByteOrder)
+	if err != nil {
+		t.Fatalf("ParseExt: %v", err)
+	}
+	p := BpfObjectFindProgramByName(obj, "handle_module")
+	if p == nil {
+		t.Fatal("program handle_module not found")
+	}
+	if len(ext.CoreRelos) != 1 || len(ext.CoreRelos[0].Relos) != 1 {
+		t.Fatalf("unexpected core relos: %+v", ext.CoreRelos)
+	}
+	relo := ext.CoreRelos[0].Relos[0]
+
+	emptyO, err := elf.Open("../testdata/progs/core_target.bpf.o")
+	if err != nil {
+		t.Fatalf("open empty target: %v", err)
+	}
+	empty, err := btf.Parse(emptyO.BTF, emptyO.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse empty target: %v", err)
+	}
+	moduleO, err := elf.Open("../testdata/progs/core_module_target.bpf.o")
+	if err != nil {
+		t.Fatalf("open module target: %v", err)
+	}
+	module, err := btf.Parse(moduleO.BTF, moduleO.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse module target: %v", err)
+	}
+
+	insns := append([]byte(nil), p.insns...)
+	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{empty, module}); err != nil {
+		t.Fatalf("relocateCore with module: %v", err)
+	}
+	if got := decodeBpfInsn(insns[relo.InsnOff:]); got.Imm != 1 {
+		t.Fatalf("module type exists = %d, want 1", got.Imm)
+	}
+
+	insns = append([]byte(nil), p.insns...)
+	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{empty}); err != nil {
+		t.Fatalf("relocateCore without module: %v", err)
+	}
+	if got := decodeBpfInsn(insns[relo.InsnOff:]); got.Imm != 0 {
+		t.Fatalf("missing type exists = %d, want 0", got.Imm)
+	}
+}
+
+func TestLoadKernelBTFs(t *testing.T) {
+	kernels, err := loadKernelBTFs()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("kernel BTF unavailable: %v", err)
+		}
+		t.Fatalf("loadKernelBTFs: %v", err)
+	}
+	if len(kernels) == 0 {
+		t.Fatal("no kernel BTF loaded")
+	}
+	base, err := loadKernelBTF()
+	if err != nil {
+		t.Fatalf("loadKernelBTF: %v", err)
+	}
+	if len(kernels) > 1 && len(kernels[1].Types) <= len(base.Types) {
+		t.Fatalf("module BTF types were not merged: %d <= %d", len(kernels[1].Types), len(base.Types))
+	}
+}
+
+func TestCoreMissingLoad(t *testing.T) {
+	obj, err := BpfObjectOpenFile("../testdata/progs/core_missing.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("BpfObjectOpenFile: %v", err)
+	}
+	defer BpfObjectClose(obj)
 
 	if err := BpfObjectLoad(obj); err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
