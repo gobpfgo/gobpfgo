@@ -28,6 +28,7 @@ type layoutFixture struct {
 	Arch         string       `json:"arch"`
 	Kernel       string       `json:"kernel"`
 	MapCreate    fixtureBlock `json:"map_create"`
+	MapElem      fixtureBlock `json:"map_elem"`
 	BtfLoad      fixtureBlock `json:"btf_load"`
 	ProgLoad     fixtureBlock `json:"prog_load"`
 	ObjInfo      fixtureBlock `json:"obj_info"`
@@ -86,6 +87,11 @@ func checkLayout(t *testing.T, name string, want fixtureBlock, gotSize int, got 
 func TestMapCreateLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "map_create", f.MapCreate, MapCreateAttrSize, mapCreateFieldLayout())
+}
+
+func TestMapElemLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "map_elem", f.MapElem, MapElemAttrSize, mapElemFieldLayout())
 }
 
 func TestBtfLoadLayout(t *testing.T) {

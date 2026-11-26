@@ -95,6 +95,40 @@ func (a *MapCreateAttr) Marshal() []byte {
 	return buf
 }
 
+// MapElemAttrSize is offsetofend(union bpf_attr, flags) on 64-bit Linux. It is
+// the size libbpf passes to the BPF_MAP_*_ELEM commands.
+const MapElemAttrSize = 32
+
+// Offsets inside union bpf_attr for the BPF_MAP_LOOKUP_ELEM command, from
+// offsetof(union bpf_attr, field) on 64-bit Linux.
+const (
+	mapElemOffMapFD = 0
+	mapElemOffKey   = 8
+	mapElemOffValue = 16
+	mapElemOffFlags = 24
+)
+
+// MapElemAttr is the BPF_MAP_LOOKUP_ELEM view of union bpf_attr. Key and Value
+// are the addresses of the caller's buffers; MapLookupElem fills them in.
+type MapElemAttr struct {
+	MapFD uint32
+	Key   uint64
+	Value uint64
+	Flags uint64
+}
+
+// Marshal returns the bytes passed to bpf(BPF_MAP_LOOKUP_ELEM, ...).
+func (a *MapElemAttr) Marshal() []byte {
+	buf := make([]byte, MapElemAttrSize)
+
+	binary.NativeEndian.PutUint32(buf[mapElemOffMapFD:], a.MapFD)
+	binary.NativeEndian.PutUint64(buf[mapElemOffKey:], a.Key)
+	binary.NativeEndian.PutUint64(buf[mapElemOffValue:], a.Value)
+	binary.NativeEndian.PutUint64(buf[mapElemOffFlags:], a.Flags)
+
+	return buf
+}
+
 type fieldLayout struct {
 	Name   string
 	Offset int
@@ -123,5 +157,16 @@ func mapCreateFieldLayout() []fieldLayout {
 		{"map_token_fd", mapCreateOffMapTokenFD, 4},
 		{"excl_prog_hash", mapCreateOffExclProgHash, 8},
 		{"excl_prog_hash_size", mapCreateOffExclProgHashSize, 4},
+	}
+}
+
+// mapElemFieldLayout is the Go claim about the C layout of the element
+// command fields. The layout test compares it with the oracle output.
+func mapElemFieldLayout() []fieldLayout {
+	return []fieldLayout{
+		{"map_fd", mapElemOffMapFD, 4},
+		{"key", mapElemOffKey, 8},
+		{"value", mapElemOffValue, 8},
+		{"flags", mapElemOffFlags, 8},
 	}
 }
