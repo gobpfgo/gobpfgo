@@ -26,7 +26,9 @@ The oracle is development-only. Tests consume checked-in JSON and never need C, 
 
 `layout` covers `BPF_MAP_CREATE`, `BPF_MAP_LOOKUP_ELEM`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open`, `load` and `attach` are implemented for the kprobe object and are linked against the pinned libbpf. `load` and `attach` have oracle fixtures generated with `sudo`.
 
-The BTF load test, the object load test and the kprobe attach test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts and the loaded info comparison run in CI. The root object load test compares the map info and the program info with `load.json`, including the 18 xlated instructions and 100 jited bytes. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test.
+The BTF load test, the object load test and the kprobe attach test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts and the loaded info comparison run in CI. The root object load test compares the map info and the program info with `load.json`. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test.
+
+The loaded xlated instruction count and jited length are verifier and JIT outputs. The test compares them exactly on the kernel that produced `load.json` and requires them to be nonzero on any other kernel; the map geometry, BTF ids and program type are compared everywhere. The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding.
 
 The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario compares that same object with libbpf.
 
@@ -41,6 +43,8 @@ The BTF parser has a structural test against the same object: type kinds, string
 | 2 | nightly or manual | VMs | kernels 5.10, 6.x and latest; amd64 and arm64 |
 
 Tier 0 is the bulk of the suite, because most parity is data in and data out. Tier 1 proves the syscalls. Tier 2 proves the old-kernel fallbacks.
+
+Tier 2 is running on Debian 11 with kernel `5.10.0-46-cloud-amd64` and on the 6.18 host. The full root and unprivileged suites pass on both. The arm64 half has not run.
 
 ## What gets compared
 

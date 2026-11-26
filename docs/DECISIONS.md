@@ -56,6 +56,10 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The project, GitHub organization, repository, module path and provenance tag are `gobpfgo`; this supersedes the initial `golbpfgo` name. D-001 and D-008 are amended to the current name. The core package stays `libbpf`, because that names the C library the port follows, not this project.
 
+## D-014: The test object targets the 5.10 BPF ISA
+
+2026-11-26. The kprobe test object is compiled with `-mcpu=v1` so the checked-in fixture loads on the 5.10 floor. The default clang target emits the `BPF_ATOMIC` fetch-add encoding, which 5.10 rejects as reserved fields. The load test compares the verifier and JIT lengths exactly only on the kernel that produced the fixture and requires them to be nonzero elsewhere.
+
 ## Open decisions
 
 None. The `reflect` address helper is accepted in D-003.
