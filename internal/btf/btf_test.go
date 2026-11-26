@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 
 package btf
 
@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/golbpfgo/golbpfgo/internal/elf"
+	"github.com/gobpfgo/gobpfgo/internal/elf"
 )
 
 func TestParseKprobeBTF(t *testing.T) {

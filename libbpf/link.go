@@ -219,11 +219,11 @@ func (e *kprobeEvent) remove() error {
 }
 
 // kprobeEventName returns a unique, sanitized event name. libbpf uses the same
-// shape, libbpf_<pid>_<seq>_<function>_0x<offset>; the golbpfgo prefix keeps
+// shape, libbpf_<pid>_<seq>_<function>_0x<offset>; the gobpfgo prefix keeps
 // the events apart.
 func kprobeEventName(funcName string) string {
 	seq := atomic.AddUint64(&kprobeAttachSeq, 1)
-	name := fmt.Sprintf("golbpfgo_%d_%d_%s", os.Getpid(), seq, funcName)
+	name := fmt.Sprintf("gobpfgo_%d_%d_%s", os.Getpid(), seq, funcName)
 	if len(name) > maxEventNameLen-1 {
 		name = name[:maxEventNameLen-1]
 	}

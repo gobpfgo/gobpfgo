@@ -9,17 +9,17 @@ Phase 0 done: syscalls, ELF, BTF, object open and the test harness.
 Done:
 
 - Bootstrap merged: contract, CI and PR template in `main`.
-- [`#2`](https://github.com/golbpfgo/golbpfgo/pull/2) merged: `BPF_MAP_CREATE` layout and attribute oracle, `internal/sys`, `libbpf.BpfMapCreate`.
-- [`#3`](https://github.com/golbpfgo/golbpfgo/pull/3) merged: the agent may merge its own green PRs and continue.
-- [`#4`](https://github.com/golbpfgo/golbpfgo/pull/4) merged: the ELF reader and the kprobe test object.
-- [`#5`](https://github.com/golbpfgo/golbpfgo/pull/5) merged: the BTF wire parser.
-- [`#6`](https://github.com/golbpfgo/golbpfgo/pull/6) merged: object open and the open oracle.
-- [`#7`](https://github.com/golbpfgo/golbpfgo/pull/7) merged: the kernel floor is 5.10.
-- [`#8`](https://github.com/golbpfgo/golbpfgo/pull/8) merged: the load oracle, generated under `sudo`.
-- [`#9`](https://github.com/golbpfgo/golbpfgo/pull/9) merged: the C clang-format rules and the CI format gate.
-- [`#10`](https://github.com/golbpfgo/golbpfgo/pull/10) merged: provenance metadata in file headers and real godocs.
-- [`#11`](https://github.com/golbpfgo/golbpfgo/pull/11) merged: the BTF load path and DATASEC fixup.
-- [`#12`](https://github.com/golbpfgo/golbpfgo/pull/12) merged: the object load path (BTF, maps, programs).
+- [`#2`](https://github.com/gobpfgo/gobpfgo/pull/2) merged: `BPF_MAP_CREATE` layout and attribute oracle, `internal/sys`, `libbpf.BpfMapCreate`.
+- [`#3`](https://github.com/gobpfgo/gobpfgo/pull/3) merged: the agent may merge its own green PRs and continue.
+- [`#4`](https://github.com/gobpfgo/gobpfgo/pull/4) merged: the ELF reader and the kprobe test object.
+- [`#5`](https://github.com/gobpfgo/gobpfgo/pull/5) merged: the BTF wire parser.
+- [`#6`](https://github.com/gobpfgo/gobpfgo/pull/6) merged: object open and the open oracle.
+- [`#7`](https://github.com/gobpfgo/gobpfgo/pull/7) merged: the kernel floor is 5.10.
+- [`#8`](https://github.com/gobpfgo/gobpfgo/pull/8) merged: the load oracle, generated under `sudo`.
+- [`#9`](https://github.com/gobpfgo/gobpfgo/pull/9) merged: the C clang-format rules and the CI format gate.
+- [`#10`](https://github.com/gobpfgo/gobpfgo/pull/10) merged: provenance metadata in file headers and real godocs.
+- [`#11`](https://github.com/gobpfgo/gobpfgo/pull/11) merged: the BTF load path and DATASEC fixup.
+- [`#12`](https://github.com/gobpfgo/gobpfgo/pull/12) merged: the object load path (BTF, maps, programs).
 - The loaded map and program info matches `load.json`: map `counts`, program `handle_open`, 18 xlated instructions and 100 jited bytes.
 - The oracle is now one binary with `layout`, `attr`, `open` and `load` subcommands. A small JSON writer owns the formatting; the layout, attr and open fixtures are unchanged and the load ids were regenerated.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.

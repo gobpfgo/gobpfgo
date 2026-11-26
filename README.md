@@ -1,8 +1,8 @@
-# golbpfgo
+# gobpfgo
 
 <!-- anchors-ok: BSD-2 LGPL-2 | SPDX identifiers, not citations -->
 
-Repository: [golbpfgo/golbpfgo](https://github.com/golbpfgo/golbpfgo).
+Repository: [gobpfgo/gobpfgo](https://github.com/gobpfgo/gobpfgo).
 
 A pure-Go port of libbpf, close to 1:1 in behavior and API shape, with no cgo and no unsafe.
 
@@ -13,7 +13,7 @@ Status: contract phase. The core `libbpf` package is built first; the `bpf` obje
 - C ABI or C consumers.
 - cgo at any point.
 - The `unsafe` package.
-- BPF program authoring. BPF programs stay in C and are compiled by clang; golbpfgo loads, relocates and attaches them.
+- BPF program authoring. BPF programs stay in C and are compiled by clang; gobpfgo loads, relocates and attaches them.
 - Windows and non-Linux kernels.
 
 ## Layout

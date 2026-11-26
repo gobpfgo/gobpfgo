@@ -1,6 +1,6 @@
 # Testing against libbpf
 
-The port is correct only when it does what libbpf does. Source similarity is not enough. Every observable behavior gets an oracle test: the same scenario runs through the C library and through golbpfgo, and the results are compared.
+The port is correct only when it does what libbpf does. Source similarity is not enough. Every observable behavior gets an oracle test: the same scenario runs through the C library and through gobpfgo, and the results are compared.
 
 ## The oracle
 

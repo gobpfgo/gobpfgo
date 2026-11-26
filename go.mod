@@ -1,4 +1,4 @@
-module github.com/golbpfgo/golbpfgo
+module github.com/gobpfgo/gobpfgo
 
 go 1.27.0
 

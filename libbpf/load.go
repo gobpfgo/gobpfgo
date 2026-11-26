@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/golbpfgo/golbpfgo/internal/elf"
-	"github.com/golbpfgo/golbpfgo/internal/sys"
+	"github.com/gobpfgo/gobpfgo/internal/elf"
+	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
 
