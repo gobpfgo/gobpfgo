@@ -13,7 +13,9 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/raw_tp.bpf.c testdata/progs/cookie.bpf.c \
 	testdata/progs/kprobe_multi.bpf.c testdata/progs/lsm.bpf.c \
 	testdata/progs/dump.bpf.c testdata/progs/ringbuf.bpf.c \
-	testdata/progs/perfbuf.bpf.c
+	testdata/progs/perfbuf.bpf.c testdata/progs/link_a.bpf.c \
+	testdata/progs/link_b.bpf.c testdata/progs/link_text_a.bpf.c \
+	testdata/progs/link_text_b.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h
 
 .PHONY: format format-check

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/linker.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: linker_load_obj_file, is_dwarf_sec_name, is_ignored_sec, linker_sanity_check_elf, linker_sanity_check_elf_symtab, linker_sanity_check_elf_relos, linker_sanity_check_btf_ext, find_src_sec_by_name, find_sym_by_name, linker_fixup_btf, btf_is_non_static, find_glob_sym_btf
+// libbpf-symbols: linker_load_obj_file, is_dwarf_sec_name, is_ignored_sec, linker_sanity_check_elf, linker_sanity_check_elf_symtab, linker_sanity_check_elf_relos, linker_sanity_check_btf, linker_sanity_check_btf_ext, check_btf_type_id, check_btf_str_off, find_src_sec_by_name, find_sym_by_name, linker_fixup_btf, btf_is_non_static, find_glob_sym_btf
 
 package libbpf
 
@@ -40,18 +40,25 @@ type linkerInput struct {
 	btfIdx    int
 	btfExtIdx int
 	btf       *btf.Spec
-	btfExt    []byte
+	btfExt    *btf.ExtRaw
 
 	// symMap maps an input symbol index to its output index. Symbols in
 	// skipped sections map to 0.
 	symMap []uint32
+	// btfTypeMap maps an input BTF type ID to its output ID. Skipped VARs
+	// and FUNCs and every DATASEC map to 0.
+	btfTypeMap []uint32
 }
 
 // linkerInputSec records how an input section reaches the output. dst is the
-// output ELF section index, or 0 when the section has none.
+// output ELF section index, or 0 when the section has none, and dstOff is the
+// offset of the section's contents inside it. btfTypeID is the section's
+// DATASEC, or 0.
 type linkerInputSec struct {
-	skipped bool
-	dst     int
+	skipped   bool
+	dst       int
+	dstOff    uint64
+	btfTypeID uint32
 }
 
 // linkerLoadObj parses data as a relocatable BPF object, classifies its
@@ -296,8 +303,8 @@ func decodeRelos(data []byte) []elfRel {
 	return relos
 }
 
-// parseBTF parses the .BTF and .BTF.ext sections. A .BTF.ext without .BTF is
-// invalid.
+// parseBTF parses and checks the .BTF and .BTF.ext sections. A .BTF.ext
+// without .BTF is invalid.
 func (in *linkerInput) parseBTF() error {
 	if in.btfIdx != 0 {
 		spec, err := btf.Parse(in.elf.Sections[in.btfIdx].Data, in.elf.ByteOrder)
@@ -305,6 +312,9 @@ func (in *linkerInput) parseBTF() error {
 			return linkerErrorf(unix.EINVAL, "failed to parse .BTF from %s: %v", in.name, err)
 		}
 		in.btf = spec
+		if err := in.sanityCheckBTF(); err != nil {
+			return err
+		}
 	}
 	if in.btfExtIdx == 0 {
 		return nil
@@ -313,11 +323,89 @@ func (in *linkerInput) parseBTF() error {
 		return linkerErrorf(unix.EINVAL, ".BTF.ext without .BTF in %s", in.name)
 	}
 
-	data := in.elf.Sections[in.btfExtIdx].Data
-	if _, err := btf.ParseExt(data, in.btf, in.elf.ByteOrder); err != nil {
+	ext, err := btf.ParseExtRaw(in.elf.Sections[in.btfExtIdx].Data, in.btf, in.elf.ByteOrder)
+	if err != nil {
 		return linkerErrorf(unix.EINVAL, "failed to parse .BTF.ext from '%s': %v", in.name, err)
 	}
-	in.btfExt = data
+	in.btfExt = ext
+	return in.sanityCheckBTFExt()
+}
+
+// sanityCheckBTF rejects a type that refers to a type ID past the end of the
+// table. Parse already checked the string offsets.
+func (in *linkerInput) sanityCheckBTF() error {
+	n := uint32(len(in.btf.Types))
+	for i := 1; i < len(in.btf.Types); i++ {
+		err := in.btf.Types[i].VisitTypeIDs(func(id *uint32) error {
+			if *id >= n {
+				return linkerErrorf(unix.EINVAL, "BTF type #%d in %s refers to missing type #%d", i, in.name, *id)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Field offsets inside the .BTF.ext records: every record starts with the
+// instruction offset; function and CO-RE records then hold a type ID, line
+// records the file and line string offsets, and CO-RE records the access
+// string offset after the type ID.
+const (
+	extRecTypeID    = 4
+	extRecFileName  = 4
+	extRecLine      = 8
+	extRecAccessStr = 8
+)
+
+// sanityCheckBTFExt checks that every .BTF.ext type ID is in the BTF type
+// table and every string offset resolves.
+func (in *linkerInput) sanityCheckBTFExt() error {
+	n := uint32(len(in.btf.Types))
+	checkType := func(rec []byte, off int) error {
+		if id := binary.LittleEndian.Uint32(rec[off:]); id >= n {
+			return linkerErrorf(unix.EINVAL, ".BTF.ext in %s refers to missing type #%d", in.name, id)
+		}
+		return nil
+	}
+	checkStr := func(rec []byte, off int) error {
+		if _, err := in.btf.String(binary.LittleEndian.Uint32(rec[off:])); err != nil {
+			return linkerErrorf(unix.EINVAL, ".BTF.ext in %s: %v", in.name, err)
+		}
+		return nil
+	}
+
+	err := forEachExtRecord(in.btfExt.FuncInfo, func(rec []byte) error { return checkType(rec, extRecTypeID) })
+	if err == nil {
+		err = forEachExtRecord(in.btfExt.LineInfo, func(rec []byte) error {
+			if err := checkStr(rec, extRecFileName); err != nil {
+				return err
+			}
+			return checkStr(rec, extRecLine)
+		})
+	}
+	if err == nil {
+		err = forEachExtRecord(in.btfExt.CoreRelo, func(rec []byte) error {
+			if err := checkType(rec, extRecTypeID); err != nil {
+				return err
+			}
+			return checkStr(rec, extRecAccessStr)
+		})
+	}
+	return err
+}
+
+// forEachExtRecord calls fn with each record of each block.
+func forEachExtRecord(blocks []btf.ExtRecords, fn func(rec []byte) error) error {
+	for _, b := range blocks {
+		for off := 0; off+b.RecSize <= len(b.Records); off += b.RecSize {
+			if err := fn(b.Records[off : off+b.RecSize]); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -344,9 +432,10 @@ func (in *linkerInput) findSymByName(secIdx int, typ elf.SymType, name string) *
 }
 
 // fixupBTF sets each DATASEC size to its ELF section size and each allocated
-// global variable's offset to its ELF symbol value. DATASECs with no ELF
-// section, such as .kconfig and .ksyms, keep their size; .extern is left
-// alone.
+// global variable's offset to its ELF symbol value, and records each
+// section's DATASEC. .extern is left alone. Any other DATASEC without an ELF
+// section, such as .kconfig or .ksyms, holds externs, which this linker does
+// not resolve yet.
 func (in *linkerInput) fixupBTF() error {
 	if in.btf == nil {
 		return nil
@@ -362,10 +451,13 @@ func (in *linkerInput) fixupBTF() error {
 		if secIdx == 0 && t.Name == btfExternSec {
 			continue
 		}
-		if secIdx != 0 {
-			if err := in.btf.SetDatasecSize(t.ID, uint32(in.elf.Sections[secIdx].Size)); err != nil {
-				return linkerErrorf(unix.EINVAL, "%v", err)
-			}
+		if secIdx == 0 {
+			return linkerErrorf(unix.EOPNOTSUPP, "extern section '%s' in %s: extern resolution is not supported yet", t.Name, in.name)
+		}
+
+		in.secs[secIdx].btfTypeID = t.ID
+		if err := in.btf.SetDatasecSize(t.ID, uint32(in.elf.Sections[secIdx].Size)); err != nil {
+			return linkerErrorf(unix.EINVAL, "%v", err)
 		}
 		if err := in.fixupDatasecVars(t, secIdx); err != nil {
 			return err

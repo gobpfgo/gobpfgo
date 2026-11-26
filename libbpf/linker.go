@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/linker.c
-// libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_linker__new, bpf_linker__new_fd, bpf_linker__add_file, bpf_linker__add_fd, bpf_linker__add_buf, bpf_linker__finalize, bpf_linker__free, init_output_elf, add_dst_sec, add_new_sym, bpf_linker_add_file, init_sec, linker_append_sec_data, linker_append_elf_syms, linker_append_elf_sym, linker_append_elf_relos, finalize_btf, emit_elf_data_sec, btf_new_empty, btf_get_raw_data
+// libbpf-symbols: bpf_linker__new, bpf_linker__new_fd, bpf_linker__add_file, bpf_linker__add_fd, bpf_linker__add_buf, bpf_linker__finalize, bpf_linker__free, init_output_elf, add_new_sym, bpf_linker_add_file
 
 package libbpf
 
 import (
 	"debug/elf"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
 
-	"github.com/gobpfgo/gobpfgo/internal/btf"
 	objelf "github.com/gobpfgo/gobpfgo/internal/elf"
 	"golang.org/x/sys/unix"
 )
@@ -29,13 +26,20 @@ type BpfLinkerFileOpts struct{}
 
 // BpfLinker statically links relocatable BPF objects into one output object.
 //
-// This version links exactly one input object. The output keeps the program,
-// data, map and license sections with their relocations, plus .BTF and
-// .BTF.ext, and rebuilds the symbol and string tables. DWARF, the input
-// string tables, .llvm_addrsig, an empty .text and the .BTF and .BTF.ext
-// relocations are dropped. Adding a second object returns EOPNOTSUPP.
+// Objects are merged in the order they are added. Sections with the same name
+// are concatenated at their alignment, and symbol values, relocation offsets,
+// BTF DATASEC entries and .BTF.ext records move with them. Global symbols are
+// resolved by name: a strong definition replaces a weak one, two strong
+// definitions are an error, and the first of several weak definitions wins.
+// Local symbols are kept. The input BTF type tables are concatenated with
+// their type IDs remapped; identical types are not deduplicated.
 //
-// Create a linker with BpfLinkerNew or BpfLinkerNewFD, add the object, write
+// Extern symbols, and the .kconfig and .ksyms sections that hold them, are
+// not resolved yet: an object with an extern is rejected with EOPNOTSUPP.
+// DWARF, the input string tables, .llvm_addrsig, an empty .text and the .BTF
+// and .BTF.ext relocations are dropped.
+//
+// Create a linker with BpfLinkerNew or BpfLinkerNewFD, add the objects, write
 // the output with BpfLinkerFinalize and release the linker with
 // BpfLinkerFree. A linker is not safe for concurrent use.
 type BpfLinker struct {
@@ -43,23 +47,28 @@ type BpfLinker struct {
 	fd        int
 	fdIsOwned bool
 	writable  bool
-	inputs    int
+	inputs    []linkerSource
 	out       *linkerOutput
 }
 
-// linkerOutput is the object being built. elf.Sections[i] has ELF index i+1
-// and elf.Symbols[i] has symbol index i+1. secSyms[i] is the STT_SECTION
-// symbol index of section i+1, or 0.
-type linkerOutput struct {
-	elf     objelf.Output
-	secSyms []uint32
-	btf     *btf.Spec
-	btfExt  []byte
+// linkerSource is an object added to the linker: a name for errors and a copy
+// of its bytes.
+type linkerSource struct {
+	name string
+	data []byte
 }
 
-// btfHdrLen is sizeof(struct btf_header) in the pinned libbpf, which ends
-// with the kind layout offset and length.
-const btfHdrLen = 32
+// linkerOutput is the object being built from the inputs. secs[i] is the
+// section with ELF index i+1, starting with .strtab and .symtab, and syms[i]
+// is the symbol with index i+1. globSyms holds the global and weak symbols
+// by name; globIdx indexes it.
+type linkerOutput struct {
+	secs     []*linkerSec
+	syms     []objelf.OutputSymbol
+	globSyms []linkerGlobSym
+	globIdx  map[string]int
+	btf      *linkerBTF
+}
 
 // BpfLinkerNew creates or truncates filename with mode 0644 and returns a
 // linker that writes the linked object to it. The linker owns the file
@@ -93,11 +102,13 @@ func newLinker(filename string, fd int, owned bool) *BpfLinker {
 	}
 }
 
-// BpfLinkerAddFile reads the relocatable BPF object at filename and adds it to
-// the output. It returns EINVAL after BpfLinkerFinalize or BpfLinkerFree, the
-// open or read errno, EINVAL or EOPNOTSUPP for an object the linker cannot
-// use, and EOPNOTSUPP when an object was already added. A failed add leaves
-// the linker unchanged.
+// BpfLinkerAddFile reads the relocatable BPF object at filename and merges it
+// into the output. It returns EINVAL after BpfLinkerFinalize or
+// BpfLinkerFree, the open or read errno, EINVAL for a malformed object or a
+// conflict with the objects already added, such as two strong definitions of
+// one symbol or two sections of one name with different types or flags, and
+// EOPNOTSUPP for an object the linker cannot handle yet, such as one with an
+// extern symbol. A failed add leaves the linker unchanged.
 func BpfLinkerAddFile(l *BpfLinker, filename string, opts *BpfLinkerFileOpts) error {
 	const op = "bpf_linker__add_file"
 	if err := l.canAdd(op); err != nil {
@@ -117,7 +128,7 @@ func BpfLinkerAddFile(l *BpfLinker, filename string, opts *BpfLinkerFileOpts) er
 	return l.add(op, filename, data)
 }
 
-// BpfLinkerAddFD adds the relocatable BPF object read from fd, starting at
+// BpfLinkerAddFD merges the relocatable BPF object read from fd, starting at
 // offset 0. The caller keeps ownership of fd. Errors are those of
 // BpfLinkerAddFile, plus EINVAL for a negative fd.
 func BpfLinkerAddFD(l *BpfLinker, fd int, opts *BpfLinkerFileOpts) error {
@@ -137,8 +148,9 @@ func BpfLinkerAddFD(l *BpfLinker, fd int, opts *BpfLinkerFileOpts) error {
 	return l.add(op, name, data)
 }
 
-// BpfLinkerAddBuf adds the relocatable BPF object in buf. buf is only read
-// during the call. Errors are those of BpfLinkerAddFile.
+// BpfLinkerAddBuf merges the relocatable BPF object in buf. The linker keeps
+// its own copy, so buf may be reused after the call. Errors are those of
+// BpfLinkerAddFile.
 func BpfLinkerAddBuf(l *BpfLinker, buf []byte, opts *BpfLinkerFileOpts) error {
 	const op = "bpf_linker__add_buf"
 	if err := l.canAdd(op); err != nil {
@@ -149,14 +161,15 @@ func BpfLinkerAddBuf(l *BpfLinker, buf []byte, opts *BpfLinkerFileOpts) error {
 
 // BpfLinkerFinalize writes the linked object and closes the output
 // descriptor if the linker owns it. Further adds and finalizes return EINVAL.
-// A layout or write failure returns EINVAL with the reason in Log.
+// A layout or write failure returns EINVAL with the reason in Log; the linker
+// stays usable, so the call can be retried.
 func BpfLinkerFinalize(l *BpfLinker) error {
 	const op = "bpf_linker__finalize"
 	if l == nil || !l.writable {
 		return &Error{Op: op, Errno: unix.EINVAL}
 	}
 
-	data, err := l.out.marshal()
+	data, err := l.out.finalize()
 	if err != nil {
 		return linkerFail(op, l.filename, err)
 	}
@@ -185,35 +198,40 @@ func BpfLinkerFree(l *BpfLinker) {
 	}
 	l.fd = -1
 	l.writable = false
+	l.inputs = nil
 	l.out = nil
 }
 
-// canAdd rejects an add after finalize or free, and a second input object.
+// canAdd rejects an add after finalize or free.
 func (l *BpfLinker) canAdd(op string) error {
 	if l == nil || !l.writable {
 		return &Error{Op: op, Errno: unix.EINVAL}
 	}
-	if l.inputs > 0 {
-		return &Error{Op: op, Path: l.filename, Errno: unix.EOPNOTSUPP,
-			Log: "the linker takes one input object; linking several objects is not supported yet"}
-	}
 	return nil
 }
 
-// add loads one object and appends its sections, symbols and relocations to
-// a fresh output, which replaces the linker's output only on success.
+// add merges one more object. The C library merges into its output in place
+// and leaves it half-updated when an object fails. To keep a failed add from
+// changing the linker, the output is rebuilt from every object added so far
+// plus the new one, and replaces the old output only on success. The earlier
+// objects linked before and linking is deterministic, so only the new object
+// can fail.
 func (l *BpfLinker) add(op, name string, data []byte) error {
-	in, err := linkerLoadObj(name, data)
-	if err != nil {
-		return linkerFail(op, name, err)
-	}
+	sources := append(slices.Clone(l.inputs), linkerSource{name: name, data: slices.Clone(data)})
 
 	out := newLinkerOutput()
-	if err := out.addObject(in); err != nil {
-		return linkerFail(op, name, err)
+	for _, src := range sources {
+		in, err := linkerLoadObj(src.name, src.data)
+		if err == nil {
+			err = out.addObject(in)
+		}
+		if err != nil {
+			return linkerFail(op, src.name, err)
+		}
 	}
+
+	l.inputs = sources
 	l.out = out
-	l.inputs++
 	return nil
 }
 
@@ -235,282 +253,64 @@ func linkerFail(op, path string, err error) error {
 }
 
 // newLinkerOutput starts the output with .strtab, which also holds the
-// section names, and .symtab with its null symbol. Like libbpf, .symtab
-// keeps sh_info at 0 instead of one past the last local symbol.
+// section names, and .symtab, an empty BTF and no symbols besides the null
+// one. Like libbpf, .symtab keeps sh_info at 0 instead of one past the last
+// local symbol.
 func newLinkerOutput() *linkerOutput {
-	out := &linkerOutput{}
-	out.addSec(objelf.OutputSection{Name: ".strtab", Type: elf.SHT_STRTAB, Flags: elf.SHF_STRINGS, Addralign: 1})
-	out.addSec(objelf.OutputSection{Name: ".symtab", Type: elf.SHT_SYMTAB, Addralign: 8})
+	out := &linkerOutput{globIdx: make(map[string]int), btf: newLinkerBTF()}
+	out.addSec(&linkerSec{name: ".strtab", typ: elf.SHT_STRTAB, flags: elf.SHF_STRINGS, addralign: 1})
+	out.addSec(&linkerSec{name: ".symtab", typ: elf.SHT_SYMTAB, addralign: 8})
 	return out
 }
 
-// addSec appends s and returns its ELF index.
-func (out *linkerOutput) addSec(s objelf.OutputSection) int {
-	out.elf.Sections = append(out.elf.Sections, s)
-	out.secSyms = append(out.secSyms, 0)
-	return len(out.elf.Sections)
-}
-
-// findSec returns the ELF index of the output section named name, or 0.
-func (out *linkerOutput) findSec(name string) int {
-	for i := range out.elf.Sections {
-		if out.elf.Sections[i].Name == name {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// addObject appends the data sections, then the symbols, then the relocation
-// sections of in, and keeps its fixed BTF for finalize.
+// addObject runs the merge steps for one loaded object in libbpf's order:
+// sections, symbols, relocations, BTF, then .BTF.ext.
 func (out *linkerOutput) addObject(in *linkerInput) error {
-	if err := out.appendSecData(in); err != nil {
-		return err
+	steps := []func(*linkerInput) error{
+		out.appendSecData,
+		out.appendSyms,
+		out.appendRelos,
+		out.appendBTF,
+		out.appendBTFExt,
 	}
-	if err := out.appendSyms(in); err != nil {
-		return err
-	}
-	if err := out.appendRelos(in); err != nil {
-		return err
-	}
-	out.btf = in.btf
-	out.btfExt = in.btfExt
-	return nil
-}
-
-// initSec adds an output section with the name, type, flags, alignment,
-// entry size and contents of s, and returns its ELF index. The first object
-// starts every output section, so the contents land at offset 0 and the
-// alignment is at least 1. A section name that is already in the output
-// needs section merging, which is not supported yet.
-func (out *linkerOutput) initSec(s *objelf.Section) (int, error) {
-	if out.findSec(s.Name) != 0 {
-		return 0, linkerErrorf(unix.EOPNOTSUPP, "section %s appears more than once; merging sections is not supported yet", s.Name)
-	}
-
-	sec := objelf.OutputSection{
-		Name:      s.Name,
-		Type:      s.Type,
-		Flags:     s.Flags,
-		Addralign: max(s.Addralign, 1),
-		Entsize:   s.Entsize,
-	}
-	switch s.Type {
-	case elf.SHT_PROGBITS:
-		sec.Data = s.Data
-	case elf.SHT_NOBITS:
-		sec.Size = s.Size
-	}
-	return out.addSec(sec), nil
-}
-
-// appendSecData copies the code and data sections that are not skipped.
-func (out *linkerOutput) appendSecData(in *linkerInput) error {
-	for i := 1; i < len(in.elf.Sections); i++ {
-		s := &in.elf.Sections[i]
-		if in.secs[i].skipped || (s.Type != elf.SHT_PROGBITS && s.Type != elf.SHT_NOBITS) {
-			continue
-		}
-
-		dst, err := out.initSec(s)
-		if err != nil {
-			return err
-		}
-		in.secs[i].dst = dst
-	}
-	return nil
-}
-
-// appendSyms appends the input symbols in order and records their output
-// indices.
-func (out *linkerOutput) appendSyms(in *linkerInput) error {
-	in.symMap = make([]uint32, len(in.elf.Symbols))
-	for i := 1; i < len(in.elf.Symbols); i++ {
-		if err := out.appendSym(in, i); err != nil {
+	for _, step := range steps {
+		if err := step(in); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// appendSym appends input symbol i. A symbol in a skipped section is dropped,
-// and an output section keeps one STT_SECTION symbol. Global, weak and extern
-// symbols need a BTF description, except in .jumptables. Resolving globals
-// against other objects belongs to multi-object linking.
-func (out *linkerOutput) appendSym(in *linkerInput, i int) error {
-	sym := &in.elf.Symbols[i]
-	inSection := sym.SectionIndex != elf.SHN_UNDEF && sym.SectionIndex < elf.SHN_LORESERVE
-	needBTF := sym.Bind != elf.STB_LOCAL
-	dst := 0
-
-	if sym.SectionIndex == elf.SHN_UNDEF && in.btf == nil {
-		return linkerErrorf(unix.ENOTSUP, "externs without BTF info are not supported")
-	}
-	if inSection {
-		src := in.secs[sym.SectionIndex]
-		if src.skipped {
-			return nil
-		}
-		dst = src.dst
-		if sym.Type == elf.STT_SECTION && dst != 0 && out.secSyms[dst-1] != 0 {
-			in.symMap[i] = out.secSyms[dst-1]
-			return nil
-		}
-		if in.elf.Sections[sym.SectionIndex].Name == jumptablesSec {
-			needBTF = false
-		}
-	}
-	if needBTF {
-		if _, _, err := in.findGlobSymBTF(sym.Name); err != nil {
-			return err
-		}
-	}
-
-	o := objelf.OutputSymbol{
-		Name:    sym.Name,
-		Info:    sym.Info,
-		Other:   sym.Other,
-		Section: sym.SectionIndex,
-		Value:   sym.Value,
-		Size:    sym.Size,
-	}
-	if inSection {
-		o.Section = elf.SectionIndex(dst)
-	}
-	if sym.Type == elf.STT_SECTION && dst != 0 {
-		o.Value = 0
-	}
-
-	out.elf.Symbols = append(out.elf.Symbols, o)
-	in.symMap[i] = uint32(len(out.elf.Symbols))
-	if sym.Type == elf.STT_SECTION && dst != 0 {
-		out.secSyms[dst-1] = in.symMap[i]
-	}
-	return nil
+// addSym appends s and returns its symbol index.
+func (out *linkerOutput) addSym(s objelf.OutputSymbol) uint32 {
+	out.syms = append(out.syms, s)
+	return uint32(len(out.syms))
 }
 
-// appendRelos copies the relocation sections whose target is kept, pointing
-// them at the output target section and the output symbols.
-func (out *linkerOutput) appendRelos(in *linkerInput) error {
-	for i := 1; i < len(in.elf.Sections); i++ {
-		s := &in.elf.Sections[i]
-		if in.secs[i].skipped || s.Type != elf.SHT_REL || in.secs[s.Info].skipped {
-			continue
-		}
-
-		relos, err := remapRelos(in, s)
-		if err != nil {
-			return err
-		}
-		dst, err := out.initSec(s)
-		if err != nil {
-			return err
-		}
-		in.secs[i].dst = dst
-
-		sec := &out.elf.Sections[dst-1]
-		sec.Info = uint32(in.secs[s.Info].dst)
-		sec.Relocs = relos
-	}
-	return nil
+// sym returns the output symbol with index idx.
+func (out *linkerOutput) sym(idx uint32) *objelf.OutputSymbol {
+	return &out.syms[idx-1]
 }
 
-// remapRelos rewrites the symbol of each relocation in s to its output index.
-// A relocation against a section symbol is allowed in code, and in data only
-// as an R_BPF_64_ABS64 pointer to code. libbpf also adds the referenced
-// section's output offset to the instruction or the stored pointer; for the
-// first object that offset is 0.
-func remapRelos(in *linkerInput, s *objelf.Section) ([]objelf.OutputReloc, error) {
-	target := &in.elf.Sections[s.Info]
-	relos := decodeRelos(s.Data)
-	res := make([]objelf.OutputReloc, len(relos))
-
-	for j, r := range relos {
-		sym := &in.elf.Symbols[r.sym]
-		if sym.Type == elf.STT_SECTION && target.Flags&elf.SHF_EXECINSTR == 0 && !isCodePointer(in, sym, r) {
-			return nil, linkerErrorf(unix.EINVAL, "relocation against STT_SECTION in non-exec section is not supported")
-		}
-		res[j] = objelf.OutputReloc{Offset: r.offset, Symbol: in.symMap[r.sym], Type: r.typ}
+// finalize serializes the output with its .BTF and .BTF.ext sections. It does
+// not change the output, so a failed finalize can be retried.
+func (out *linkerOutput) finalize() ([]byte, error) {
+	btfSecs, err := out.finalizeBTF()
+	if err != nil {
+		return nil, err
 	}
-	return res, nil
-}
 
-// isCodePointer reports whether r stores the address of code in data: an
-// R_BPF_64_ABS64 against the section symbol of an executable section.
-func isCodePointer(in *linkerInput, sym *objelf.Symbol, r elfRel) bool {
-	if r.typ != objelf.R_BPF_64_ABS64 || int(sym.SectionIndex) >= len(in.elf.Sections) {
-		return false
+	final := objelf.Output{Symbols: out.syms}
+	for _, s := range out.secs {
+		final.Sections = append(final.Sections, s.output())
 	}
-	return in.elf.Sections[sym.SectionIndex].Flags&elf.SHF_EXECINSTR != 0
-}
+	final.Sections = append(final.Sections, btfSecs...)
 
-// marshal serializes the output with its .BTF and .BTF.ext sections. The
-// linker's own section list is not modified, so a failed finalize can be
-// retried.
-func (out *linkerOutput) marshal() ([]byte, error) {
-	final := objelf.Output{
-		Sections: slices.Concat(out.elf.Sections, out.btfSections()),
-		Symbols:  out.elf.Symbols,
-	}
 	data, err := objelf.Marshal(&final)
 	if err != nil {
 		return nil, linkerErrorf(unix.EINVAL, "failed to finalize ELF layout: %v", err)
 	}
 	return data, nil
-}
-
-// btfSections returns the .BTF and .BTF.ext sections, 8-byte aligned. There
-// are none when the input has no BTF types besides DATASECs.
-//
-// .BTF holds the input types and strings after the DATASEC fixup, under the
-// header libbpf writes. libbpf rebuilds and deduplicates the BTF, which can
-// reorder the string table; this version keeps the input order, so .BTF and
-// .BTF.ext have libbpf's sizes but not always its bytes. .BTF.ext is copied
-// as it is.
-func (out *linkerOutput) btfSections() []objelf.OutputSection {
-	if out.btf == nil || !hasNonDatasecTypes(out.btf) {
-		return nil
-	}
-
-	secs := []objelf.OutputSection{
-		{Name: btfSecName, Type: elf.SHT_PROGBITS, Addralign: 8, Data: linkerBTFData(out.btf)},
-	}
-	if out.btfExt != nil {
-		secs = append(secs, objelf.OutputSection{Name: btfExtSecName, Type: elf.SHT_PROGBITS, Addralign: 8, Data: out.btfExt})
-	}
-	return secs
-}
-
-func hasNonDatasecTypes(spec *btf.Spec) bool {
-	for id := 1; id < len(spec.Types); id++ {
-		if spec.Types[id].Kind != btf.KindDatasec {
-			return true
-		}
-	}
-	return false
-}
-
-// linkerBTFData lays out spec the way libbpf writes a BTF it built: the
-// 32-byte header with no kind layout section, the types, then the strings.
-func linkerBTFData(spec *btf.Spec) []byte {
-	h := spec.Header
-	raw := spec.Raw()
-	types := raw[h.HdrLen+h.TypeOff:][:h.TypeLen]
-	strs := raw[h.HdrLen+h.StrOff:][:h.StrLen]
-
-	le := binary.LittleEndian
-	b := make([]byte, 0, btfHdrLen+len(types)+len(strs))
-	b = le.AppendUint16(b, h.Magic)
-	b = append(b, h.Version, 0)
-	b = le.AppendUint32(b, btfHdrLen)
-	b = le.AppendUint32(b, 0)                  // type_off
-	b = le.AppendUint32(b, uint32(len(types))) // type_len
-	b = le.AppendUint32(b, uint32(len(types))) // str_off
-	b = le.AppendUint32(b, uint32(len(strs)))  // str_len
-	b = le.AppendUint32(b, 0)                  // layout_off
-	b = le.AppendUint32(b, 0)                  // layout_len
-	b = append(b, types...)
-	return append(b, strs...)
 }
 
 // readFD reads the whole file behind fd from offset 0, without moving the

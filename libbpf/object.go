@@ -168,6 +168,9 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	if err := spec.FixupDatasecOffsets(variableOffsets(e)); err != nil {
 		return nil, openError(path, err)
 	}
+	if err := spec.SortDatasecVars(); err != nil {
+		return nil, openError(path, err)
+	}
 	maps, err := parseMaps(spec)
 	if err != nil {
 		return nil, openError(path, err)

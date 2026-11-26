@@ -14,7 +14,7 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 - `ringbuf <object>` attaches a ring buffer writer, polls the ring and prints the sample bytes.
 - `perfbuf <object>` attaches a perf event array writer, polls the per-CPU buffers and prints the sample bytes, loss count and buffer count.
 - `probe` runs the program, map and helper probes and prints the result for each case.
-- `linker <object>` links the object alone into a temporary `linked.bpf.o` with `bpf_linker__new`, `bpf_linker__add_file`, `bpf_linker__finalize` and `bpf_linker__free`, opens the result with `bpf_object__open_file`, and prints the object name, the maps, the programs and every section's name, type, flags and size, sorted by name.
+- `linker <object>...` links the objects, in order, into a temporary `linked.bpf.o` with `bpf_linker__new`, one `bpf_linker__add_file` per object, `bpf_linker__finalize` and `bpf_linker__free`. It opens the result with `bpf_object__open_file` and libelf and prints the object name, the maps, the programs, every section sorted by name and the symbol table. A section has its name, type, flags, size and alignment, the hex contents of a code or data section other than `.BTF` and `.BTF.ext`, and the entries of a relocation section with each symbol named the way readelf names it.
 
 ## Layout
 
@@ -35,7 +35,7 @@ This writes `layout.json`, `attr.json`, `open.json`, `core.json` and `core-reloc
 make -C oracle linker-fixture
 ```
 
-This writes `linker.json` and needs no privileges.
+This writes `linker.json` for `kprobe.bpf.o` alone, `linker-merge.json` for `link_a.bpf.o` then `link_b.bpf.o`, `linker-merge-reverse.json` for the opposite order, and `linker-text.json` for `link_text_a.bpf.o` and `link_text_b.bpf.o`, whose `.text` subprograms merge. It needs no privileges.
 
 ```sh
 make -C oracle load-fixture

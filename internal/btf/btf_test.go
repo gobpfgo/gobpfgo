@@ -270,6 +270,39 @@ func TestSetDatasec(t *testing.T) {
 	}
 }
 
+func TestSortDatasecVars(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/ringbuf.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	maps := spec.Find(".maps", KindDatasec)
+	if maps == nil || len(maps.DataSec) != 2 {
+		t.Fatalf(".maps datasec = %+v, want two variables", maps)
+	}
+	if err := spec.SetDatasecVarOffset(maps.ID, 0, 16); err != nil {
+		t.Fatalf("SetDatasecVarOffset: %v", err)
+	}
+	if err := spec.SetDatasecVarOffset(maps.ID, 1, 0); err != nil {
+		t.Fatalf("SetDatasecVarOffset: %v", err)
+	}
+	if err := spec.SortDatasecVars(); err != nil {
+		t.Fatalf("SortDatasecVars: %v", err)
+	}
+	for i, want := range []uint32{0, 16} {
+		if maps.DataSec[i].Offset != want {
+			t.Errorf("variable %d offset = %d, want %d", i, maps.DataSec[i].Offset, want)
+		}
+		off := spec.typeStart + int(maps.rawOff) + 12 + i*12 + 4
+		if got := spec.ByteOrder.Uint32(spec.raw[off:]); got != want {
+			t.Errorf("variable %d raw offset = %d, want %d", i, got, want)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	if _, err := Parse(nil, binary.LittleEndian); err == nil {
 		t.Fatal("Parse accepted an empty blob")

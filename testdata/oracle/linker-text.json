@@ -1,0 +1,55 @@
+{
+  "case": "linker",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "link_text_a.bpf.o",
+    "link_text_b.bpf.o"
+  ],
+  "output": "linked.bpf.o",
+  "object_name": "linked",
+  "maps": [
+    {"name": "text_counts_a", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1},
+    {"name": "text_counts_b", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1}
+  ],
+  "programs": [
+    {"name": "handle_text_a", "type": 2, "section": "kprobe/do_sys_openat2"},
+    {"name": "handle_text_b", "type": 2, "section": "kprobe/do_sys_open"}
+  ],
+  "sections": [
+    {"name": ".BTF", "type": 1, "flags": 0, "size": 835, "align": 8},
+    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 376, "align": 8},
+    {"name": ".maps", "type": 1, "flags": 3, "size": 64, "align": 8, "data": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},
+    {"name": ".rel.text", "type": 9, "flags": 64, "size": 32, "align": 8, "relocations": [
+        {"offset": 32, "type": 1, "symbol": "text_counts_a"},
+        {"offset": 120, "type": 1, "symbol": "text_counts_b"}
+      ]},
+    {"name": ".relkprobe/do_sys_open", "type": 9, "flags": 64, "size": 16, "align": 8, "relocations": [
+        {"offset": 0, "type": 10, "symbol": ".text"}
+      ]},
+    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 16, "align": 8, "relocations": [
+        {"offset": 0, "type": 10, "symbol": ".text"}
+      ]},
+    {"name": ".strtab", "type": 3, "flags": 32, "size": 256, "align": 1},
+    {"name": ".symtab", "type": 2, "flags": 0, "size": 312, "align": 8},
+    {"name": ".text", "type": 1, "flags": 6, "size": 176, "align": 8, "data": "b701000000000000631afcff00000000bfa200000000000007020000fcffffff1801000000000000000000000000000085000000010000001500020000000000b701000001000000db100000000000009500000000000000b701000000000000631afcff00000000bfa200000000000007020000fcffffff1801000000000000000000000000000085000000010000001500020000000000b701000001000000db100000000000009500000000000000"},
+    {"name": "kprobe/do_sys_open", "type": 1, "flags": 6, "size": 24, "align": 8, "data": "851000000a000000b7000000000000009500000000000000"},
+    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 24, "align": 8, "data": "85100000ffffffffb7000000000000009500000000000000"},
+    {"name": "license", "type": 1, "flags": 3, "size": 4, "align": 1, "data": "47504c00"}
+  ],
+  "symbols": [
+    {"name": "link_text_a.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": ".text", "type": 3, "bind": 0, "section": ".text", "value": 0, "size": 0},
+    {"name": "kprobe/do_sys_openat2", "type": 3, "bind": 0, "section": "kprobe/do_sys_openat2", "value": 0, "size": 0},
+    {"name": "bump", "type": 2, "bind": 0, "section": ".text", "value": 0, "size": 88},
+    {"name": "handle_text_a", "type": 2, "bind": 1, "section": "kprobe/do_sys_openat2", "value": 0, "size": 24},
+    {"name": "text_counts_a", "type": 1, "bind": 1, "section": ".maps", "value": 0, "size": 32},
+    {"name": "LICENSE", "type": 1, "bind": 1, "section": "license", "value": 0, "size": 4},
+    {"name": "link_text_b.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": "kprobe/do_sys_open", "type": 3, "bind": 0, "section": "kprobe/do_sys_open", "value": 0, "size": 0},
+    {"name": "bump", "type": 2, "bind": 0, "section": ".text", "value": 88, "size": 88},
+    {"name": "handle_text_b", "type": 2, "bind": 1, "section": "kprobe/do_sys_open", "value": 0, "size": 24},
+    {"name": "text_counts_b", "type": 1, "bind": 1, "section": ".maps", "value": 32, "size": 32}
+  ]
+}
