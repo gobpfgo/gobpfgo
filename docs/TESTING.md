@@ -26,6 +26,8 @@ The oracle is development-only. Tests consume checked-in JSON and never need C, 
 
 `layout` and `attr` are implemented for `BPF_MAP_CREATE`. The remaining scenarios land with the slice that needs them.
 
+The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario will compare that same object with libbpf.
+
 ## Tiers
 
 | Tier | Runs | Needs | Covers |
