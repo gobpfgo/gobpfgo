@@ -7,13 +7,13 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c core.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c
 ORACLE_HDRS := json.h oracle.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
 LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 
-.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture clean
+.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture clean
 
 all: $(ORACLE)
 
@@ -62,6 +62,10 @@ perfbuf-fixture: $(ORACLE)
 probe-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
 	sudo -n $(ORACLE) probe > ../testdata/oracle/probe.json
+
+linker-fixture: $(ORACLE)
+	mkdir -p ../testdata/oracle
+	$(ORACLE) linker ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/linker.json
 
 clean:
 	rm -rf $(BUILD)

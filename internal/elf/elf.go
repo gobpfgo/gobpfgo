@@ -6,10 +6,12 @@
 
 // Package elf reads the parts of a 64-bit BPF ELF object that the loader
 // needs: sections, symbols, relocations, the .maps, .BTF and .BTF.ext payloads
-// and the executable program sections.
+// and the executable program sections. Marshal writes a relocatable BPF
+// object from Go section, symbol and relocation values.
 //
-// The reader is independent of libelf. It keeps the section bytes in memory;
-// the caller parses the BTF and map definitions from them.
+// The reader and the writer are independent of libelf. The reader keeps the
+// section bytes in memory; the caller parses the BTF and map definitions from
+// them.
 package elf
 
 import (
@@ -22,11 +24,17 @@ import (
 	"strings"
 )
 
-// BPF relocation types used by the object loader.
+// BPF relocation types used by the object loader and the static linker.
 const (
-	R_BPF_64_64 = 1
-	R_BPF_64_32 = 10
+	R_BPF_64_64    = 1
+	R_BPF_64_ABS64 = 2
+	R_BPF_64_ABS32 = 3
+	R_BPF_64_32    = 10
 )
+
+// SHT_LLVM_ADDRSIG is LLVM's address-significance table section type, which
+// debug/elf does not name.
+const SHT_LLVM_ADDRSIG elf.SectionType = 0x6fff4c03
 
 // Re-exported so callers do not need to import debug/elf as well.
 const (
@@ -52,7 +60,8 @@ const (
 	BindWeak   = elf.STB_WEAK
 )
 
-// Symbol is one symbol table entry, with its section name resolved.
+// Symbol is one symbol table entry, with its section name resolved. Other
+// holds the visibility bits of st_other.
 type Symbol struct {
 	Name         string
 	SectionIndex elf.SectionIndex
@@ -60,19 +69,24 @@ type Symbol struct {
 	Value        uint64
 	Size         uint64
 	Info         byte
+	Other        byte
 	Type         elf.SymType
 	Bind         elf.SymBind
 }
 
 // Section is one ELF section header plus its bytes. SHT_NOBITS sections have
-// no data.
+// no data. Link and Info keep the raw sh_link and sh_info values.
 type Section struct {
-	Name  string
-	Index int
-	Type  elf.SectionType
-	Flags elf.SectionFlag
-	Size  uint64
-	Data  []byte
+	Name      string
+	Index     int
+	Type      elf.SectionType
+	Flags     elf.SectionFlag
+	Size      uint64
+	Addralign uint64
+	Entsize   uint64
+	Link      uint32
+	Info      uint32
+	Data      []byte
 }
 
 // Program is an executable section with its instruction bytes and
@@ -89,6 +103,7 @@ type Program struct {
 // and relocation entries; Programs are the executable PROGBITS sections.
 type Object struct {
 	Class       elf.Class
+	Type        elf.Type
 	Machine     elf.Machine
 	ByteOrder   binary.ByteOrder
 	Sections    []Section
@@ -126,17 +141,22 @@ func OpenBytes(data []byte) (*Object, error) {
 
 	o := &Object{
 		Class:     f.Class,
+		Type:      f.Type,
 		Machine:   f.Machine,
 		ByteOrder: f.ByteOrder,
 	}
 
 	for i, s := range f.Sections {
 		sec := Section{
-			Name:  s.Name,
-			Index: i,
-			Type:  s.Type,
-			Flags: s.Flags,
-			Size:  s.Size,
+			Name:      s.Name,
+			Index:     i,
+			Type:      s.Type,
+			Flags:     s.Flags,
+			Size:      s.Size,
+			Addralign: s.Addralign,
+			Entsize:   s.Entsize,
+			Link:      s.Link,
+			Info:      s.Info,
 		}
 		if s.Type != elf.SHT_NOBITS {
 			sec.Data, err = s.Data()
@@ -191,6 +211,7 @@ func OpenBytes(data []byte) (*Object, error) {
 				Value:        sym.Value,
 				Size:         sym.Size,
 				Info:         sym.Info,
+				Other:        sym.Other,
 				Type:         elf.ST_TYPE(sym.Info),
 				Bind:         elf.ST_BIND(sym.Info),
 			})

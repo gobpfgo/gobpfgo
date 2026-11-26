@@ -330,12 +330,9 @@ func (s *Spec) FixupDatasecSizes(sectionSizes map[string]uint32) error {
 		if !ok || size == 0 || t.SizeOrType == size {
 			continue
 		}
-		off := s.typeStart + int(t.rawOff) + 8
-		if off+4 > len(s.raw) {
-			return fmt.Errorf("btf: datasec %s: size field out of bounds", t.Name)
+		if err := s.SetDatasecSize(t.ID, size); err != nil {
+			return err
 		}
-		s.ByteOrder.PutUint32(s.raw[off:], size)
-		t.SizeOrType = size
 	}
 	return nil
 }
@@ -374,16 +371,60 @@ func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
 			if !ok {
 				return fmt.Errorf("btf: datasec %s: no ELF symbol for %s", t.Name, varType.Name)
 			}
-
-			off := s.typeStart + int(t.rawOff) + 12 + j*12 + 4
-			if off+4 > len(s.raw) {
-				return fmt.Errorf("btf: datasec %s: offset field out of bounds", t.Name)
+			if err := s.SetDatasecVarOffset(t.ID, j, value); err != nil {
+				return err
 			}
-			s.ByteOrder.PutUint32(s.raw[off:], value)
-			vsi.Offset = value
 		}
 	}
 	return nil
+}
+
+// SetDatasecSize writes size into the DATASEC type id, in both the raw blob
+// and the parsed type. It returns an error when id is not a DATASEC.
+func (s *Spec) SetDatasecSize(id uint32, size uint32) error {
+	t, err := s.datasec(id)
+	if err != nil {
+		return err
+	}
+	off := s.typeStart + int(t.rawOff) + 8
+	if off+4 > len(s.raw) {
+		return fmt.Errorf("btf: datasec %s: size field out of bounds", t.Name)
+	}
+	s.ByteOrder.PutUint32(s.raw[off:], size)
+	t.SizeOrType = size
+	return nil
+}
+
+// SetDatasecVarOffset writes offset into member j of the DATASEC type id, in
+// both the raw blob and the parsed type. It returns an error when id is not a
+// DATASEC or j is not one of its members.
+func (s *Spec) SetDatasecVarOffset(id uint32, j int, offset uint32) error {
+	t, err := s.datasec(id)
+	if err != nil {
+		return err
+	}
+	if j < 0 || j >= len(t.DataSec) {
+		return fmt.Errorf("btf: datasec %s: member %d out of range", t.Name, j)
+	}
+	off := s.typeStart + int(t.rawOff) + 12 + j*12 + 4
+	if off+4 > len(s.raw) {
+		return fmt.Errorf("btf: datasec %s: offset field out of bounds", t.Name)
+	}
+	s.ByteOrder.PutUint32(s.raw[off:], offset)
+	t.DataSec[j].Offset = offset
+	return nil
+}
+
+// datasec returns the DATASEC type with id.
+func (s *Spec) datasec(id uint32) (*Type, error) {
+	t, err := s.TypeByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Kind != KindDatasec {
+		return nil, fmt.Errorf("btf: type %d is %v, not a DATASEC", id, t.Kind)
+	}
+	return t, nil
 }
 
 // Find returns the first type with the given name and kind, or nil. Names are

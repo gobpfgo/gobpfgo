@@ -224,6 +224,52 @@ func TestFixupDatasecOffsets(t *testing.T) {
 	}
 }
 
+// TestSetDatasec patches a DATASEC size and variable offset and reads them
+// back from a fresh parse of the raw blob.
+func TestSetDatasec(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/kprobe.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	maps := spec.Find(".maps", KindDatasec)
+	if maps == nil || len(maps.DataSec) != 1 {
+		t.Fatalf(".maps datasec = %+v, want one variable", maps)
+	}
+
+	if err := spec.SetDatasecSize(maps.ID, 48); err != nil {
+		t.Fatalf("SetDatasecSize: %v", err)
+	}
+	if err := spec.SetDatasecVarOffset(maps.ID, 0, 16); err != nil {
+		t.Fatalf("SetDatasecVarOffset: %v", err)
+	}
+
+	again, err := Parse(spec.Raw(), spec.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse patched blob: %v", err)
+	}
+	got := again.Find(".maps", KindDatasec)
+	if got.SizeOrType != 48 || got.DataSec[0].Offset != 16 {
+		t.Fatalf("patched .maps = size %d offset %d, want 48 and 16", got.SizeOrType, got.DataSec[0].Offset)
+	}
+	if maps.SizeOrType != 48 || maps.DataSec[0].Offset != 16 {
+		t.Fatalf("parsed .maps = size %d offset %d, want 48 and 16", maps.SizeOrType, maps.DataSec[0].Offset)
+	}
+
+	if err := spec.SetDatasecSize(maps.DataSec[0].Type, 1); err == nil {
+		t.Fatal("SetDatasecSize accepted a VAR")
+	}
+	if err := spec.SetDatasecSize(uint32(len(spec.Types)), 1); err == nil {
+		t.Fatal("SetDatasecSize accepted an out-of-range id")
+	}
+	if err := spec.SetDatasecVarOffset(maps.ID, 1, 0); err == nil {
+		t.Fatal("SetDatasecVarOffset accepted a missing member")
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	if _, err := Parse(nil, binary.LittleEndian); err == nil {
 		t.Fatal("Parse accepted an empty blob")
