@@ -40,7 +40,11 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The operator authorized the agent to open, approve where possible, and merge its own PRs one at a time after CI is green, fix CI failures, and continue until a decision needs the operator. GitHub rejects self-approval, so the agent merges without an approval when branch protection allows it. The merge method is rebase and merge, matching [`#1`](https://github.com/golbpfgo/golbpfgo/pull/1); the branch is deleted after merge. This is a project-specific exception to the global never-merge rule.
 
+## D-010: Kernel floor is 5.10
+
+2026-11-26. The port targets Linux 5.10 and newer. 5.10 is old enough for the fleet and recent enough to skip the 4.9-era fallbacks. The feature-probe matrix starts at 5.10; the VM tier covers 5.10, 6.x and latest; libbpf's 4.9-only fallbacks are not ported unless a consumer needs them. This is a deliberate deviation from libbpf's 4.9 floor, recorded in [DEVIATIONS.md](DEVIATIONS.md).
+
 ## Open decisions
 
-- Kernel floor: 4.9 to match libbpf, or 5.10 to cut the probe matrix.
-- Whether the `reflect` address helper in `internal/sys/addr.go` is acceptable, or a per-architecture assembly stub is preferred.
+None. The `reflect` address helper is accepted in D-003.
+

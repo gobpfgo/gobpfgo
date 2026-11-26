@@ -36,7 +36,7 @@ The BTF parser has a structural test against the same object: type kinds, string
 |---|---|---|---|
 | 0 | every PR | nothing beyond Go | serialization bytes, ELF parse, BTF parse, CO-RE fixups, `btf_dump` text, linker, USDT, layout constants |
 | 1 | main and nightly | a Linux kernel, root or `CAP_BPF` | open, load, attach, link types, pinning, ring buffer, perf events, syscall transcript |
-| 2 | nightly or manual | VMs | kernels 4.9, 5.5, 6.x and latest; amd64 and arm64 |
+| 2 | nightly or manual | VMs | kernels 5.10, 6.x and latest; amd64 and arm64 |
 
 Tier 0 is the bulk of the suite, because most parity is data in and data out. Tier 1 proves the syscalls. Tier 2 proves the old-kernel fallbacks.
 
