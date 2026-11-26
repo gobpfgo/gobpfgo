@@ -6,7 +6,7 @@ Repository: [gobpfgo/gobpfgo](https://github.com/gobpfgo/gobpfgo).
 
 A pure-Go port of libbpf, close to 1:1 in behavior and API shape, with no cgo and no unsafe.
 
-Status: phase 2. The phase 1 object, map, program and kprobe attach path is tested on 5.10 and 6.18. CO-RE access specs, field matching and instruction patching are parity tested with a synthetic target; wiring them into the load path comes next.
+Status: phase 2. The phase 1 object, map, program and kprobe attach path is tested on 5.10 and 6.18. CO-RE field relocations are applied at load against the kernel BTF; type and enum relocations, module BTFs and flexible arrays come next.
 
 ## Non-goals
 
