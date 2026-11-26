@@ -159,6 +159,9 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	if err != nil {
 		return nil, openError(path, err)
 	}
+	if err := spec.FixupDatasecSizes(sectionSizes(e)); err != nil {
+		return nil, openError(path, err)
+	}
 	maps, err := parseMaps(spec)
 	if err != nil {
 		return nil, openError(path, err)
@@ -187,6 +190,16 @@ func openError(path string, err error) error {
 		Errno: unix.EINVAL,
 		Log:   err.Error(),
 	}
+}
+
+// sectionSizes maps ELF section names to their sizes for the BTF DATASEC
+// fixup.
+func sectionSizes(e *elf.Object) map[string]uint32 {
+	sizes := make(map[string]uint32, len(e.Sections))
+	for _, s := range e.Sections {
+		sizes[s.Name] = uint32(s.Size)
+	}
+	return sizes
 }
 
 // parseMaps turns the .maps BTF data section into map specs. Each variable's

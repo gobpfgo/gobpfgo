@@ -165,4 +165,6 @@ type Type struct {
 	Var     *Var
 	DataSec []VarSecInfo
 	DeclTag *DeclTag
+
+	rawOff uint32
 }

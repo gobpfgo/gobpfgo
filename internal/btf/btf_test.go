@@ -150,6 +150,42 @@ func TestParseKprobeBTF(t *testing.T) {
 	}
 }
 
+func TestFixupDatasecSizes(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/kprobe.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	sizes := map[string]uint32{".maps": 32, "license": 4}
+	if err := spec.FixupDatasecSizes(sizes); err != nil {
+		t.Fatalf("FixupDatasecSizes: %v", err)
+	}
+
+	maps := spec.Find(".maps", KindDatasec)
+	if maps == nil || maps.SizeOrType != 32 {
+		t.Fatalf(".maps datasec = %+v, want size 32", maps)
+	}
+	license := spec.Find("license", KindDatasec)
+	if license == nil || license.SizeOrType != 4 {
+		t.Fatalf("license datasec = %+v, want size 4", license)
+	}
+
+	off := spec.typeStart + int(maps.rawOff) + 8
+	if got := spec.ByteOrder.Uint32(spec.raw[off:]); got != 32 {
+		t.Fatalf("patched .maps size = %d, want 32", got)
+	}
+	if got := spec.ByteOrder.Uint32(o.BTF[off:]); got != 0 {
+		t.Fatalf("original .maps size = %d, want 0", got)
+	}
+	if len(spec.Raw()) != len(o.BTF) {
+		t.Fatalf("Raw length = %d, want %d", len(spec.Raw()), len(o.BTF))
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	if _, err := Parse(nil, binary.LittleEndian); err == nil {
 		t.Fatal("Parse accepted an empty blob")
