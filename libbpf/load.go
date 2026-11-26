@@ -53,6 +53,16 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 	obj.btfFD = btfFD
 
+	ext, kernelBTF, err := objectCoreRelocations(obj)
+	if err != nil {
+		obj.closeLoadFDs()
+		return &Error{
+			Op:    "bpf_object__relocate_core",
+			Errno: errnoFromError(err),
+			Log:   err.Error(),
+		}
+	}
+
 	for _, m := range obj.maps {
 		if m.reused {
 			info, err := sys.MapInfoByFD(m.fd)
@@ -106,6 +116,16 @@ func BpfObjectLoad(obj *BpfObject) error {
 	license := append([]byte(obj.license), 0)
 	for _, p := range obj.programs {
 		insns := append([]byte(nil), p.insns...)
+		if kernelBTF != nil {
+			if err := relocateCore(p, insns, ext, obj.btf, kernelBTF); err != nil {
+				obj.closeLoadFDs()
+				return &Error{
+					Op:    "bpf_object__relocate_core",
+					Errno: unix.EINVAL,
+					Log:   err.Error(),
+				}
+			}
+		}
 		if err := relocateProgram(obj, p, insns); err != nil {
 			obj.closeLoadFDs()
 			return &Error{
