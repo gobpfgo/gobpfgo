@@ -1,0 +1,13 @@
+{
+  "case": "load",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object_name": "kprobe",
+  "maps": [
+    {"name": "counts", "type": 2, "id": 716, "key_size": 4, "value_size": 8, "max_entries": 1, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11}
+  ],
+  "programs": [
+    {"name": "handle_open", "type": 2, "id": 300, "section": "kprobe/do_sys_open", "insn_cnt": 12, "xlated_insn_cnt": 18, "jited_prog_len": 100}
+  ]
+}

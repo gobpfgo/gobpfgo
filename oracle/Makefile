@@ -8,11 +8,12 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 BUILD := build
 ORACLE := $(BUILD)/oracle
 OPEN := $(BUILD)/open
+LOAD := $(BUILD)/load
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
 LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 
-.PHONY: all fixtures clean
+.PHONY: all fixtures load-fixture clean
 
 all: $(ORACLE)
 
@@ -31,6 +32,11 @@ $(OPEN): open.c $(LIBBPF_A)
 		$(CFLAGS) -o $@ open.c $(LIBBPF_A) \
 		$(shell pkg-config --libs libelf zlib)
 
+$(LOAD): load.c $(LIBBPF_A)
+	$(CC) $(CPPFLAGS) -I$(LIBBPF_SRC) -I$(BUILD)/libbpf/include/uapi \
+		$(CFLAGS) -o $@ load.c $(LIBBPF_A) \
+		$(shell pkg-config --libs libelf zlib)
+
 $(BUILD):
 	mkdir -p $@
 
@@ -39,6 +45,10 @@ fixtures: $(ORACLE) $(OPEN)
 	$(ORACLE) layout > ../testdata/oracle/layout.json
 	$(ORACLE) attr > ../testdata/oracle/attr.json
 	$(OPEN) ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
+
+load-fixture: $(LOAD)
+	mkdir -p ../testdata/oracle
+	sudo -n $(LOAD) ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/load.json
 
 clean:
 	rm -rf $(BUILD)
