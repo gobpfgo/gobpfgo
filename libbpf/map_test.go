@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/bpf.c at 4f05fb0.
+// golbpfgo-origin: original
 
 //go:build linux && (amd64 || arm64)
 

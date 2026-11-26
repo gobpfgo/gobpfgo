@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original bpf() wrapper
+// libbpf-source: src/bpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: sys_bpf, bpf_map_create
 
 //go:build linux && (amd64 || arm64)
 
@@ -25,13 +28,17 @@ func bpf(cmd uint32, attr []byte) (uintptr, error) {
 	return r1, nil
 }
 
-// BPF issues one bpf() syscall and discards its return value.
+// BPF issues one bpf() syscall and discards its return value. The kernel errno
+// is returned unchanged.
 func BPF(cmd uint32, attr []byte) error {
 	_, err := bpf(cmd, attr)
 	return err
 }
 
 // MapCreate calls BPF_MAP_CREATE and returns the new map file descriptor.
+//
+// When exclHash is non-empty, its address and length are passed as the
+// exclusive program hash and the slice is kept alive for the syscall.
 func MapCreate(attr *MapCreateAttr, exclHash []byte) (int, error) {
 	if len(exclHash) > 0 {
 		attr.ExclProgHash = uint64(addr(exclHash))

@@ -44,6 +44,10 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The port targets Linux 5.10 and newer. 5.10 is old enough for the fleet and recent enough to skip the 4.9-era fallbacks. The feature-probe matrix starts at 5.10; the VM tier covers 5.10, 6.x and latest; libbpf's 4.9-only fallbacks are not ported unless a consumer needs them. This is a deliberate deviation from libbpf's 4.9 floor, recorded in [DEVIATIONS.md](DEVIATIONS.md).
 
+## D-011: Provenance in file metadata, godocs for Go behavior
+
+2026-11-26. The libbpf source, commit and symbol list live in `libbpf-source`, `libbpf-commit` and `libbpf-symbols` comments at the top of each file. Godocs describe what the Go API does, its ownership, errors and limits; they do not say "mirrors X" or repeat the C symbol. The API map generator reads the metadata. Original files use `golbpfgo-origin: original`; a reimplementation of a C module uses both tags.
+
 ## Open decisions
 
 None. The `reflect` address helper is accepted in D-003.

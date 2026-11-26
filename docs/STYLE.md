@@ -82,7 +82,8 @@ These rules are binding. The core is boring Go that mirrors boring C. If a revie
 
 ## Comments
 
-- Exported identifiers: doc comment starting with the name, plus the C symbol and source file.
+- Exported identifiers: doc comment starting with the name. Describe what the Go API does, its ownership, errors and limits. Do not write "mirrors X" or repeat the C symbol; the provenance lives in the file header.
+- Important public functions get a full godoc. Trivial accessors get one sentence.
 - Unexported helpers: comment only when the reason is not obvious.
 - No commented-out code. No TODO without a phase or issue reference.
 - Code comments explain why; the C source explains what.
@@ -101,17 +102,29 @@ Put one blank line before and after a control block when another statement prece
 
 clang-format does not format Go. The Go files stay with gofmt, and the Go rules above still apply.
 
-## License headers
+## License and provenance headers
 
-Every Go file starts with:
+Every Go file starts with the SPDX line and a provenance block:
 
 <!-- anchors-ok: go | a code-fence language, not a source snippet -->
 ```go
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/libbpf.c at <commit>.
+// libbpf-source: src/libbpf.c
+// libbpf-commit: <full sha>
+// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem
 ```
 
-Files with no libbpf counterpart say `Original golbpfgo code` instead of the ported line. The commit used for the port is recorded in `NOTICE`.
+`libbpf-source` repeats when a file draws on several C files. `libbpf-symbols`
+is a comma-separated list. Files with no libbpf counterpart use:
+
+<!-- anchors-ok: go | a code-fence language, not a source snippet -->
+```go
+// golbpfgo-origin: original
+```
+
+A file that reimplements a C module uses both `golbpfgo-origin` and
+`libbpf-source`. The commit is the one recorded in `NOTICE`. The API map
+generator reads these tags; do not move the mapping into the godoc.
 
 ## Tests
 

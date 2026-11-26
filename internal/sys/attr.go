@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// libbpf-source: include/uapi/linux/bpf.h
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: union bpf_attr
 
 //go:build linux && (amd64 || arm64)
 
@@ -34,7 +36,8 @@ const (
 	mapCreateOffExclProgHashSize      = 88
 )
 
-// MapCreateAttr is the BPF_MAP_CREATE part of union bpf_attr.
+// MapCreateAttr is the BPF_MAP_CREATE view of union bpf_attr. Marshal writes
+// the fields at the offsets in the layout table; fields left zero stay zero.
 type MapCreateAttr struct {
 	MapType               uint32
 	KeySize               uint32

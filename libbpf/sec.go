@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/libbpf.c at 4f05fb0.
+// libbpf-source: src/libbpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: libbpf_sec_def
 
 package libbpf
 
