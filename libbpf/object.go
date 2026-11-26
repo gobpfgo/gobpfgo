@@ -330,7 +330,7 @@ func mapTypeID(spec *btf.Spec, id uint32) (uint32, error) {
 func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
 	var programs []*BpfProgram
 	for _, p := range e.Programs {
-		progType, attachType, ok := secDefFor(p.Name)
+		def, ok := secDefFor(p.Name)
 		if !ok {
 			continue
 		}
@@ -338,15 +338,21 @@ func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
 		if name == "" {
 			return nil, fmt.Errorf("section %s has no function symbol", p.Name)
 		}
-		programs = append(programs, &BpfProgram{
+		prog := &BpfProgram{
 			name:               name,
-			progType:           progType,
-			expectedAttachType: attachType,
+			progType:           def.progType,
+			expectedAttachType: def.attachType,
+			progFlags:          def.progFlags,
 			sectionName:        p.Name,
 			insns:              p.Insns,
 			relocs:             p.Relocs,
 			fd:                 -1,
-		})
+		}
+		if def.attachBTF {
+			prog.attachBTF = true
+			prog.attachTarget = strings.TrimPrefix(p.Name, def.prefix)
+		}
+		programs = append(programs, prog)
 	}
 	return programs, nil
 }

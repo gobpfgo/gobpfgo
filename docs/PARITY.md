@@ -10,11 +10,11 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 |---|---|---|---|---|
 | Syscalls and UAPI | `bpf.c`, `libbpf_probes.c` | `internal/sys`, `bpf.go` | 0 | in progress |
 | ELF reader | `elf.c` | `internal/elf` | 0 | in progress |
-| Object lifecycle | `libbpf.c` | `object.go`, `secdefs.go`, `skeleton.go` | 1 | in progress (open, load) |
+| Object lifecycle | `libbpf.c` | `object.go`, `sec.go`, `skeleton.go` | 1 | in progress (open, load) |
 | Maps | `libbpf.c` | `map.go`, `bpf_map.go` | 1 | in progress (create, open, load, lookup) |
 | Programs | `libbpf.c` | `program.go` | 1 | in progress (open, load) |
-| Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `netlink.go` | 1 | in progress (kprobe through tracefs; kprobe multi and perf links not ported) |
-| Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go` | 1 | in progress (map, program and object pin/unpin and map reuse; link pinning not ported) |
+| Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `attach.go`, `perf.go`, `elf_func.go`, `attach_btf.go` | 1 | parity tested for the section and link attach types (kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi, perf event, auto attach); cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT not started |
+| Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go`, `link.go` | 1 | parity tested (map, program, object and link pin/unpin; map reuse) |
 | BTF | `btf.c` | `internal/btf` | 2 | in progress (parser and split module merge; BTF dump separate) |
 | CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | parity tested (access specs, field/flexible array/type/enum relocations, vmlinux and split module BTFs, no-target poison; `TYPE_MATCHES` rejected like libbpf's normal path) |
 | BTF to C | `btf_dump.c` | `btf_dump.go` | 2 | not started |
@@ -40,7 +40,10 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | Object load (BTF, maps, programs) | root load test | parity tested (kprobe object, 6.18) |
 | ELF sections, symbols and relocations | checked-in `kprobe.bpf.o` | structural test |
 | Loaded map and program metadata | C harness JSON (root) | parity tested (root info comparison) |
-| kprobe attach and program output | C harness JSON (root) + root test | parity tested (kprobe object, 6.18) |
+| Attach types and program output | C harness JSON (`attach` scenario) + root table test | parity tested (kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, raw tracepoint, kprobe multi, LSM and cookie; 6.18, 5.10 with kprobe multi and cookie skipping) |
+| Perf event link and ioctl attach | root test + cookie case | parity tested (6.18 link with cookie; every kernel ioctl path) |
+| Link pin, open and unpin | root link test on bpffs | parity tested (5.10 and 6.18) |
+| Link update | root test | in progress (syscall layout checked; no tested link type supports update) |
 | Map, program and object pinning | root pin test on bpffs | parity tested (5.10 and 6.18) |
 | Map reuse | root reuse test | parity tested (5.10 and 6.18) |
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |

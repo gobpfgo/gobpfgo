@@ -13,7 +13,12 @@ type BpfProgram struct {
 	name               string
 	progType           BpfProgType
 	expectedAttachType BpfAttachType
+	progFlags          uint32
 	sectionName        string
+	attachBTF          bool
+	attachTarget       string
+	attachBTFID        uint32
+	attachBTFObjFD     int
 	insns              []byte
 	relocs             []elf.Reloc
 	fd                 int

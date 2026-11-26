@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <object>|core <object>|core-reloc <object> <target>\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|core <object>|core-reloc <object> <target>\n", prog);
 }
 
 int main(int argc, char **argv) {

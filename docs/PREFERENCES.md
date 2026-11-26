@@ -19,6 +19,7 @@ Rules learned from the operator. Newest last. Every entry carries the date, the 
 - **Pull requests.** Every change starts with a pull request. Open it early, commit to its branch, and let CI run before the merge.
 - **Merge and continue.** The agent may merge its own PRs one at a time after CI is green, fix failing CI, and move to the next slice without asking, until a decision needs the operator. GitHub rejects self-approval; merge without it when branch protection allows, using rebase and merge. The operator authorized this on 2026-11-26.
 - **Learning.** This file is the log. A correction is not complete until it is written here and in the affected document.
+- **Finish the promised attach surface before the next phase.** The operator corrected that the non-kprobe attach types were left as an open phase 1 row while phase 2 moved ahead. The rule: every attach type the plan promises gets a concrete slice, and it is ported, tested and documented before the next phase starts. Affected docs: [PROGRESS.md](../PROGRESS.md), [PARITY.md](PARITY.md).
 
 ## Entry template
 

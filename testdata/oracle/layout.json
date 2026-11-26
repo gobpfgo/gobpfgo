@@ -50,8 +50,52 @@
       {"name": "log_buf", "offset": 32, "size": 8},
       {"name": "prog_flags", "offset": 44, "size": 4},
       {"name": "prog_name", "offset": 48, "size": 16},
+      {"name": "prog_ifindex", "offset": 64, "size": 4},
       {"name": "expected_attach_type", "offset": 68, "size": 4},
-      {"name": "prog_btf_fd", "offset": 72, "size": 4}
+      {"name": "prog_btf_fd", "offset": 72, "size": 4},
+      {"name": "func_info_rec_size", "offset": 76, "size": 4},
+      {"name": "func_info", "offset": 80, "size": 8},
+      {"name": "func_info_cnt", "offset": 88, "size": 4},
+      {"name": "line_info_rec_size", "offset": 92, "size": 4},
+      {"name": "line_info", "offset": 96, "size": 8},
+      {"name": "line_info_cnt", "offset": 104, "size": 4},
+      {"name": "attach_btf_id", "offset": 108, "size": 4},
+      {"name": "attach_btf_obj_fd", "offset": 112, "size": 4}
+    ]
+  },
+  "link_create": {
+    "attr_size": 64,
+    "fields": [
+      {"name": "prog_fd", "offset": 0, "size": 4},
+      {"name": "target_fd", "offset": 4, "size": 4},
+      {"name": "attach_type", "offset": 8, "size": 4},
+      {"name": "flags", "offset": 12, "size": 4},
+      {"name": "target_btf_id", "offset": 16, "size": 4},
+      {"name": "perf_event.bpf_cookie", "offset": 16, "size": 8},
+      {"name": "kprobe_multi.flags", "offset": 16, "size": 4},
+      {"name": "kprobe_multi.cnt", "offset": 20, "size": 4},
+      {"name": "kprobe_multi.syms", "offset": 24, "size": 8},
+      {"name": "kprobe_multi.addrs", "offset": 32, "size": 8},
+      {"name": "kprobe_multi.cookies", "offset": 40, "size": 8},
+      {"name": "tracing.target_btf_id", "offset": 16, "size": 4},
+      {"name": "tracing.cookie", "offset": 24, "size": 8}
+    ]
+  },
+  "link_update": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "link_fd", "offset": 0, "size": 4},
+      {"name": "new_prog_fd", "offset": 4, "size": 4},
+      {"name": "flags", "offset": 8, "size": 4},
+      {"name": "old_prog_fd", "offset": 12, "size": 4}
+    ]
+  },
+  "raw_tracepoint": {
+    "attr_size": 24,
+    "fields": [
+      {"name": "name", "offset": 0, "size": 8},
+      {"name": "prog_fd", "offset": 8, "size": 4},
+      {"name": "cookie", "offset": 16, "size": 8}
     ]
   },
   "map_elem": {

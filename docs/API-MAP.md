@@ -67,7 +67,35 @@ The generated table has these columns:
 | `bpf_object__pin` | `BpfObjectPin` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_object__unpin` | `BpfObjectUnpin` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_obj_pin` | `ObjPin` (internal; public through the map and program pins) | `internal/sys/bpf.go` | parity tested (layout and root pin test) |
-| `bpf_program__attach_kprobe` | `BpfProgramAttachKprobe` | `libbpf/link.go` | in progress (kprobe through tracefs; retprobe untested; kprobe multi not ported) |
+| `bpf_program__attach` | `BpfProgramAttach` | `libbpf/attach.go` | parity tested (kprobe and fentry auto attach) |
+| `bpf_program__attach_kprobe` | `BpfProgramAttachKprobe` | `libbpf/attach.go` | parity tested (kprobe and kretprobe through tracefs, 5.10 and 6.18) |
+| `bpf_program__attach_kprobe_opts` | `BpfProgramAttachKprobeOpts` | `libbpf/attach.go` | in progress (offset and retprobe; cookie returns `EOPNOTSUPP` on the tracefs path) |
+| `bpf_program__attach_uprobe` | `BpfProgramAttachUprobe` | `libbpf/attach.go` | parity tested (uprobe and uretprobe, 5.10 and 6.18) |
+| `bpf_program__attach_uprobe_opts` | `BpfProgramAttachUprobeOpts` | `libbpf/attach.go` | in progress (function-name resolution; ref counter and cookie not available on the tracefs path) |
+| `bpf_program__attach_tracepoint` | `BpfProgramAttachTracepoint` | `libbpf/attach.go` | parity tested (tracepoint, 5.10 and 6.18) |
+| `bpf_program__attach_tracepoint_opts` | `BpfProgramAttachTracepointOpts` | `libbpf/attach.go` | parity tested (BPF cookie on 6.18) |
+| `bpf_program__attach_perf_event` | `BpfProgramAttachPerfEvent` | `libbpf/attach.go` | parity tested (perf event ioctl path) |
+| `bpf_program__attach_perf_event_opts` | `BpfProgramAttachPerfEventOpts` | `libbpf/attach.go` | parity tested (perf link with cookie on 6.18; ioctl fallback everywhere) |
+| `bpf_program__attach_raw_tracepoint` | `BpfProgramAttachRawTracepoint` | `libbpf/attach.go` | parity tested (raw `sys_enter`, 5.10 and 6.18) |
+| `bpf_program__attach_raw_tracepoint_opts` | `BpfProgramAttachRawTracepointOpts` | `libbpf/attach.go` | in progress (cookie field; exercised without a cookie) |
+| `bpf_program__attach_kprobe_multi_opts` | `BpfProgramAttachKprobeMulti` | `libbpf/attach.go` | parity tested (kprobe and kretprobe multi on 6.18; 5.10 skips) |
+| `bpf_program__attach_trace` | `BpfProgramAttachTrace` | `libbpf/attach.go` | parity tested (fentry and fexit, 5.10 and 6.18) |
+| `bpf_program__attach_trace_opts` | `BpfProgramAttachTraceOpts` | `libbpf/attach.go` | in progress (tracing cookie path on 6.18) |
+| `bpf_program__attach_lsm` | `BpfProgramAttachLsm` | `libbpf/attach.go` | parity tested (BPF LSM active on 6.18; 5.10 skips) |
+| `bpf_link__fd` | `BpfLinkFD` | `libbpf/link.go` | parity tested |
+| `bpf_link__pin_path` | `BpfLinkPinPath` | `libbpf/link.go` | parity tested |
+| `bpf_link__pin` | `BpfLinkPin` | `libbpf/link.go` | parity tested (5.10 and 6.18) |
+| `bpf_link__unpin` | `BpfLinkUnpin` | `libbpf/link.go` | parity tested (5.10 and 6.18) |
+| `bpf_link__open` | `BpfLinkOpen` | `libbpf/link.go` | parity tested (5.10 and 6.18) |
+| `bpf_link__update_program` | `BpfLinkUpdateProgram` | `libbpf/link.go` | in progress (layout checked; no tested link type supports update) |
+| `bpf_link__detach` | `BpfLinkDetach` | `libbpf/link.go` | parity tested (releases the descriptors the link owns; see DEVIATIONS 17) |
+| `bpf_link__disconnect` | `BpfLinkDisconnect` | `libbpf/link.go` | parity tested |
+| `bpf_link__destroy` | `BpfLinkDestroy` | `libbpf/link.go` | parity tested |
+| `bpf_link_create` | `LinkCreate` (internal) | `internal/sys/link.go` | parity tested (layout; tracing, perf and kprobe multi links) |
+| `bpf_link_update` | `LinkUpdate` (internal) | `internal/sys/link.go` | parity tested (layout) |
+| `bpf_link_detach` | `LinkDetach` (internal) | `internal/sys/link.go` | parity tested (layout) |
+| `bpf_raw_tracepoint_open` | `RawTracepointOpen`, `RawTracepointOpenProgram` (internal) | `internal/sys/link.go` | parity tested (raw tracepoint and 5.10 tracing fallback) |
+| `bpf_obj_get` | `ObjGet` (internal) | `internal/sys/link.go` | parity tested (link open) |
 | `bpf_core_parse_spec` | `ParseCoreSpec` (internal) | `internal/btf/core.go` | parity tested (field, flexible array, type and enum access specs) |
 | `bpf_core_calc_relo_insn` | `CalcCoreRelo` (internal) | `internal/btf/core.go` | parity tested (field, flexible array, type and enum relocations, module candidates, no-target values) |
 | `bpf_core_patch_insn` | `patchCoreInsn` (internal) | `libbpf/core_reloc.go` | parity tested (ALU, LDX/ST/STX and 64-bit immediate forms) |
