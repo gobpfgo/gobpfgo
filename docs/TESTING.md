@@ -28,6 +28,8 @@ The oracle is development-only. Tests consume checked-in JSON and never need C, 
 
 The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario will compare that same object with libbpf.
 
+The BTF parser has a structural test against the same object: type kinds, strings, the `counts` map definition and the `handle_open` prototype.
+
 ## Tiers
 
 | Tier | Runs | Needs | Covers |

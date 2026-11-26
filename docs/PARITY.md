@@ -1,6 +1,6 @@
 # Parity matrix
 
-<!-- anchors-ok: cmd/bpfgen internal/elf internal/sys | package paths, not citations -->
+<!-- anchors-ok: cmd/bpfgen internal/elf internal/sys internal/btf | package paths, not citations -->
 
 Status values: not started, in progress, parity tested, deferred.
 
@@ -15,7 +15,7 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | Programs | `libbpf.c` | `program.go` | 1 | not started |
 | Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `netlink.go` | 1 | not started |
 | Pinning and reuse | `libbpf.c` | `pin.go` | 1 | not started |
-| BTF | `btf.c` | `btf.go` | 2 | not started |
+| BTF | `btf.c` | `internal/btf` | 2 | in progress (parser) |
 | CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | not started |
 | BTF to C | `btf_dump.c` | `btf_dump.go` | 2 | not started |
 | Linker | `linker.c` | `linker.go` | 3 | not started |
