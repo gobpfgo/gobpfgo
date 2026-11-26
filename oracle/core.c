@@ -281,8 +281,9 @@ static int print_reloc(void *opaque, const char *section, const struct bpf_core_
 	struct bpf_core_relo_res res;
 	const char *access, *name;
 	unsigned char *program = NULL;
-	size_t program_size    = 0;
-	struct bpf_insn insn, orig;
+	size_t program_size    = 0, insn_idx;
+	struct bpf_insn *insns;
+	struct bpf_insn orig;
 	int target_id, err;
 
 	local_type = btf__type_by_id(ctx->local, relo->type_id);
@@ -303,25 +304,27 @@ static int print_reloc(void *opaque, const char *section, const struct bpf_core_
 
 	if (read_section(ctx->path, section, &program, &program_size))
 		return -1;
-	if (relo->insn_off % sizeof(insn) || relo->insn_off + sizeof(insn) > program_size) {
+	if (relo->insn_off % sizeof(*insns) || relo->insn_off + sizeof(*insns) > program_size) {
 		fprintf(stderr, "%s: instruction %u out of bounds\n", section, relo->insn_off);
 		free(program);
 		return -1;
 	}
-	memcpy(&insn, program + relo->insn_off, sizeof(insn));
-	orig = insn;
-	free(program);
+	insns    = (struct bpf_insn *)program;
+	insn_idx = relo->insn_off / sizeof(*insns);
+	orig     = insns[insn_idx];
 
 	cand  = (struct bpf_core_cand){.btf = ctx->target, .id = target_id};
 	cands = (struct bpf_core_cand_list){.cands = &cand, .len = 1};
 	err   = bpf_core_calc_relo_insn(section, relo, 0, ctx->local, &cands, specs, &res);
 	if (err) {
 		fprintf(stderr, "%s: cannot resolve core relocation: %d\n", section, err);
+		free(program);
 		return -1;
 	}
-	err = bpf_core_patch_insn(section, &insn, relo->insn_off / sizeof(insn), relo, 0, &res);
+	err = bpf_core_patch_insn(section, &insns[insn_idx], insn_idx, relo, 0, &res);
 	if (err) {
 		fprintf(stderr, "%s: cannot patch core relocation: %d\n", section, err);
+		free(program);
 		return -1;
 	}
 
@@ -345,8 +348,9 @@ static int print_reloc(void *opaque, const char *section, const struct bpf_core_
 	json_bool(ctx->j, "poison", res.poison);
 	json_bool(ctx->j, "fail_memsz_adjust", res.fail_memsz_adjust);
 	json_insn(ctx->j, "orig_insn", &orig);
-	json_insn(ctx->j, "new_insn", &insn);
+	json_insn(ctx->j, "new_insn", &insns[insn_idx]);
 	json_obj_end(ctx->j);
+	free(program);
 	return 0;
 }
 

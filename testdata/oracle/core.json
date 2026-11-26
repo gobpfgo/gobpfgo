@@ -5,9 +5,20 @@
   "kernel": "6.18.63-3-lts",
   "object": "core.bpf.o",
   "relos": [
-    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 11, "kind": 0, "access": "0:1", "root_type_id": 11, "bit_offset": 32, "spec": "<byte_off> [11] struct core_sample.second (0:1 @ offset 4)", "accessors": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 11, "kind": 8, "access": "0", "root_type_id": 11, "bit_offset": 0, "spec": "<type_exists> [11] struct core_sample", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 80, "type_id": 11, "kind": 9, "access": "0", "root_type_id": 11, "bit_offset": 0, "spec": "<type_size> [11] struct core_sample", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 96, "type_id": 11, "kind": 6, "access": "0", "root_type_id": 11, "bit_offset": 0, "spec": "<local_type_id> [11] struct core_sample", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 120, "type_id": 11, "kind": 7, "access": "0", "root_type_id": 11, "bit_offset": 0, "spec": "<target_type_id> [11] struct core_sample", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 144, "type_id": 11, "kind": 0, "access": "0:1", "root_type_id": 11, "bit_offset": 32, "spec": "<byte_off> [11] struct core_sample.second (0:1 @ offset 4)", "accessors": [
         {"type_id": 11, "idx": 0, "name": ""},
         {"type_id": 11, "idx": 1, "name": "second"}
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 152, "type_id": 17, "kind": 11, "access": "1", "root_type_id": 17, "bit_offset": 0, "spec": "<enumval_value> [17] enum core_enum::CORE_SECOND = 2", "accessors": [
+        {"type_id": 17, "idx": 1, "name": "CORE_SECOND"}
       ]}
   ]
 }

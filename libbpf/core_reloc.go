@@ -26,6 +26,7 @@ const (
 	bpfSTX        = 0x03
 	bpfJMP        = 0x05
 	bpfCall       = 0x80
+	bpfImm        = 0x00
 	bpfSourceX    = 0x08
 	bpfSizeMask   = 0x18
 	bpfSizeW      = 0x00
@@ -66,12 +67,17 @@ func encodeBpfInsn(b []byte, insn bpfInsn) {
 	binary.NativeEndian.PutUint32(b[4:], uint32(insn.Imm))
 }
 
-// patchCoreInsn applies a resolved CO-RE relocation to insn. It mirrors the
-// ALU, LDX, ST and STX cases of libbpf's bpf_core_patch_insn. The 64-bit load
-// form is not patched yet.
-func patchCoreInsn(insn *bpfInsn, res *btf.CoreReloResult) error {
+// patchCoreInsn applies a resolved CO-RE relocation to the instruction bytes
+// at b. It mirrors the ALU, LDX, ST, STX and LDIMM64 cases of libbpf's
+// bpf_core_patch_insn.
+func patchCoreInsn(b []byte, res *btf.CoreReloResult) error {
+	if len(b) < bpfInsnLength {
+		return fmt.Errorf("core patch: truncated instruction")
+	}
+
+	insn := decodeBpfInsn(b)
 	if res.Poison {
-		poisonCoreInsn(insn)
+		poisonCoreInsn(b, insn.Code)
 		return nil
 	}
 
@@ -84,6 +90,7 @@ func patchCoreInsn(insn *bpfInsn, res *btf.CoreReloResult) error {
 			return fmt.Errorf("core patch: ALU value %d, want %d", insn.Imm, res.OrigVal)
 		}
 		insn.Imm = int32(res.NewVal)
+		encodeBpfInsn(b, insn)
 
 	case bpfLDX, bpfST, bpfSTX:
 		if res.Validate && uint64(int64(insn.Off)) != res.OrigVal {
@@ -93,7 +100,7 @@ func patchCoreInsn(insn *bpfInsn, res *btf.CoreReloResult) error {
 			return fmt.Errorf("core patch: memory offset %d is too large", res.NewVal)
 		}
 		if res.FailMemSizeAdjust {
-			poisonCoreInsn(insn)
+			poisonCoreInsn(b, insn.Code)
 			return nil
 		}
 		insn.Off = int16(res.NewVal)
@@ -108,6 +115,27 @@ func patchCoreInsn(insn *bpfInsn, res *btf.CoreReloResult) error {
 			}
 			insn.Code = insn.Code&^bpfSizeMask | size
 		}
+		encodeBpfInsn(b, insn)
+
+	case bpfLD:
+		if insn.Code != bpfLD|bpfSizeDW|bpfImm || insn.Src != 0 || insn.Off != 0 {
+			return fmt.Errorf("core patch: unexpected 64-bit load form")
+		}
+		if len(b) < 2*bpfInsnLength {
+			return fmt.Errorf("core patch: truncated 64-bit load")
+		}
+		second := decodeBpfInsn(b[bpfInsnLength:])
+		if second.Code != 0 || second.Dst != 0 || second.Src != 0 || second.Off != 0 {
+			return fmt.Errorf("core patch: unexpected 64-bit load tail")
+		}
+		imm := uint64(uint32(insn.Imm)) | uint64(uint32(second.Imm))<<32
+		if res.Validate && imm != res.OrigVal {
+			return fmt.Errorf("core patch: 64-bit value %d, want %d", imm, res.OrigVal)
+		}
+		insn.Imm = int32(res.NewVal)
+		second.Imm = int32(res.NewVal >> 32)
+		encodeBpfInsn(b, insn)
+		encodeBpfInsn(b[bpfInsnLength:], second)
 
 	default:
 		return fmt.Errorf("core patch: unsupported instruction class %#x", insn.Code&bpfClassMask)
@@ -116,8 +144,13 @@ func patchCoreInsn(insn *bpfInsn, res *btf.CoreReloResult) error {
 	return nil
 }
 
-func poisonCoreInsn(insn *bpfInsn) {
-	*insn = bpfInsn{Code: bpfJMP | bpfCall, Imm: bpfPoisonImm}
+func poisonCoreInsn(b []byte, code uint8) {
+	poison := bpfInsn{Code: bpfJMP | bpfCall, Imm: bpfPoisonImm}
+
+	encodeBpfInsn(b, poison)
+	if code == bpfLD|bpfSizeDW|bpfImm && len(b) >= 2*bpfInsnLength {
+		encodeBpfInsn(b[bpfInsnLength:], poison)
+	}
 }
 
 func bpfSizeBits(size uint32) (uint8, bool) {
