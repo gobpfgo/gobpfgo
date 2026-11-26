@@ -3,8 +3,140 @@
   "libbpf_version": "1.9.0",
   "arch": "x86_64",
   "kernel": "6.18.63-3-lts",
-  "object_name": "kprobe",
-  "program": "handle_open",
-  "function": "do_sys_openat2",
-  "triggered": true
+  "cases": [
+    {
+      "kind": "kprobe",
+      "object": "kprobe.bpf.o",
+      "program": "handle_open",
+      "target": "do_sys_openat2",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "kretprobe",
+      "object": "kprobe.bpf.o",
+      "program": "handle_open",
+      "target": "do_sys_openat2",
+      "retprobe": true,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "tracepoint",
+      "object": "tracepoint.bpf.o",
+      "program": "handle_tracepoint",
+      "category": "syscalls",
+      "target": "sys_enter_openat",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "uprobe",
+      "object": "uprobe.bpf.o",
+      "program": "handle_uprobe",
+      "target": "oracle_uprobe_target",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "uretprobe",
+      "object": "uprobe.bpf.o",
+      "program": "handle_uretprobe",
+      "target": "oracle_uprobe_target",
+      "retprobe": true,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "fentry",
+      "object": "fentry.bpf.o",
+      "program": "handle_fentry",
+      "target": "do_sys_openat2",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "fexit",
+      "object": "fentry.bpf.o",
+      "program": "handle_fexit",
+      "target": "do_sys_openat2",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "raw_tracepoint",
+      "object": "raw_tp.bpf.o",
+      "program": "handle_raw_tp",
+      "target": "sys_enter",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 3,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "kprobe_multi",
+      "object": "kprobe_multi.bpf.o",
+      "program": "handle_open_multi",
+      "target": "do_sys_openat2",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "kretprobe_multi",
+      "object": "kprobe_multi.bpf.o",
+      "program": "handle_open_multi",
+      "target": "do_sys_openat2",
+      "retprobe": true,
+      "cookie": false,
+      "cookie_value": 1,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "lsm",
+      "object": "lsm.bpf.o",
+      "program": "handle_lsm",
+      "target": "file_open",
+      "retprobe": false,
+      "cookie": false,
+      "cookie_value": 93,
+      "supported": true,
+      "triggered": true
+    },
+    {
+      "kind": "cookie",
+      "object": "cookie.bpf.o",
+      "program": "handle_cookie",
+      "category": "syscalls",
+      "target": "sys_enter_openat",
+      "retprobe": false,
+      "cookie": true,
+      "cookie_value": 4660,
+      "supported": true,
+      "triggered": true
+    }
+  ]
 }

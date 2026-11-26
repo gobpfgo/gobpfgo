@@ -24,17 +24,20 @@ type fixtureBlock struct {
 }
 
 type layoutFixture struct {
-	LibbpfCommit string       `json:"libbpf_commit"`
-	Arch         string       `json:"arch"`
-	Kernel       string       `json:"kernel"`
-	MapCreate    fixtureBlock `json:"map_create"`
-	MapElem      fixtureBlock `json:"map_elem"`
-	ObjPin       fixtureBlock `json:"obj_pin"`
-	BtfLoad      fixtureBlock `json:"btf_load"`
-	ProgLoad     fixtureBlock `json:"prog_load"`
-	ObjInfo      fixtureBlock `json:"obj_info"`
-	MapInfo      fixtureBlock `json:"map_info"`
-	ProgInfo     fixtureBlock `json:"prog_info"`
+	LibbpfCommit  string       `json:"libbpf_commit"`
+	Arch          string       `json:"arch"`
+	Kernel        string       `json:"kernel"`
+	MapCreate     fixtureBlock `json:"map_create"`
+	MapElem       fixtureBlock `json:"map_elem"`
+	ObjPin        fixtureBlock `json:"obj_pin"`
+	BtfLoad       fixtureBlock `json:"btf_load"`
+	ProgLoad      fixtureBlock `json:"prog_load"`
+	LinkCreate    fixtureBlock `json:"link_create"`
+	LinkUpdate    fixtureBlock `json:"link_update"`
+	RawTracepoint fixtureBlock `json:"raw_tracepoint"`
+	ObjInfo       fixtureBlock `json:"obj_info"`
+	MapInfo       fixtureBlock `json:"map_info"`
+	ProgInfo      fixtureBlock `json:"prog_info"`
 }
 
 func loadLayoutFixture(t *testing.T) layoutFixture {
@@ -108,6 +111,21 @@ func TestBtfLoadLayout(t *testing.T) {
 func TestProgLoadLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "prog_load", f.ProgLoad, ProgLoadAttrSize, progLoadFieldLayout())
+}
+
+func TestLinkCreateLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "link_create", f.LinkCreate, LinkCreateAttrSize, linkCreateFieldLayout())
+}
+
+func TestLinkUpdateLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "link_update", f.LinkUpdate, LinkUpdateAttrSize, linkUpdateFieldLayout())
+}
+
+func TestRawTracepointLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "raw_tracepoint", f.RawTracepoint, RawTracepointAttrSize, rawTracepointFieldLayout())
 }
 
 func TestObjInfoLayout(t *testing.T) {

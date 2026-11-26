@@ -9,6 +9,9 @@
 #include <stdint.h>
 
 #define F(name) {#name, offsetof(union bpf_attr, name), sizeof(((union bpf_attr *)0)->name)}
+#define FC(name) {#name, offsetof(union bpf_attr, link_create.name), sizeof(((union bpf_attr *)0)->link_create.name)}
+#define FU(name) {#name, offsetof(union bpf_attr, link_update.name), sizeof(((union bpf_attr *)0)->link_update.name)}
+#define FR(name) {#name, offsetof(union bpf_attr, raw_tracepoint.name), sizeof(((union bpf_attr *)0)->raw_tracepoint.name)}
 #define FMAP(name) {#name, offsetof(struct bpf_map_info, name), sizeof(((struct bpf_map_info *)0)->name)}
 #define FPROG(name) {#name, offsetof(struct bpf_prog_info, name), sizeof(((struct bpf_prog_info *)0)->name)}
 
@@ -53,8 +56,43 @@ int oracle_layout(void) {
 		F(log_buf),
 		F(prog_flags),
 		F(prog_name),
+		F(prog_ifindex),
 		F(expected_attach_type),
 		F(prog_btf_fd),
+		F(func_info_rec_size),
+		F(func_info),
+		F(func_info_cnt),
+		F(line_info_rec_size),
+		F(line_info),
+		F(line_info_cnt),
+		F(attach_btf_id),
+		F(attach_btf_obj_fd),
+	};
+	static const struct oracle_field link_create_fields[] = {
+		FC(prog_fd),
+		FC(target_fd),
+		FC(attach_type),
+		FC(flags),
+		FC(target_btf_id),
+		FC(perf_event.bpf_cookie),
+		FC(kprobe_multi.flags),
+		FC(kprobe_multi.cnt),
+		FC(kprobe_multi.syms),
+		FC(kprobe_multi.addrs),
+		FC(kprobe_multi.cookies),
+		FC(tracing.target_btf_id),
+		FC(tracing.cookie),
+	};
+	static const struct oracle_field link_update_fields[] = {
+		FU(link_fd),
+		FU(new_prog_fd),
+		FU(flags),
+		FU(old_prog_fd),
+	};
+	static const struct oracle_field raw_tracepoint_fields[] = {
+		FR(name),
+		FR(prog_fd),
+		FR(cookie),
 	};
 	static const struct oracle_field map_elem_fields[] = {
 		F(map_fd),
@@ -101,6 +139,9 @@ int oracle_layout(void) {
 	oracle_field_block(&j, "map_create", map_create_fields, ORACLE_ARRAY_SIZE(map_create_fields), ORACLE_OFFSETOFEND(union bpf_attr, excl_prog_hash_size));
 	oracle_field_block(&j, "btf_load", btf_load_fields, ORACLE_ARRAY_SIZE(btf_load_fields), ORACLE_OFFSETOFEND(union bpf_attr, btf_token_fd));
 	oracle_field_block(&j, "prog_load", prog_load_fields, ORACLE_ARRAY_SIZE(prog_load_fields), ORACLE_OFFSETOFEND(union bpf_attr, keyring_id));
+	oracle_field_block(&j, "link_create", link_create_fields, ORACLE_ARRAY_SIZE(link_create_fields), ORACLE_OFFSETOFEND(union bpf_attr, link_create));
+	oracle_field_block(&j, "link_update", link_update_fields, ORACLE_ARRAY_SIZE(link_update_fields), ORACLE_OFFSETOFEND(union bpf_attr, link_update));
+	oracle_field_block(&j, "raw_tracepoint", raw_tracepoint_fields, ORACLE_ARRAY_SIZE(raw_tracepoint_fields), ORACLE_OFFSETOFEND(union bpf_attr, raw_tracepoint));
 	oracle_field_block(&j, "map_elem", map_elem_fields, ORACLE_ARRAY_SIZE(map_elem_fields), ORACLE_OFFSETOFEND(union bpf_attr, flags));
 	oracle_field_block(&j, "obj_pin", obj_pin_fields, ORACLE_ARRAY_SIZE(obj_pin_fields), ORACLE_OFFSETOFEND(union bpf_attr, path_fd));
 	oracle_field_block(&j, "obj_info", obj_info_fields, ORACLE_ARRAY_SIZE(obj_info_fields), ORACLE_OFFSETOFEND(union bpf_attr, info));
