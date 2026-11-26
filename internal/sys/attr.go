@@ -108,8 +108,9 @@ const (
 	mapElemOffFlags = 24
 )
 
-// MapElemAttr is the BPF_MAP_LOOKUP_ELEM view of union bpf_attr. Key and Value
-// are the addresses of the caller's buffers; MapLookupElem fills them in.
+// MapElemAttr is the BPF_MAP_*_ELEM view of union bpf_attr. Key and Value are
+// the addresses of the caller's buffers; MapLookupElem fills the value in and
+// MapUpdateElem reads both.
 type MapElemAttr struct {
 	MapFD uint32
 	Key   uint64

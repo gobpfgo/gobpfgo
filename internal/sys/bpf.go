@@ -99,3 +99,43 @@ func MapLookupElem(fd int, key, value []byte, flags uint64) error {
 	runtime.KeepAlive(value)
 	return err
 }
+
+// MapUpdateElem calls BPF_MAP_UPDATE_ELEM and copies value into the map.
+//
+// flags is one of BPF_ANY, BPF_NOEXIST or BPF_EXIST. The slices are kept
+// alive until the syscall returns.
+func MapUpdateElem(fd int, key, value []byte, flags uint64) error {
+	if fd < 0 || len(key) == 0 || len(value) == 0 {
+		return unix.EINVAL
+	}
+
+	attr := &MapElemAttr{
+		MapFD: uint32(fd),
+		Key:   uint64(addr(key)),
+		Value: uint64(addr(value)),
+		Flags: flags,
+	}
+	err := BPF(BPF_MAP_UPDATE_ELEM, attr.Marshal())
+	runtime.KeepAlive(key)
+	runtime.KeepAlive(value)
+	return err
+}
+
+// MapDeleteElem calls BPF_MAP_DELETE_ELEM and removes key from the map.
+//
+// The value address is NULL, as the command does not read one. key is kept
+// alive until the syscall returns.
+func MapDeleteElem(fd int, key []byte, flags uint64) error {
+	if fd < 0 || len(key) == 0 {
+		return unix.EINVAL
+	}
+
+	attr := &MapElemAttr{
+		MapFD: uint32(fd),
+		Key:   uint64(addr(key)),
+		Flags: flags,
+	}
+	err := BPF(BPF_MAP_DELETE_ELEM, attr.Marshal())
+	runtime.KeepAlive(key)
+	return err
+}

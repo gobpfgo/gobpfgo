@@ -4,6 +4,7 @@
 #include "oracle.h"
 
 #include <linux/bpf.h>
+#include <linux/perf_event.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -14,6 +15,23 @@
 #define FR(name) {#name, offsetof(union bpf_attr, raw_tracepoint.name), sizeof(((union bpf_attr *)0)->raw_tracepoint.name)}
 #define FMAP(name) {#name, offsetof(struct bpf_map_info, name), sizeof(((struct bpf_map_info *)0)->name)}
 #define FPROG(name) {#name, offsetof(struct bpf_prog_info, name), sizeof(((struct bpf_prog_info *)0)->name)}
+#define FPAGE(name) {#name, offsetof(struct perf_event_mmap_page, name), sizeof(((struct perf_event_mmap_page *)0)->name)}
+#define FHDR(name) {#name, offsetof(struct perf_event_header, name), sizeof(((struct perf_event_header *)0)->name)}
+
+struct perf_sample_raw_layout {
+	struct perf_event_header header;
+	__u32 size;
+};
+
+struct perf_sample_lost_layout {
+	struct perf_event_header header;
+	__u64 id;
+	__u64 lost;
+	__u64 sample_id;
+};
+
+#define FSAMPLE(name) {#name, offsetof(struct perf_sample_raw_layout, name), sizeof(((struct perf_sample_raw_layout *)0)->name)}
+#define FLOST(name) {#name, offsetof(struct perf_sample_lost_layout, name), sizeof(((struct perf_sample_lost_layout *)0)->name)}
 
 int oracle_layout(void) {
 	static const struct oracle_field map_create_fields[] = {
@@ -129,6 +147,23 @@ int oracle_layout(void) {
 		FPROG(xlated_prog_len),
 		FPROG(name),
 	};
+	static const struct oracle_field perf_event_fields[] = {
+		FPAGE(data_head),
+		FPAGE(data_tail),
+	};
+	static const struct oracle_field perf_event_header_fields[] = {
+		FHDR(type),
+		FHDR(misc),
+		FHDR(size),
+	};
+	static const struct oracle_field perf_sample_fields[] = {
+		FSAMPLE(size),
+	};
+	static const struct oracle_field perf_lost_fields[] = {
+		FLOST(id),
+		FLOST(lost),
+		FLOST(sample_id),
+	};
 	struct oracle_meta meta = {.commit = true};
 	struct json j;
 
@@ -147,6 +182,10 @@ int oracle_layout(void) {
 	oracle_field_block(&j, "obj_info", obj_info_fields, ORACLE_ARRAY_SIZE(obj_info_fields), ORACLE_OFFSETOFEND(union bpf_attr, info));
 	oracle_field_block(&j, "map_info", map_info_fields, ORACLE_ARRAY_SIZE(map_info_fields), sizeof(struct bpf_map_info));
 	oracle_field_block(&j, "prog_info", prog_info_fields, ORACLE_ARRAY_SIZE(prog_info_fields), sizeof(struct bpf_prog_info));
+	oracle_field_block(&j, "perf_event", perf_event_fields, ORACLE_ARRAY_SIZE(perf_event_fields), ORACLE_OFFSETOFEND(struct perf_event_mmap_page, data_tail));
+	oracle_field_block(&j, "perf_event_header", perf_event_header_fields, ORACLE_ARRAY_SIZE(perf_event_header_fields), sizeof(struct perf_event_header));
+	oracle_field_block(&j, "perf_sample", perf_sample_fields, ORACLE_ARRAY_SIZE(perf_sample_fields), sizeof(struct perf_sample_raw_layout));
+	oracle_field_block(&j, "perf_lost", perf_lost_fields, ORACLE_ARRAY_SIZE(perf_lost_fields), sizeof(struct perf_sample_lost_layout));
 
 	json_obj_end(&j);
 	fputc('\n', stdout);

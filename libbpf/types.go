@@ -12,6 +12,29 @@ type BpfMapType uint32
 // array of max_entries values and indexes it by key.
 const BPF_MAP_TYPE_ARRAY BpfMapType = 2
 
+// BPF_MAP_TYPE_PERF_EVENT_ARRAY maps a CPU index to a perf event descriptor.
+// The perf buffer writes one entry per online CPU.
+const BPF_MAP_TYPE_PERF_EVENT_ARRAY BpfMapType = 4
+
+// Additional map types used by the BTF creation rule. The kernel accepts no
+// BTF key or value ids for them, so libbpf clears the object BTF and both ids
+// before creating the map.
+const (
+	BPF_MAP_TYPE_STACK_TRACE   BpfMapType = 7
+	BPF_MAP_TYPE_CGROUP_ARRAY  BpfMapType = 8
+	BPF_MAP_TYPE_ARRAY_OF_MAPS BpfMapType = 12
+	BPF_MAP_TYPE_HASH_OF_MAPS  BpfMapType = 13
+	BPF_MAP_TYPE_DEVMAP        BpfMapType = 14
+	BPF_MAP_TYPE_SOCKMAP       BpfMapType = 15
+	BPF_MAP_TYPE_CPUMAP        BpfMapType = 16
+	BPF_MAP_TYPE_XSKMAP        BpfMapType = 17
+	BPF_MAP_TYPE_SOCKHASH      BpfMapType = 18
+	BPF_MAP_TYPE_QUEUE         BpfMapType = 22
+	BPF_MAP_TYPE_STACK         BpfMapType = 23
+	BPF_MAP_TYPE_DEVMAP_HASH   BpfMapType = 25
+	BPF_MAP_TYPE_ARENA         BpfMapType = 33
+)
+
 // BPF_MAP_TYPE_RINGBUF is the BPF ring buffer map type. max_entries is the
 // data ring size in bytes and must be a power of two.
 const BPF_MAP_TYPE_RINGBUF BpfMapType = 27

@@ -147,5 +147,34 @@
       {"name": "xlated_prog_len", "offset": 20, "size": 4},
       {"name": "name", "offset": 64, "size": 16}
     ]
+  },
+  "perf_event": {
+    "attr_size": 1040,
+    "fields": [
+      {"name": "data_head", "offset": 1024, "size": 8},
+      {"name": "data_tail", "offset": 1032, "size": 8}
+    ]
+  },
+  "perf_event_header": {
+    "attr_size": 8,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "misc", "offset": 4, "size": 2},
+      {"name": "size", "offset": 6, "size": 2}
+    ]
+  },
+  "perf_sample": {
+    "attr_size": 12,
+    "fields": [
+      {"name": "size", "offset": 8, "size": 4}
+    ]
+  },
+  "perf_lost": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "id", "offset": 8, "size": 8},
+      {"name": "lost", "offset": 16, "size": 8},
+      {"name": "sample_id", "offset": 24, "size": 8}
+    ]
   }
 }
