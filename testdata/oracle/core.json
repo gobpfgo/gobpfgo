@@ -17,8 +17,13 @@
         {"type_id": 11, "idx": 0, "name": ""},
         {"type_id": 11, "idx": 1, "name": "second"}
       ]},
-    {"section": "kprobe/do_sys_openat2", "insn_off": 152, "type_id": 17, "kind": 11, "access": "1", "root_type_id": 17, "bit_offset": 0, "spec": "<enumval_value> [17] enum core_enum::CORE_SECOND = 2", "accessors": [
-        {"type_id": 17, "idx": 1, "name": "CORE_SECOND"}
+    {"section": "kprobe/do_sys_openat2", "insn_off": 152, "type_id": 22, "kind": 11, "access": "1", "root_type_id": 22, "bit_offset": 0, "spec": "<enumval_value> [22] enum core_enum::CORE_SECOND = 2", "accessors": [
+        {"type_id": 22, "idx": 1, "name": "CORE_SECOND"}
+      ]},
+    {"section": "kprobe/do_sys_open_flex", "insn_off": 64, "type_id": 15, "kind": 0, "access": "0:1:0", "root_type_id": 15, "bit_offset": 32, "spec": "<byte_off> [15] struct core_flex.values[0] (0:1:0 @ offset 4)", "accessors": [
+        {"type_id": 15, "idx": 0, "name": ""},
+        {"type_id": 15, "idx": 1, "name": "values"},
+        {"type_id": 2, "idx": 0, "name": ""}
       ]}
   ]
 }

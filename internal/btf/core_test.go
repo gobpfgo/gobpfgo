@@ -116,7 +116,11 @@ func TestCalcCoreRelo(t *testing.T) {
 	found := false
 	for _, section := range ext.CoreRelos {
 		for _, candidate := range section.Relos {
-			if candidate.Kind == CoreFieldByteOffset {
+			if candidate.Kind != CoreFieldByteOffset {
+				continue
+			}
+			localType, err := local.TypeByID(candidate.TypeID)
+			if err == nil && localType.Name == "core_sample" {
 				relo = candidate
 				found = true
 			}

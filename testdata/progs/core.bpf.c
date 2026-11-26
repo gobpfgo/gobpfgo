@@ -15,12 +15,24 @@ struct core_sample {
 	int second;
 };
 
+struct core_flex {
+	int count;
+	int values[];
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
 	__type(value, struct core_sample);
 } values SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct core_flex);
+} flex_values SEC(".maps");
 
 SEC("kprobe/do_sys_openat2")
 int handle_core(void *ctx) {
@@ -38,6 +50,16 @@ int handle_core(void *ctx) {
 	if (bpf_core_type_id_kernel(struct core_sample) == 0)
 		return 0;
 	return __builtin_preserve_access_index(sample->second) + bpf_core_enum_value(enum core_enum, CORE_SECOND);
+}
+
+SEC("kprobe/do_sys_open_flex")
+int handle_flex(void *ctx) {
+	__u32 key              = 0;
+	struct core_flex *flex = bpf_map_lookup_elem(&flex_values, &key);
+
+	if (!flex)
+		return 0;
+	return __builtin_preserve_access_index(flex->values[0]);
 }
 
 char LICENSE[] SEC("license") = "GPL";

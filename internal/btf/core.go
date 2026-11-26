@@ -195,10 +195,8 @@ func (s *Spec) ParseCoreSpec(relo CoreRelo) (*CoreSpec, error) {
 			if t.Array == nil {
 				return nil, fmt.Errorf("btf: type %d has no array payload", id)
 			}
-			if t.Array.Nelems == 0 {
-				return nil, fmt.Errorf("btf: flexible array access is not supported")
-			}
-			if raw[i] >= t.Array.Nelems {
+			flex := isFlexArray(s, spec.Accessors, t.Array)
+			if !flex && raw[i] >= t.Array.Nelems {
 				return nil, fmt.Errorf("btf: array index %d out of range", raw[i])
 			}
 			_, elemID, err := s.skipModsTypedefs(t.Array.Type)
@@ -495,10 +493,8 @@ func (s *Spec) matchCoreSpec(local *CoreSpec, target *Spec, targetTypeID uint32)
 		if t.Kind != KindArray || t.Array == nil {
 			return nil, false, nil
 		}
-		if t.Array.Nelems == 0 {
-			return nil, false, fmt.Errorf("btf: flexible array access is not supported")
-		}
-		if acc.Index >= t.Array.Nelems {
+		flex := isFlexArray(target, targ.Accessors, t.Array)
+		if !flex && acc.Index >= t.Array.Nelems {
 			return nil, false, nil
 		}
 		_, elemID, err := target.skipModsTypedefs(t.Array.Type)
@@ -812,6 +808,23 @@ func parseCoreAccess(access string) ([]uint32, error) {
 		raw = append(raw, uint32(idx))
 	}
 	return raw, nil
+}
+
+// isFlexArray reports whether arr is a flexible array member: zero-length,
+// named by the previous accessor, and the last member of its struct or union.
+func isFlexArray(s *Spec, accessors []CoreAccessor, arr *Array) bool {
+	if arr == nil || arr.Nelems != 0 || len(accessors) == 0 {
+		return false
+	}
+	acc := &accessors[len(accessors)-1]
+	if acc.Name == "" {
+		return false
+	}
+	t, err := s.TypeByID(acc.TypeID)
+	if err != nil || (t.Kind != KindStruct && t.Kind != KindUnion) {
+		return false
+	}
+	return acc.Index == uint32(len(t.Members))-1
 }
 
 // addBitOffset adds idx elements of size bytes to offset and rejects a result
