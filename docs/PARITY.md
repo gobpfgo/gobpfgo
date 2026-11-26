@@ -16,7 +16,7 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `netlink.go` | 1 | in progress (kprobe through tracefs; kprobe multi and perf links not ported) |
 | Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go` | 1 | in progress (map, program and object pin/unpin and map reuse; link pinning not ported) |
 | BTF | `btf.c` | `internal/btf` | 2 | in progress (parser) |
-| CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | in progress (access-spec parsing; target matching and patching not started) |
+| CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | in progress (access specs, field matching and patching; load-path wiring and type/enum target matching not done) |
 | BTF to C | `btf_dump.c` | `btf_dump.go` | 2 | not started |
 | Linker | `linker.c` | `linker.go` | 3 | not started |
 | USDT | `usdt.c` | `usdt.go` | 3 | not started |
@@ -45,7 +45,8 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | Map reuse | root reuse test | parity tested (5.10 and 6.18) |
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |
 | CO-RE access spec | C harness JSON (`core` scenario) | parity tested (field access) |
-| CO-RE target fixups | libbpf internal harness | not started |
+| CO-RE field relocation | C harness JSON (`core-reloc` scenario) | parity tested (field access, synthetic target) |
+| CO-RE target fixups in the load path | kernel BTF + root load | not started |
 | `btf_dump` text | exact text diff | not started |
 | 5.10 and newer | VM matrix | parity tested (5.10.0-46-cloud-amd64 and 6.18.63-3-lts; arm64 not run) |
 

@@ -1,0 +1,11 @@
+{
+  "case": "core-reloc",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core.bpf.o",
+  "target": "core_target.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 11, "kind": 0, "access": "0:1", "target_type_id": 1, "orig_val": 4, "new_val": 8, "orig_sz": 4, "new_sz": 4, "orig_type_id": 2, "new_type_id": 2, "validate": true, "poison": false, "fail_memsz_adjust": false, "orig_insn": {"code": 97, "dst": 6, "src": 0, "off": 4, "imm": 0}, "new_insn": {"code": 97, "dst": 6, "src": 0, "off": 8, "imm": 0}}
+  ]
+}
