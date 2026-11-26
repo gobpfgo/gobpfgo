@@ -11,7 +11,7 @@ struct {
 	__type(value, __u64);
 } counts SEC(".maps");
 
-SEC("kprobe/do_sys_open")
+SEC("kprobe/do_sys_openat2")
 int handle_open(void *ctx) {
 	__u32 key    = 0;
 	__u64 *value = bpf_map_lookup_elem(&counts, &key);
