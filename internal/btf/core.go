@@ -227,6 +227,414 @@ func (s *Spec) ParseCoreSpec(relo CoreRelo) (*CoreSpec, error) {
 	return spec, nil
 }
 
+// CoreReloResult is the computed local and target values of a CO-RE
+// relocation. It is the Go view of bpf_core_relo_res.
+type CoreReloResult struct {
+	OrigVal           uint64
+	NewVal            uint64
+	OrigSize          uint32
+	NewSize           uint32
+	OrigTypeID        uint32
+	NewTypeID         uint32
+	Validate          bool
+	Poison            bool
+	FailMemSizeAdjust bool
+}
+
+// CalcCoreRelo matches relo against targetTypeID and computes the local and
+// target relocation values.
+//
+// It supports the field-based kinds. A field missing from the target yields
+// NewVal zero for FIELD_EXISTS and a poisoned result for every other kind.
+// Type-based and enum-value target matching are not implemented yet.
+func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
+	if target == nil {
+		return nil, fmt.Errorf("btf: nil target spec")
+	}
+	if !relo.Kind.fieldBased() {
+		return nil, fmt.Errorf("btf: target matching for %s is not implemented", relo.Kind)
+	}
+
+	local, err := s.ParseCoreSpec(relo)
+	if err != nil {
+		return nil, err
+	}
+	targ, found, err := s.matchCoreSpec(local, target, targetTypeID)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &CoreReloResult{}
+	if !found {
+		if relo.Kind == CoreFieldExists {
+			res.OrigVal = 1
+			return res, nil
+		}
+		res.Poison = true
+		return res, nil
+	}
+
+	origVal, origSize, origType, validate, err := local.calcField(s, relo.Kind)
+	if err != nil {
+		return nil, err
+	}
+	newVal, newSize, newType, _, err := targ.calcField(target, relo.Kind)
+	if err != nil {
+		return nil, err
+	}
+
+	res.OrigVal = origVal
+	res.NewVal = newVal
+	res.OrigSize = origSize
+	res.NewSize = newSize
+	res.OrigTypeID = origType
+	res.NewTypeID = newType
+	res.Validate = validate
+
+	if origSize != newSize {
+		origBtfType, err := s.TypeByID(origType)
+		if err != nil {
+			return nil, err
+		}
+		newBtfType, err := target.TypeByID(newType)
+		if err != nil {
+			return nil, err
+		}
+		safe := origBtfType.Kind == KindPtr && newBtfType.Kind == KindPtr
+		if origBtfType.Kind == KindInt && newBtfType.Kind == KindInt {
+			safe = intEncoding(origBtfType)&(1<<24) == 0 && intEncoding(newBtfType)&(1<<24) == 0
+		}
+		res.FailMemSizeAdjust = !safe
+	}
+
+	return res, nil
+}
+
+// matchCoreSpec walks the target type with the field and array accessors of
+// the local spec. It returns found false when a field is absent.
+func (s *Spec) matchCoreSpec(local *CoreSpec, target *Spec, targetTypeID uint32) (*CoreSpec, bool, error) {
+	targ := &CoreSpec{
+		RootTypeID: targetTypeID,
+		Kind:       local.Kind,
+	}
+	targID := targetTypeID
+
+	for i, acc := range local.Accessors {
+		t, id, err := target.skipModsTypedefs(targID)
+		if err != nil {
+			return nil, false, err
+		}
+		targID = id
+
+		if acc.Name != "" {
+			found, nextID, err := s.matchMember(&acc, target, t, targID, targ)
+			if err != nil {
+				return nil, false, err
+			}
+			if !found {
+				return nil, false, nil
+			}
+			targID = nextID
+			continue
+		}
+
+		if i == 0 {
+			size, err := target.SizeOf(targID)
+			if err != nil {
+				return nil, false, err
+			}
+			targ.BitOffset, err = addBitOffset(targ.BitOffset, acc.Index, size)
+			if err != nil {
+				return nil, false, err
+			}
+			targ.Accessors = append(targ.Accessors, CoreAccessor{TypeID: targID, Index: acc.Index})
+			continue
+		}
+
+		if t.Kind != KindArray || t.Array == nil {
+			return nil, false, nil
+		}
+		if t.Array.Nelems == 0 {
+			return nil, false, fmt.Errorf("btf: flexible array access is not supported")
+		}
+		if acc.Index >= t.Array.Nelems {
+			return nil, false, nil
+		}
+		_, elemID, err := target.skipModsTypedefs(t.Array.Type)
+		if err != nil {
+			return nil, false, err
+		}
+		size, err := target.SizeOf(elemID)
+		if err != nil {
+			return nil, false, err
+		}
+		targ.BitOffset, err = addBitOffset(targ.BitOffset, acc.Index, size)
+		if err != nil {
+			return nil, false, err
+		}
+		targ.Accessors = append(targ.Accessors, CoreAccessor{TypeID: elemID, Index: acc.Index})
+		targID = elemID
+	}
+
+	return targ, true, nil
+}
+
+// matchMember finds the named local member in the target composite, including
+// anonymous embedded structs and unions. It returns the matched member type
+// for the next accessor.
+func (s *Spec) matchMember(localAcc *CoreAccessor, target *Spec, targetType *Type, targetID uint32, targ *CoreSpec) (bool, uint32, error) {
+	if targetType.Kind != KindStruct && targetType.Kind != KindUnion {
+		return false, 0, nil
+	}
+
+	localType, err := s.TypeByID(localAcc.TypeID)
+	if err != nil {
+		return false, 0, err
+	}
+	if localAcc.Index >= uint32(len(localType.Members)) {
+		return false, 0, fmt.Errorf("btf: local field index %d out of range", localAcc.Index)
+	}
+	localMember := localType.Members[localAcc.Index]
+
+	for i := range targetType.Members {
+		member := targetType.Members[i]
+
+		if member.Name == "" {
+			savedOffset := targ.BitOffset
+			savedAccessors := len(targ.Accessors)
+			if uint64(targ.BitOffset)+uint64(member.Offset) > math.MaxUint32 {
+				return false, 0, fmt.Errorf("btf: bit offset overflows")
+			}
+			targ.BitOffset += member.Offset
+			memberType := targetMemberType(target, member.Type)
+			if memberType == nil {
+				return false, 0, fmt.Errorf("btf: anonymous member type %d not found", member.Type)
+			}
+			found, nextID, err := s.matchMember(localAcc, target, memberType, member.Type, targ)
+			if err != nil {
+				return false, 0, err
+			}
+			if found {
+				return true, nextID, nil
+			}
+			targ.BitOffset = savedOffset
+			targ.Accessors = targ.Accessors[:savedAccessors]
+			continue
+		}
+
+		if member.Name != localMember.Name {
+			continue
+		}
+		if !coreFieldsCompatible(s, localMember.Type, target, member.Type) {
+			continue
+		}
+
+		if uint64(targ.BitOffset)+uint64(member.Offset) > math.MaxUint32 {
+			return false, 0, fmt.Errorf("btf: bit offset overflows")
+		}
+		targ.BitOffset += member.Offset
+		targ.Accessors = append(targ.Accessors, CoreAccessor{
+			TypeID: targetID,
+			Index:  uint32(i),
+			Name:   member.Name,
+		})
+		return true, member.Type, nil
+	}
+
+	return false, 0, nil
+}
+
+func targetMemberType(spec *Spec, id uint32) *Type {
+	t, _, err := spec.skipModsTypedefs(id)
+	if err != nil {
+		return nil
+	}
+	return t
+}
+
+// calcField implements bpf_core_calc_field_relo for one spec.
+func (spec *CoreSpec) calcField(s *Spec, kind CoreReloKind) (uint64, uint32, uint32, bool, error) {
+	if kind == CoreFieldExists {
+		return 1, 0, 0, false, nil
+	}
+	if len(spec.Accessors) == 0 {
+		return 0, 0, 0, false, fmt.Errorf("btf: empty core access spec")
+	}
+
+	acc := spec.Accessors[len(spec.Accessors)-1]
+	t, err := s.TypeByID(acc.TypeID)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+
+	if acc.Name == "" {
+		switch kind {
+		case CoreFieldByteOffset:
+			val := uint64(spec.BitOffset / 8)
+			size, err := s.elementSize(acc.TypeID)
+			if err != nil {
+				return 0, 0, 0, false, err
+			}
+			return val, size, acc.TypeID, true, nil
+		case CoreFieldByteSize:
+			size, err := s.SizeOf(acc.TypeID)
+			if err != nil {
+				return 0, 0, 0, false, err
+			}
+			return uint64(size), 0, 0, true, nil
+		default:
+			return 0, 0, 0, false, fmt.Errorf("btf: %s on an array access", kind)
+		}
+	}
+
+	if acc.Index >= uint32(len(t.Members)) {
+		return 0, 0, 0, false, fmt.Errorf("btf: field index %d out of range", acc.Index)
+	}
+	member := t.Members[acc.Index]
+	memberType, fieldTypeID, err := s.skipModsTypedefs(member.Type)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+
+	bitOff := spec.BitOffset
+	bitSize := uint32(member.BitfieldSize)
+	bitfield := bitSize > 0
+	byteSize, err := s.SizeOf(fieldTypeID)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	byteOff := bitOff / 8
+	if bitfield {
+		byteOff = bitOff / 8 / byteSize * byteSize
+		for bitOff+bitSize-byteOff*8 > byteSize*8 {
+			if byteSize >= 8 {
+				return 0, 0, 0, false, fmt.Errorf("btf: bitfield does not fit")
+			}
+			byteSize *= 2
+			byteOff = bitOff / 8 / byteSize * byteSize
+		}
+	} else {
+		bitSize = byteSize * 8
+	}
+
+	validate := !bitfield
+	switch kind {
+	case CoreFieldByteOffset:
+		val := uint64(byteOff)
+		if bitfield {
+			return val, 0, 0, validate, nil
+		}
+		size, err := s.elementSize(fieldTypeID)
+		if err != nil {
+			return 0, 0, 0, false, err
+		}
+		return val, size, fieldTypeID, validate, nil
+	case CoreFieldByteSize:
+		return uint64(byteSize), 0, 0, validate, nil
+	case CoreFieldSigned:
+		signed := (memberType.Kind == KindEnum || memberType.Kind == KindEnum64) && memberType.KindFlag ||
+			memberType.Kind == KindInt && intEncoding(memberType)&(1<<24) != 0
+		return boolUint64(signed), 0, 0, true, nil
+	case CoreFieldLShiftU64:
+		return uint64(64 - (bitOff + bitSize - byteOff*8)), 0, 0, validate, nil
+	case CoreFieldRShiftU64:
+		return uint64(64 - bitSize), 0, 0, true, nil
+	default:
+		return 0, 0, 0, false, fmt.Errorf("btf: unsupported field relocation %s", kind)
+	}
+}
+
+// elementSize returns the size of the element type after stripping arrays.
+func (s *Spec) elementSize(id uint32) (uint32, error) {
+	for {
+		t, next, err := s.skipModsTypedefs(id)
+		if err != nil {
+			return 0, err
+		}
+		if t.Kind != KindArray {
+			return s.SizeOf(next)
+		}
+		if t.Array == nil {
+			return 0, fmt.Errorf("btf: type %d has no array payload", next)
+		}
+		id = t.Array.Type
+	}
+}
+
+func intEncoding(t *Type) uint32 {
+	if t.Int == nil {
+		return 0
+	}
+	return t.Int.Encoding
+}
+
+func boolUint64(v bool) uint64 {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+// coreFieldsCompatible mirrors libbpf's field compatibility rules closely
+// enough for the field accessor match.
+func coreFieldsCompatible(local *Spec, localID uint32, target *Spec, targetID uint32) bool {
+	localType, localID, err := local.skipModsTypedefs(localID)
+	if err != nil {
+		return false
+	}
+	targetType, targetID, err := target.skipModsTypedefs(targetID)
+	if err != nil {
+		return false
+	}
+
+	if (localType.Kind == KindStruct || localType.Kind == KindUnion) &&
+		(targetType.Kind == KindStruct || targetType.Kind == KindUnion) {
+		return true
+	}
+	if isEnumKind(localType.Kind) && isEnumKind(targetType.Kind) {
+		localName := essentialName(localType.Name)
+		targetName := essentialName(targetType.Name)
+		return localName == "" || targetName == "" || localName == targetName
+	}
+	if localType.Kind != targetType.Kind {
+		return false
+	}
+
+	switch localType.Kind {
+	case KindPtr, KindFloat:
+		return true
+	case KindFwd, KindEnum, KindEnum64:
+		localName := essentialName(localType.Name)
+		targetName := essentialName(targetType.Name)
+		return localName == "" || targetName == "" || localName == targetName
+	case KindInt:
+		return intOffset(localType) == 0 && intOffset(targetType) == 0
+	case KindArray:
+		if localType.Array == nil || targetType.Array == nil {
+			return false
+		}
+		return coreFieldsCompatible(local, localType.Array.Type, target, targetType.Array.Type)
+	default:
+		return false
+	}
+}
+
+func intOffset(t *Type) uint32 {
+	return (intEncoding(t) >> 16) & 0xff
+}
+
+func isEnumKind(k Kind) bool {
+	return k == KindEnum || k == KindEnum64
+}
+
+// essentialName drops the ___flavor suffix libbpf ignores during matching.
+func essentialName(name string) string {
+	if i := strings.Index(name, "___"); i >= 0 {
+		return name[:i]
+	}
+	return name
+}
+
 // skipModsTypedefs follows typedefs and type modifiers to the underlying
 // type, the same rule libbpf applies before resolving an access.
 func (s *Spec) skipModsTypedefs(id uint32) (*Type, uint32, error) {

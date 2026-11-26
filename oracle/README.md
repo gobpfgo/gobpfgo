@@ -1,6 +1,6 @@
 # Oracle
 
-The C harness that produces the golden files under `testdata/oracle/`. It is one binary with six subcommands and links the pinned libbpf for the `open`, `load`, `attach` and `core` scenarios. Tests consume the checked-in JSON and never build this directory.
+The C harness that produces the golden files under `testdata/oracle/`. It is one binary with seven subcommands and links the pinned libbpf for the `open`, `load`, `attach`, `core` and `core-reloc` scenarios. Tests consume the checked-in JSON and never build this directory.
 
 ## Scenarios
 
@@ -10,6 +10,7 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 - `load <object>` loads the object with libbpf and prints the loaded map and program info. It needs root or `CAP_BPF`.
 - `attach <object>` loads the object, attaches `handle_open` to `do_sys_openat2`, opens `/dev/null` and reads the `counts` map. It fails unless the program incremented the counter. It needs root or `CAP_BPF`.
 - `core <object>` parses the object's `.BTF` and `.BTF.ext` with libbpf, resolves each CO-RE access spec against the local BTF, and prints the section, instruction, kind, access string, bit offset and accessors.
+- `core-reloc <object> <target>` takes the local CO-RE record and a target BTF, resolves the field against the target with libbpf, and prints the local and target values plus the patched instruction.
 
 ## Layout
 
@@ -24,7 +25,7 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 make -C oracle fixtures
 ```
 
-This writes `layout.json`, `attr.json`, `open.json` and `core.json`.
+This writes `layout.json`, `attr.json`, `open.json`, `core.json` and `core-reloc.json`.
 
 ```sh
 make -C oracle load-fixture

@@ -38,6 +38,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) attr > ../testdata/oracle/attr.json
 	$(ORACLE) open ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
 	$(ORACLE) core ../testdata/progs/core.bpf.o > ../testdata/oracle/core.json
+	$(ORACLE) core-reloc ../testdata/progs/core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc.json
 
 load-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
