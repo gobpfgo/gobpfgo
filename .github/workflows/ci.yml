@@ -46,5 +46,5 @@ jobs:
               echo "missing SPDX header: $f"
               missing=1
             fi
-          done < <(git ls-files '*.go')
+          done < <(git ls-files '*.go' '*.c' '*.h')
           exit "$missing"
