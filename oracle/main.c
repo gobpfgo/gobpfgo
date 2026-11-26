@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|core <object>|core-reloc <object> <target>|linfo\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|core <object>|core-reloc <object> <target>|linfo|zip\n", prog);
 }
 
 int main(int argc, char **argv) {
@@ -46,6 +46,8 @@ int main(int argc, char **argv) {
 		return oracle_core_reloc(argv[2], argv[3]);
 	if (strcmp(argv[1], "linfo") == 0 && argc == 2)
 		return oracle_linfo();
+	if (strcmp(argv[1], "zip") == 0 && argc == 2)
+		return oracle_zip();
 
 	usage(argv[0]);
 	return 2;

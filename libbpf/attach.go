@@ -159,6 +159,13 @@ func BpfProgramAttachUprobe(prog *BpfProgram, pid int, binaryPath string, offset
 // given options. FuncName, when set, is resolved to a file offset in
 // binaryPath. A nonzero RefCtrOffset or BpfCookie returns EOPNOTSUPP on the
 // tracefs path; a nonzero offset on a uretprobe returns EINVAL.
+//
+// binaryPath may name an ELF member of a zip archive as "archive!/member",
+// the form Android uses for libraries stored uncompressed in an APK. FuncName
+// is then resolved inside the member and the probe is placed on the archive
+// file at the member's data offset plus the function offset. A compressed
+// member returns LIBBPF_ERRNO__FORMAT (4001). Without FuncName the probe uses
+// the member path itself.
 func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, offset uint64, opts *BpfUprobeOpts) (*BpfLink, error) {
 	const op = "bpf_program__attach_uprobe"
 	if err := checkAttachProgram(prog, op); err != nil {
@@ -171,11 +178,17 @@ func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, of
 		opts = &BpfUprobeOpts{}
 	}
 	if opts.FuncName != "" {
-		funcOffset, err := findFuncOffset(binaryPath, opts.FuncName)
+		path, funcOffset, err := findUprobeFuncOffset(binaryPath, opts.FuncName)
 		if err != nil {
 			return nil, attachErr(op, errnoFromError(err))
 		}
+		binaryPath = path
 		offset += funcOffset
+	} else if _, member, ok := strings.Cut(binaryPath, archiveSep); ok {
+		// The archive path replaces the member only when a function was
+		// resolved in it; an explicit offset alone probes the member path,
+		// as libbpf does.
+		binaryPath = member
 	}
 	if opts.RefCtrOffset != 0 || opts.BpfCookie != 0 {
 		return nil, attachErr(op, unix.EOPNOTSUPP)
