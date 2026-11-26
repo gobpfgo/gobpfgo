@@ -4,7 +4,7 @@ The port is correct only when it does what libbpf does. Source similarity is not
 
 ## The oracle
 
-`oracle/` is a small C program linked against the libbpf commit recorded in [NOTICE](../NOTICE). It runs a scenario and writes canonical JSON.
+`oracle/` is a single C binary with `layout`, `attr`, `open` and `load` subcommands. The output goes through a small JSON writer in `json.c`; the scenarios live in `layout.c`, `attr.c`, `open.c` and `load.c`, and the shared metadata and UAPI field block live in `oracle.c`. The `open` and `load` scenarios link the libbpf commit recorded in [NOTICE](../NOTICE).
 
 Scenarios:
 

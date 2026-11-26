@@ -1,234 +1,30 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // Original golbpfgo code.
 
-#include <linux/bpf.h>
+#include "oracle.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/utsname.h>
 
-#define LIBBPF_COMMIT "4f05fb027a08a8a66d03916cf6a68a91e2c720ea"
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
-#define offsetofend(TYPE, FIELD) (offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
-
-struct field {
-	const char *name;
-	size_t offset;
-	size_t size;
-};
-
-#define F(name) {#name, offsetof(union bpf_attr, name), sizeof(((union bpf_attr *)0)->name)}
-#define FMAP(name) {#name, offsetof(struct bpf_map_info, name), sizeof(((struct bpf_map_info *)0)->name)}
-#define FPROG(name) {#name, offsetof(struct bpf_prog_info, name), sizeof(((struct bpf_prog_info *)0)->name)}
-
-static void json_string(const char *s) {
-	const unsigned char *p = (const unsigned char *)s;
-
-	putchar('"');
-	for (; *p; p++) {
-		switch (*p) {
-		case '"':
-		case '\\':
-			putchar('\\');
-			putchar(*p);
-			break;
-		case '\n':
-			fputs("\\n", stdout);
-			break;
-		default:
-			putchar(*p);
-			break;
-		}
-	}
-
-	putchar('"');
-}
-
-static void print_field_block(const char *name, const struct field *fields, size_t count, size_t attr_size, bool comma) {
-	size_t i;
-
-	printf("  \"%s\": {\n", name);
-	printf("    \"attr_size\": %zu,\n", attr_size);
-	printf("    \"fields\": [\n");
-	for (i = 0; i < count; i++) {
-		printf("      {\"name\": ");
-		json_string(fields[i].name);
-		printf(", \"offset\": %zu, \"size\": %zu}%s\n", fields[i].offset, fields[i].size, i + 1 == count ? "" : ",");
-	}
-	printf("    ]\n");
-	printf("  }%s\n", comma ? "," : "");
-}
-
-static void print_layout(void) {
-	static const struct field map_fields[] = {
-		F(map_type),
-		F(key_size),
-		F(value_size),
-		F(max_entries),
-		F(map_flags),
-		F(inner_map_fd),
-		F(numa_node),
-		F(map_name),
-		F(map_ifindex),
-		F(btf_fd),
-		F(btf_key_type_id),
-		F(btf_value_type_id),
-		F(btf_vmlinux_value_type_id),
-		F(map_extra),
-		F(value_type_btf_obj_fd),
-		F(map_token_fd),
-		F(excl_prog_hash),
-		F(excl_prog_hash_size),
-	};
-	static const struct field btf_fields[] = {
-		F(btf),
-		F(btf_log_buf),
-		F(btf_size),
-		F(btf_log_size),
-		F(btf_log_level),
-		F(btf_log_true_size),
-		F(btf_flags),
-		F(btf_token_fd),
-	};
-	static const struct field prog_fields[] = {
-		F(prog_type),
-		F(insn_cnt),
-		F(insns),
-		F(license),
-		F(log_level),
-		F(log_size),
-		F(log_buf),
-		F(prog_flags),
-		F(prog_name),
-		F(expected_attach_type),
-		F(prog_btf_fd),
-	};
-	static const struct field obj_info_fields[] = {
-		{"bpf_fd", offsetof(union bpf_attr, info), 4},
-		{"info_len", offsetof(union bpf_attr, info) + 4, 4},
-		{"info", offsetof(union bpf_attr, info) + 8, 8},
-	};
-	static const struct field map_info_fields[] = {
-		FMAP(type),
-		FMAP(id),
-		FMAP(key_size),
-		FMAP(value_size),
-		FMAP(max_entries),
-		FMAP(map_flags),
-		FMAP(name),
-		FMAP(btf_key_type_id),
-		FMAP(btf_value_type_id),
-	};
-	static const struct field prog_info_fields[] = {
-		FPROG(type),
-		FPROG(id),
-		FPROG(jited_prog_len),
-		FPROG(xlated_prog_len),
-		FPROG(name),
-	};
-	struct utsname uts;
-
-	if (uname(&uts) != 0) {
-		perror("uname");
-		exit(1);
-	}
-
-	printf("{\n");
-	printf("  \"libbpf_commit\": \"%s\",\n", LIBBPF_COMMIT);
-	printf("  \"arch\": ");
-	json_string(uts.machine);
-	printf(",\n");
-	printf("  \"kernel\": ");
-	json_string(uts.release);
-	printf(",\n");
-	print_field_block("map_create", map_fields, ARRAY_SIZE(map_fields), offsetofend(union bpf_attr, excl_prog_hash_size), true);
-	print_field_block("btf_load", btf_fields, ARRAY_SIZE(btf_fields), offsetofend(union bpf_attr, btf_token_fd), true);
-	print_field_block("prog_load", prog_fields, ARRAY_SIZE(prog_fields), offsetofend(union bpf_attr, keyring_id), true);
-	print_field_block("obj_info", obj_info_fields, ARRAY_SIZE(obj_info_fields), offsetofend(union bpf_attr, info), true);
-	print_field_block("map_info", map_info_fields, ARRAY_SIZE(map_info_fields), sizeof(struct bpf_map_info), true);
-	print_field_block("prog_info", prog_info_fields, ARRAY_SIZE(prog_info_fields), sizeof(struct bpf_prog_info), false);
-	printf("}\n");
-}
-
-static void print_attr(void) {
-	const size_t attr_size = offsetofend(union bpf_attr, excl_prog_hash_size);
-	const char *name       = "golbpfgo-test";
-	struct utsname uts;
-	union bpf_attr attr;
-	size_t i;
-
-	if (uname(&uts) != 0) {
-		perror("uname");
-		exit(1);
-	}
-
-	memset(&attr, 0, sizeof(attr));
-	attr.map_type = BPF_MAP_TYPE_ARRAY;
-	for (i = 0; i < sizeof(attr.map_name) - 1 && name[i]; i++)
-		attr.map_name[i] = name[i];
-	attr.map_name[i] = '\0';
-
-	attr.key_size    = 4;
-	attr.value_size  = 8;
-	attr.max_entries = 16;
-
-	printf("{\n");
-	printf("  \"case\": \"map_create\",\n");
-	printf("  \"arch\": ");
-	json_string(uts.machine);
-	printf(",\n");
-	printf("  \"kernel\": ");
-	json_string(uts.release);
-	printf(",\n");
-	printf("  \"input\": {\n");
-	printf("    \"map_type\": %u,\n", attr.map_type);
-	printf("    \"name\": ");
-	json_string(name);
-	printf(",\n");
-	printf("    \"key_size\": %u,\n", attr.key_size);
-	printf("    \"value_size\": %u,\n", attr.value_size);
-	printf("    \"max_entries\": %u,\n", attr.max_entries);
-	printf("    \"map_flags\": %u,\n", attr.map_flags);
-	printf("    \"btf_fd\": %u,\n", attr.btf_fd);
-	printf("    \"btf_key_type_id\": %u,\n", attr.btf_key_type_id);
-	printf("    \"btf_value_type_id\": %u,\n", attr.btf_value_type_id);
-	printf("    \"btf_vmlinux_value_type_id\": %u,\n", attr.btf_vmlinux_value_type_id);
-	printf("    \"inner_map_fd\": %u,\n", attr.inner_map_fd);
-	printf("    \"map_extra\": %llu,\n", (unsigned long long)attr.map_extra);
-	printf("    \"numa_node\": %u,\n", attr.numa_node);
-	printf("    \"map_ifindex\": %u,\n", attr.map_ifindex);
-	printf("    \"value_type_btf_obj_fd\": %d,\n", attr.value_type_btf_obj_fd);
-	printf("    \"token_fd\": %d,\n", attr.map_token_fd);
-	printf("    \"excl_prog_hash_size\": %u\n", attr.excl_prog_hash_size);
-	printf("  },\n");
-	printf("  \"size\": %zu,\n", attr_size);
-	printf("  \"hex\": \"");
-	for (i = 0; i < attr_size; i++)
-		printf("%02x", ((const unsigned char *)&attr)[i]);
-
-	printf("\"\n");
-	printf("}\n");
+static void usage(const char *prog) {
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>\n", prog);
 }
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s layout|attr\n", argv[0]);
+	if (argc < 2) {
+		usage(argv[0]);
 		return 2;
 	}
 
-	if (strcmp(argv[1], "layout") == 0)
-		print_layout();
-	else if (strcmp(argv[1], "attr") == 0)
-		print_attr();
-	else {
-		fprintf(stderr, "unknown scenario: %s\n", argv[1]);
-		return 2;
-	}
+	if (strcmp(argv[1], "layout") == 0 && argc == 2)
+		return oracle_layout();
+	if (strcmp(argv[1], "attr") == 0 && argc == 2)
+		return oracle_attr();
+	if (strcmp(argv[1], "open") == 0 && argc == 3)
+		return oracle_open(argv[2]);
+	if (strcmp(argv[1], "load") == 0 && argc == 3)
+		return oracle_load(argv[2]);
 
-	return 0;
+	usage(argv[0]);
+	return 2;
 }

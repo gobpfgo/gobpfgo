@@ -21,6 +21,7 @@ Done:
 - [`#11`](https://github.com/golbpfgo/golbpfgo/pull/11) merged: the BTF load path and DATASEC fixup.
 - [`#12`](https://github.com/golbpfgo/golbpfgo/pull/12) merged: the object load path (BTF, maps, programs).
 - The loaded map and program info matches `load.json`: map `counts`, program `handle_open`, 18 xlated instructions and 100 jited bytes.
+- The oracle is now one binary with `layout`, `attr`, `open` and `load` subcommands. A small JSON writer owns the formatting; the layout, attr and open fixtures are unchanged and the load ids were regenerated.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.
 - `internal/btf`: header, type table, string table, all type kinds and `SizeOf`.
 - `oracle`: `layout`, `attr`, `open` and `load`; the linked scenarios build the pinned libbpf under `oracle/build`.
