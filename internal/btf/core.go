@@ -237,6 +237,9 @@ type CoreReloResult struct {
 	Validate          bool
 	Poison            bool
 	FailMemSizeAdjust bool
+
+	// Matched is false when the target type or field did not match.
+	Matched bool
 }
 
 // CalcCoreRelo matches relo against targetTypeID and computes the local and
@@ -247,7 +250,11 @@ type CoreReloResult struct {
 // Type-based and enum-value target matching are not implemented yet.
 func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
 	if relo.Kind == CoreTypeIDLocal {
-		return &CoreReloResult{OrigVal: uint64(relo.TypeID), NewVal: uint64(relo.TypeID)}, nil
+		return &CoreReloResult{
+			OrigVal: uint64(relo.TypeID),
+			NewVal:  uint64(relo.TypeID),
+			Matched: true,
+		}, nil
 	}
 	if target == nil {
 		return nil, fmt.Errorf("btf: nil target spec")
@@ -275,11 +282,13 @@ func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 	if !found {
 		if relo.Kind == CoreFieldExists {
 			res.OrigVal = 1
+			res.Validate = true
 			return res, nil
 		}
 		res.Poison = true
 		return res, nil
 	}
+	res.Matched = true
 
 	origVal, origSize, origType, validate, err := local.calcField(s, relo.Kind)
 	if err != nil {
@@ -320,7 +329,7 @@ func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 // calcTypeRelo computes a type-based relocation against the target type.
 func (s *Spec) calcTypeRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
 	compatible := coreTypesCompatible(s, relo.TypeID, target, targetTypeID)
-	res := &CoreReloResult{Validate: true}
+	res := &CoreReloResult{Validate: true, Matched: compatible}
 
 	switch relo.Kind {
 	case CoreTypeIDTarget:
@@ -381,7 +390,7 @@ func (s *Spec) calcEnumRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 		return nil, err
 	}
 
-	res := &CoreReloResult{Validate: true}
+	res := &CoreReloResult{Validate: true, Matched: found}
 	switch relo.Kind {
 	case CoreEnumvalExists:
 		res.OrigVal = 1

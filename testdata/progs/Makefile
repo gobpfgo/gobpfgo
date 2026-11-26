@@ -12,7 +12,8 @@ DEBUG_DIR ?= /build/gobpfgo/testdata/progs
 
 .PHONY: all clean
 
-all: kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_target.bpf.o
+all: kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
+	core_module.bpf.o core_module_target.bpf.o core_target.bpf.o
 
 kprobe.bpf.o: kprobe.bpf.c
 	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
@@ -32,6 +33,24 @@ core_kernel.bpf.o: core_kernel.bpf.c
 		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
 		-c $< -o $@
 
+core_missing.bpf.o: core_missing.bpf.c
+	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
+		-fdebug-compilation-dir=$(DEBUG_DIR) \
+		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
+		-c $< -o $@
+
+core_module.bpf.o: core_module.bpf.c
+	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
+		-fdebug-compilation-dir=$(DEBUG_DIR) \
+		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
+		-c $< -o $@
+
+core_module_target.bpf.o: core_module_target.bpf.c
+	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
+		-fdebug-compilation-dir=$(DEBUG_DIR) \
+		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
+		-c $< -o $@
+
 core_target.bpf.o: core_target.c
 	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
 		-fdebug-compilation-dir=$(DEBUG_DIR) \
@@ -39,4 +58,5 @@ core_target.bpf.o: core_target.c
 		-c $< -o $@
 
 clean:
-	rm -f kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_target.bpf.o
+	rm -f kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
+		core_module.bpf.o core_module_target.bpf.o core_target.bpf.o

@@ -50,11 +50,12 @@ Phase 2, in progress.
 - The load path parses `.BTF.ext`, finds the target type in `/sys/kernel/btf/vmlinux`, applies the field relocation, and loads `core_kernel.bpf.o` with the kernel `pt_regs.sp` offset patched. The root test passes on 5.10 and 6.18 ([`#25`](https://github.com/gobpfgo/gobpfgo/pull/25)).
 - The `core-reloc` oracle now covers field offsets, type ids, type existence, type size and enum values; the engine adds type/enum target matching and 64-bit immediate patching. The Go result and patched instructions match libbpf on 5.10 and 6.18 ([`#26`](https://github.com/gobpfgo/gobpfgo/pull/26)).
 - Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18 ([`#27`](https://github.com/gobpfgo/gobpfgo/pull/27)).
-- Next: module BTFs, TYPE_MATCHES and poison-on-missing-root.
+- The load path searches vmlinux and the split module BTFs, merges module types with the vmlinux base, detects ambiguous candidates, and poisons instructions with no target instead of failing the load. `core_missing.bpf.o` loads because the poisoned access is guarded, and `TestLoadKernelBTFs` verifies the split merge. CO-RE is done for libbpf's normal path on 5.10 and 6.18. `TYPE_MATCHES` is rejected, matching libbpf's normal `bpf_core_parse_spec`.
+- Next: BTF dump, the remaining phase 2 item.
 
 Open:
 
 - The arm64 half of the 5.10 tier has not run.
 - kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.
 - Link pinning and the remaining attach types are not ported.
-- CO-RE module BTFs, TYPE_MATCHES and poison-on-missing-root are not ported.
+- BTF dump and the remaining CO-RE `TYPE_MATCHES` kind (rejected by libbpf's normal path) are not ported.
