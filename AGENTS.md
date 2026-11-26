@@ -37,8 +37,10 @@ Every change goes through a pull request:
 
 1. Create a branch from `main`: `slice/<phase>-<name>`.
 2. Open a pull request immediately, as a draft when the slice is not ready.
-3. Commit and push to the PR branch so CI runs. "Commit the pull request" means push commits to it; it does not mean merge.
-4. Merge only when the operator says merge and the required checks are green.
+3. Commit and push to the PR branch so CI runs.
+4. When CI is green, merge the PR yourself with a rebase merge and delete the branch, then start the next slice. GitHub does not allow approving your own PR; merge without an approval when branch protection allows it. Stop when a decision needs the operator.
+
+The operator authorized this merge loop for this repository on 2026-11-26. It is the explicit exception to the global "never merge the operator's own PR" rule. Fix failing CI before merging; do not merge a red PR.
 
 Never push directly to `main`. Never force-push a branch you do not own. One vertical slice per PR: code, tests, oracle diff, docs.
 
