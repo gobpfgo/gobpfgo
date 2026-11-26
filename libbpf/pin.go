@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_map__set_pin_path, bpf_map__pin, bpf_map__unpin, bpf_map__is_pinned, bpf_program__pin, bpf_program__unpin
+// libbpf-symbols: bpf_map__set_pin_path, bpf_map__pin, bpf_map__unpin, bpf_map__is_pinned, bpf_program__pin, bpf_program__unpin, bpf_object__pin_maps, bpf_object__unpin_maps, bpf_object__pin_programs, bpf_object__unpin_programs, bpf_object__pin, bpf_object__unpin
 
 //go:build linux && (amd64 || arm64)
 
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
@@ -156,6 +157,188 @@ func BpfProgramUnpin(p *BpfProgram, path string) error {
 		return pinError(op, err)
 	}
 	return nil
+}
+
+// BpfObjectPinMaps pins every loaded map of obj.
+//
+// When path is nil, each map's stored pin path is used and maps without one
+// are skipped. When path is non-nil, each map is pinned at path/<map-name>;
+// dots in the resulting path become underscores, matching libbpf. If a pin
+// fails, the maps pinned by this call are unpinned.
+func BpfObjectPinMaps(obj *BpfObject, path *string) error {
+	const op = "bpf_object__pin_maps"
+
+	if !objectMapsLoaded(obj) {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+
+	pinned := make([]*BpfMap, 0, len(obj.maps))
+	for _, m := range obj.maps {
+		var pinPath *string
+
+		switch {
+		case path != nil:
+			p := sanitizePinPath(filepath.Join(*path, m.name))
+			pinPath = &p
+		case m.pinPath == "":
+			continue
+		}
+
+		if err := BpfMapPin(m, pinPath); err != nil {
+			for _, done := range pinned {
+				_ = BpfMapUnpin(done, nil)
+			}
+			return pinError(op, err)
+		}
+		pinned = append(pinned, m)
+	}
+	return nil
+}
+
+// BpfObjectUnpinMaps removes the pinned maps of obj. When path is nil, each
+// map's stored pin path is used and maps without one are skipped.
+func BpfObjectUnpinMaps(obj *BpfObject, path *string) error {
+	const op = "bpf_object__unpin_maps"
+
+	if obj == nil || obj.closed {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+
+	for _, m := range obj.maps {
+		var pinPath *string
+
+		switch {
+		case path != nil:
+			p := sanitizePinPath(filepath.Join(*path, m.name))
+			pinPath = &p
+		case m.pinPath == "":
+			continue
+		}
+
+		if err := BpfMapUnpin(m, pinPath); err != nil {
+			return pinError(op, err)
+		}
+	}
+	return nil
+}
+
+// BpfObjectPinPrograms pins every loaded program of obj at path/<program-name>.
+// Dots in the resulting path become underscores, matching libbpf. If a pin
+// fails, the programs pinned by this call are unpinned.
+func BpfObjectPinPrograms(obj *BpfObject, path string) error {
+	const op = "bpf_object__pin_programs"
+
+	if !objectProgramsLoaded(obj) {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+	if path == "" {
+		return &Error{Op: op, Errno: unix.EINVAL}
+	}
+
+	pinned := make([]*BpfProgram, 0, len(obj.programs))
+	for _, p := range obj.programs {
+		pinPath := sanitizePinPath(filepath.Join(path, p.name))
+		if err := BpfProgramPin(p, pinPath); err != nil {
+			for _, done := range pinned {
+				_ = BpfProgramUnpin(done, sanitizePinPath(filepath.Join(path, done.name)))
+			}
+			return pinError(op, err)
+		}
+		pinned = append(pinned, p)
+	}
+	return nil
+}
+
+// BpfObjectUnpinPrograms removes the programs of obj from path.
+func BpfObjectUnpinPrograms(obj *BpfObject, path string) error {
+	const op = "bpf_object__unpin_programs"
+
+	if obj == nil || obj.closed {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+	if path == "" {
+		return &Error{Op: op, Errno: unix.EINVAL}
+	}
+
+	for _, p := range obj.programs {
+		pinPath := sanitizePinPath(filepath.Join(path, p.name))
+		if err := BpfProgramUnpin(p, pinPath); err != nil {
+			return pinError(op, err)
+		}
+	}
+	return nil
+}
+
+// BpfObjectPin pins every map at path/<map-name> and every program at
+// path/<program-name>. If the program pins fail, the map pins are undone.
+func BpfObjectPin(obj *BpfObject, path string) error {
+	const op = "bpf_object__pin"
+
+	if obj == nil || obj.closed {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+	if path == "" {
+		return &Error{Op: op, Errno: unix.EINVAL}
+	}
+
+	if err := BpfObjectPinMaps(obj, &path); err != nil {
+		return err
+	}
+	if err := BpfObjectPinPrograms(obj, path); err != nil {
+		_ = BpfObjectUnpinMaps(obj, &path)
+		return err
+	}
+	return nil
+}
+
+// BpfObjectUnpin removes the programs and then the maps of obj from path.
+func BpfObjectUnpin(obj *BpfObject, path string) error {
+	const op = "bpf_object__unpin"
+
+	if obj == nil || obj.closed {
+		return &Error{Op: op, Errno: unix.ENOENT}
+	}
+	if path == "" {
+		return &Error{Op: op, Errno: unix.EINVAL}
+	}
+
+	if err := BpfObjectUnpinPrograms(obj, path); err != nil {
+		return err
+	}
+	return BpfObjectUnpinMaps(obj, &path)
+}
+
+// objectMapsLoaded reports whether obj has maps and all of them are created.
+func objectMapsLoaded(obj *BpfObject) bool {
+	if obj == nil || obj.closed {
+		return false
+	}
+	for _, m := range obj.maps {
+		if m.fd < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// objectProgramsLoaded reports whether obj has programs and all of them are
+// loaded.
+func objectProgramsLoaded(obj *BpfObject) bool {
+	if obj == nil || obj.closed {
+		return false
+	}
+	for _, p := range obj.programs {
+		if p.fd < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// sanitizePinPath replaces periods with underscores, the same rule libbpf
+// applies to object pin paths.
+func sanitizePinPath(path string) string {
+	return strings.ReplaceAll(path, ".", "_")
 }
 
 // makeParentDir creates the immediate parent directory of path with mode
