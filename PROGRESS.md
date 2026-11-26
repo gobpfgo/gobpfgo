@@ -29,6 +29,7 @@ Done:
 - The open test compares the object name, map fields and program fields with `testdata/oracle/open.json`.
 - The load fixture records the loaded map and program info on 6.18; the map and program ids are ephemeral.
 - File provenance now lives in the `libbpf-source`, `libbpf-commit` and `libbpf-symbols` headers; godocs describe the Go API.
+- The project, module path, GitHub owner and provenance tag are renamed `gobpfgo` ([`#17`](https://github.com/gobpfgo/gobpfgo/pull/17)); the C oracle map names and the tracefs event prefix follow.
 
 Next: phase 1, in progress.
 
