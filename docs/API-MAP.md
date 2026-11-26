@@ -102,8 +102,17 @@ The generated table has these columns:
 | `bpf_object__relocate_core` | `relocateCore` (internal) | `libbpf/core_load.go` | parity tested (vmlinux and module BTFs, poison, 5.10/6.18) |
 | `btf__parse_split` | `MergeSplit` (internal) | `internal/btf/split.go` | parity tested (module split merge) |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
-| `btf__parse` | `BtfParse` | `libbpf/btf.go` | not started |
-| `btf_dump__new` | `BtfDumpNew` | `libbpf/btf_dump.go` | not started |
+| `btf__new` | `BtfNew` | `libbpf/btf.go` | parity tested (raw BTF dump) |
+| `btf__parse` | `BtfParse` | `libbpf/btf.go` | parity tested (ELF `.BTF` dump) |
+| `btf__type_cnt` | `BtfTypeCnt` | `libbpf/btf.go` | parity tested (dump loop) |
+| `btf__free` | `BtfFree` | `libbpf/btf.go` | parity tested (idempotent) |
+| `bpf_object__btf` | `BpfObjectBTF` | `libbpf/btf.go` | parity tested (borrowed table) |
+| `btf__align_of` | `AlignOf` (internal) | `internal/btf/align.go` | parity tested (struct and union layout) |
+| `btf_dump__new` | `BtfDumpNew` | `libbpf/btf_dump.go` | parity tested (`dump` scenario) |
+| `btf_dump__free` | `BtfDumpFree` | `libbpf/btf_dump.go` | parity tested (idempotent) |
+| `btf_dump__dump_type` | `BtfDumpDumpType` | `libbpf/btf_dump.go` | parity tested (exact text) |
+| `btf_dump__emit_type_decl` | `BtfDumpEmitTypeDecl` | `libbpf/btf_dump_decl.go` | parity tested (exact text, with and without modifiers) |
+| `btf_dump__dump_type_data` | `BtfDumpDumpTypeData` | `libbpf/btf_dump_data.go` | not started |
 | `ring_buffer__new` | `RingBufferNew` | `libbpf/ringbuf.go` | not started |
 
 Status values: not started, in progress, parity tested, deferred, not portable.

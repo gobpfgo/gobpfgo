@@ -6,7 +6,7 @@ Repository: [gobpfgo/gobpfgo](https://github.com/gobpfgo/gobpfgo).
 
 A pure-Go port of libbpf, close to 1:1 in behavior and API shape, with no cgo and no unsafe.
 
-Status: phase 2. The phase 1 object, map and program path and the attach surface are tested on 5.10 and 6.18: kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi and perf event links, plus link pin/open and automatic attach. CO-RE is done for libbpf's normal path: access specs, field, flexible array, type and enum relocations, vmlinux and split module BTFs, and no-target poison. BTF dump comes next.
+Status: phase 3. The phase 1 object, map and program path and the attach surface are tested on 5.10 and 6.18: kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi and perf event links, plus link pin/open and automatic attach. Phase 2 is done: CO-RE covers access specs, field, flexible array, type and enum relocations, vmlinux and split module BTFs, and no-target poison; the BTF type dump and declarators match libbpf's exact text. Phase 3 starts with the feature and probe matrix and the ring buffer.
 
 ## Non-goals
 
