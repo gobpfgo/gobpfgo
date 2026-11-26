@@ -72,6 +72,9 @@ func TestBpfProgramAttachTypes(t *testing.T) {
 			if c.Kind == "lsm" && !bpfLsmActive() {
 				t.Skip("BPF LSM is not active in this kernel")
 			}
+			if c.Kind == "cookie" && !perfLinkSupported() {
+				t.Skip("BPF cookies and perf links are not supported by this kernel")
+			}
 
 			obj := loadTestObject(t, "../testdata/progs/"+c.Object)
 			defer BpfObjectClose(obj)
