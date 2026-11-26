@@ -115,6 +115,11 @@ void json_str(struct json *j, const char *key, const char *value) {
 	json_quote(j->out, value);
 }
 
+void json_bool(struct json *j, const char *key, bool value) {
+	json_begin(j, key);
+	fputs(value ? "true" : "false", j->out);
+}
+
 void json_u32(struct json *j, const char *key, uint32_t value) {
 	json_begin(j, key);
 	fprintf(j->out, "%u", value);

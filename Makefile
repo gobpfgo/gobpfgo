@@ -2,7 +2,7 @@
 
 CLANG_FORMAT ?= clang-format
 C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
-	oracle/attr.c oracle/open.c oracle/load.c testdata/progs/kprobe.bpf.c
+	oracle/attr.c oracle/open.c oracle/load.c oracle/attach.c testdata/progs/kprobe.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h
 
 .PHONY: format format-check

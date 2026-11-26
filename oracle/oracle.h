@@ -30,6 +30,7 @@ int oracle_layout(void);
 int oracle_attr(void);
 int oracle_open(const char *path);
 int oracle_load(const char *path);
+int oracle_attach(const char *path);
 
 void oracle_meta(struct json *j, const struct oracle_meta *meta);
 void oracle_field_block(struct json *j, const char *name, const struct oracle_field *fields, size_t count, size_t size);
