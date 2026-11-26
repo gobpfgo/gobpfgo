@@ -3,10 +3,7 @@
 
 package libbpf
 
-import (
-	"fmt"
-	"syscall"
-)
+import "syscall"
 
 // Error is the error returned by the libbpf wrappers. Errno preserves the
 // code from the failed operation, so errors.Is(err, unix.EINVAL) works.
@@ -18,10 +15,15 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	msg := e.Op
 	if e.Path != "" {
-		return fmt.Sprintf("%s %s: %v", e.Op, e.Path, e.Errno)
+		msg += " " + e.Path
 	}
-	return fmt.Sprintf("%s: %v", e.Op, e.Errno)
+	msg += ": " + e.Errno.Error()
+	if e.Log != "" {
+		msg += ": " + e.Log
+	}
+	return msg
 }
 
 // Unwrap exposes the errno to errors.Is and errors.As.
