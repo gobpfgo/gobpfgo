@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_map_create, bpf_prog_load
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info
 
 //go:build linux && (amd64 || arm64)
 
@@ -176,6 +176,7 @@ func BpfObjectLoad(obj *BpfObject) error {
 		}
 
 		funcInfo := programFuncInfo(ext, p)
+		lineInfo := programLineInfo(ext, p)
 		attr := &sys.ProgLoadAttr{
 			ProgType:           uint32(p.progType),
 			InsnCnt:            uint32(len(insns) / 8),
@@ -187,13 +188,18 @@ func BpfObjectLoad(obj *BpfObject) error {
 			AttachBtfObjFD:     int32(p.attachBTFObjFD),
 			FuncInfoRecSize:    8,
 			FuncInfoCnt:        uint32(len(funcInfo) / 8),
+			LineInfoRecSize:    btf.LineInfoMinSize,
+			LineInfoCnt:        uint32(len(lineInfo) / btf.LineInfoMinSize),
 		}
 		if len(funcInfo) == 0 {
 			attr.FuncInfoRecSize = 0
 		}
+		if len(lineInfo) == 0 {
+			attr.LineInfoRecSize = 0
+		}
 		attr.SetProgName(p.name)
 
-		fd, err := sys.ProgLoad(attr, insns, license, logBuf, funcInfo)
+		fd, err := sys.ProgLoad(attr, insns, license, logBuf, funcInfo, lineInfo)
 		if err != nil {
 			obj.closeLoadFDs()
 			return &Error{
@@ -243,6 +249,39 @@ func programFuncInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
 			rec := make([]byte, 8)
 			binary.NativeEndian.PutUint32(rec, info.InsnOff)
 			binary.NativeEndian.PutUint32(rec[4:], info.TypeID)
+			buf = append(buf, rec...)
+		}
+		return buf
+	}
+	return nil
+}
+
+// programLineInfo encodes the .BTF.ext line records of p's section in the
+// struct bpf_line_info layout BPF_PROG_LOAD expects. Clang records byte
+// offsets from the section start and the kernel takes instruction indexes,
+// so each offset is divided by the instruction size. The records are sorted,
+// and the copy stops at the first one past the program's instructions.
+func programLineInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
+	if ext == nil {
+		return nil
+	}
+
+	insnCnt := uint32(len(p.insns) / bpfInsnSize)
+	for _, section := range ext.LineInfos {
+		if section.Section != p.sectionName {
+			continue
+		}
+		var buf []byte
+		for _, info := range section.Records {
+			insnOff := info.InsnOff / bpfInsnSize
+			if insnOff >= insnCnt {
+				break
+			}
+			rec := make([]byte, btf.LineInfoMinSize)
+			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffInsnOff:], insnOff)
+			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffFileNameOff:], info.FileNameOff)
+			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffLineOff:], info.LineOff)
+			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffLineCol:], info.LineCol)
 			buf = append(buf, rec...)
 		}
 		return buf

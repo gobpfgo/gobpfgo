@@ -216,7 +216,7 @@ func perfLinkSupported() bool {
 		license := []byte("GPL\x00")
 		attr := &sys.ProgLoadAttr{ProgType: progType, InsnCnt: 2}
 
-		progFD, err := sys.ProgLoad(attr, insns, license, nil, nil)
+		progFD, err := sys.ProgLoad(attr, insns, license, nil, nil, nil)
 		if err != nil {
 			return
 		}

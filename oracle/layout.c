@@ -147,6 +147,16 @@ int oracle_layout(void) {
 		FPROG(jited_prog_len),
 		FPROG(xlated_prog_len),
 		FPROG(name),
+		FPROG(nr_jited_ksyms),
+		FPROG(nr_jited_func_lens),
+		FPROG(jited_ksyms),
+		FPROG(jited_func_lens),
+		FPROG(nr_line_info),
+		FPROG(line_info),
+		FPROG(jited_line_info),
+		FPROG(nr_jited_line_info),
+		FPROG(line_info_rec_size),
+		FPROG(jited_line_info_rec_size),
 	};
 	static const struct oracle_field perf_event_fields[] = {
 		FPAGE(data_head),

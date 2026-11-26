@@ -1,6 +1,6 @@
 # Oracle
 
-The C harness that produces the golden files under `testdata/oracle/`. It is one binary with the subcommands below and links the pinned libbpf for the `open`, `load`, `attach`, `core`, `core-reloc`, `ringbuf`, `perfbuf`, `probe` and `linker` scenarios. Tests consume the checked-in JSON and never build this directory.
+The C harness that produces the golden files under `testdata/oracle/`. It is one binary with the subcommands below and links the pinned libbpf for the `open`, `load`, `attach`, `core`, `core-reloc`, `ringbuf`, `perfbuf`, `probe`, `linker` and `linfo` scenarios. Tests consume the checked-in JSON and never build this directory.
 
 ## Scenarios
 
@@ -14,13 +14,14 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 - `ringbuf <object>` attaches a ring buffer writer, polls the ring and prints the sample bytes.
 - `perfbuf <object>` attaches a perf event array writer, polls the per-CPU buffers and prints the sample bytes, loss count and buffer count.
 - `probe` runs the program, map and helper probes and prints the result for each case.
+- `linfo` builds synthetic `struct bpf_prog_info` values with line info, jited line info, jited symbols and function lengths, passes each to `bpf_prog_linfo__new`, and prints the input, the constructor errno and the result of `bpf_prog_linfo__lfind` for every instruction offset up to one past the last record and of `bpf_prog_linfo__lfind_addr_func` for address 0, each jited address and the byte before it and the largest address, for every `nr_skip` and function index. A result is the index of the returned record or the negative errno. It needs no privileges.
 - `linker <object>...` links the objects, in order, into a temporary `linked.bpf.o` with `bpf_linker__new`, one `bpf_linker__add_file` per object, `bpf_linker__finalize` and `bpf_linker__free`. It opens the result with `bpf_object__open_file` and libelf and prints the object name, the maps, the programs, every section sorted by name and the symbol table. A section has its name, type, flags, size and alignment, the hex contents of a code or data section other than `.BTF` and `.BTF.ext`, and the entries of a relocation section with each symbol named the way readelf names it.
 
 ## Layout
 
 - `json.c` and `json.h` are a small JSON writer that owns commas, indentation and escaping.
 - `oracle.c` and `oracle.h` hold the shared metadata and the UAPI field block.
-- `layout.c`, `attr.c`, `open.c`, `load.c`, `attach.c`, `core.c`, `ringbuf.c`, `perfbuf.c`, `probe.c` and `linker.c` are the scenarios.
+- `layout.c`, `attr.c`, `open.c`, `load.c`, `attach.c`, `core.c`, `ringbuf.c`, `perfbuf.c`, `probe.c`, `linker.c` and `linfo.c` are the scenarios.
 - `main.c` dispatches the subcommands.
 
 ## Regenerate
@@ -29,7 +30,7 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 make -C oracle fixtures
 ```
 
-This writes `layout.json`, `attr.json`, `open.json`, `core.json` and `core-reloc.json`.
+This writes `layout.json`, `attr.json`, `open.json`, the `dump` texts, `core.json`, `core-reloc.json` and `linfo.json`.
 
 ```sh
 make -C oracle linker-fixture

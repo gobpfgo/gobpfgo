@@ -23,6 +23,7 @@ void json_obj_begin(struct json *j, const char *key);
 void json_obj_begin_compact(struct json *j, const char *key);
 void json_obj_end(struct json *j);
 void json_arr_begin(struct json *j, const char *key);
+void json_arr_begin_compact(struct json *j, const char *key);
 void json_arr_end(struct json *j);
 void json_str(struct json *j, const char *key, const char *value);
 void json_bool(struct json *j, const char *key, bool value);

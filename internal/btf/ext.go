@@ -17,10 +17,11 @@ const extMagic = 0xeb9f
 // extHeaderSize is sizeof(struct btf_ext_header).
 const extHeaderSize = 32
 
-// ExtSpec holds the function and CO-RE relocation records of a .BTF.ext
-// section.
+// ExtSpec holds the function, line and CO-RE relocation records of a
+// .BTF.ext section.
 type ExtSpec struct {
 	FuncInfos []FuncInfoSection
+	LineInfos []LineInfoSection
 	CoreRelos []CoreReloSection
 }
 
@@ -34,6 +35,22 @@ type FuncInfoSection struct {
 type FuncInfo struct {
 	InsnOff uint32
 	TypeID  uint32
+}
+
+// LineInfoSection groups the line records of one program section.
+type LineInfoSection struct {
+	Section string
+	Records []LineInfo
+}
+
+// LineInfo is one struct bpf_line_info record. InsnOff is the byte offset of
+// the instruction from the start of the section, as Clang emits it;
+// FileNameOff and LineOff are string offsets into the object BTF.
+type LineInfo struct {
+	InsnOff     uint32
+	FileNameOff uint32
+	LineOff     uint32
+	LineCol     uint32
 }
 
 // CoreReloSection groups the CO-RE records of one program section.
@@ -57,8 +74,8 @@ type extRecordSection struct {
 	records []byte
 }
 
-// ParseExt parses the .BTF.ext data against the matching BTF spec. The
-// function and CO-RE subsections are decoded; line info is skipped.
+// ParseExt parses the .BTF.ext data against the matching BTF spec and decodes
+// the function, line and CO-RE subsections.
 //
 // The header offsets are relative to hdr_len, as the UAPI defines. The
 // section names and access strings are resolved through spec, so spec must be
@@ -73,6 +90,10 @@ func ParseExt(data []byte, spec *Spec, order binary.ByteOrder) (*ExtSpec, error)
 	if err != nil {
 		return nil, err
 	}
+	lineSections, err := parseExtRecords(data, spec, order, hdrLen, extLineInfoField, LineInfoMinSize, "line")
+	if err != nil {
+		return nil, err
+	}
 	coreSections, err := parseExtRecords(data, spec, order, hdrLen, extCoreReloField, CoreReloMinSize, "core")
 	if err != nil {
 		return nil, err
@@ -81,6 +102,9 @@ func ParseExt(data []byte, spec *Spec, order binary.ByteOrder) (*ExtSpec, error)
 	var ext ExtSpec
 	for _, section := range funcSections {
 		ext.FuncInfos = append(ext.FuncInfos, FuncInfoSection{Section: section.name, Records: decodeFuncInfos(order, section)})
+	}
+	for _, section := range lineSections {
+		ext.LineInfos = append(ext.LineInfos, LineInfoSection{Section: section.name, Records: decodeLineInfos(order, section)})
 	}
 	for _, section := range coreSections {
 		ext.CoreRelos = append(ext.CoreRelos, CoreReloSection{Section: section.name, Relos: decodeCoreRelos(order, section)})
@@ -241,6 +265,20 @@ func decodeFuncInfos(order binary.ByteOrder, section extRecordSection) []FuncInf
 		records = append(records, FuncInfo{
 			InsnOff: order.Uint32(rec),
 			TypeID:  order.Uint32(rec[4:]),
+		})
+	}
+	return records
+}
+
+func decodeLineInfos(order binary.ByteOrder, section extRecordSection) []LineInfo {
+	records := make([]LineInfo, 0, len(section.records)/section.recSize)
+	for i := 0; i < len(section.records); i += section.recSize {
+		rec := section.records[i:]
+		records = append(records, LineInfo{
+			InsnOff:     order.Uint32(rec),
+			FileNameOff: order.Uint32(rec[4:]),
+			LineOff:     order.Uint32(rec[8:]),
+			LineCol:     order.Uint32(rec[12:]),
 		})
 	}
 	return records
