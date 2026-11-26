@@ -24,6 +24,8 @@ Scenarios:
 
 The oracle is development-only. Tests consume checked-in JSON and never need C, clang or libbpf.
 
+`layout` and `attr` are implemented for `BPF_MAP_CREATE`. The remaining scenarios land with the slice that needs them.
+
 ## Tiers
 
 | Tier | Runs | Needs | Covers |

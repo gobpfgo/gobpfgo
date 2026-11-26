@@ -8,10 +8,10 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 
 | Module | libbpf source | Go files | Phase | Status |
 |---|---|---|---|---|
-| Syscalls and UAPI | `bpf.c`, `libbpf_probes.c` | `internal/sys`, `bpf.go` | 0 | not started |
+| Syscalls and UAPI | `bpf.c`, `libbpf_probes.c` | `internal/sys`, `bpf.go` | 0 | in progress |
 | ELF reader | `elf.c` | `internal/elf` | 0 | not started |
 | Object lifecycle | `libbpf.c` | `object.go`, `secdefs.go`, `skeleton.go` | 1 | not started |
-| Maps | `libbpf.c` | `map.go` | 1 | not started |
+| Maps | `libbpf.c` | `map.go` | 1 | in progress |
 | Programs | `libbpf.c` | `program.go` | 1 | not started |
 | Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `netlink.go` | 1 | not started |
 | Pinning and reuse | `libbpf.c` | `pin.go` | 1 | not started |
@@ -35,6 +35,7 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | Area | Oracle | Status |
 |---|---|---|
 | Object and map metadata after open | C harness JSON | not started |
+| `BPF_MAP_CREATE` layout and attribute bytes | C harness JSON | parity tested |
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |
 | CO-RE fixups | libbpf internal harness | not started |
 | `btf_dump` text | exact text diff | not started |
