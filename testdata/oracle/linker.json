@@ -1,0 +1,25 @@
+{
+  "case": "linker",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "kprobe.bpf.o",
+  "output": "linked.bpf.o",
+  "object_name": "linked",
+  "maps": [
+    {"name": "counts", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1}
+  ],
+  "programs": [
+    {"name": "handle_open", "type": 2, "section": "kprobe/do_sys_openat2"}
+  ],
+  "sections": [
+    {"name": ".BTF", "type": 1, "flags": 0, "size": 651},
+    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 160},
+    {"name": ".maps", "type": 1, "flags": 3, "size": 32},
+    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 16},
+    {"name": ".strtab", "type": 3, "flags": 32, "size": 133},
+    {"name": ".symtab", "type": 2, "flags": 0, "size": 144},
+    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 96},
+    {"name": "license", "type": 1, "flags": 3, "size": 4}
+  ]
+}
