@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_program__name, bpf_program__type, bpf_program__expected_attach_type, bpf_program__section_name, bpf_program__insn_cnt, bpf_program__insns
+// libbpf-symbols: bpf_program__name, bpf_program__type, bpf_program__expected_attach_type, bpf_program__section_name, bpf_program__insn_cnt, bpf_program__insns, bpf_program__fd
 
 package libbpf
 
@@ -16,6 +16,7 @@ type BpfProgram struct {
 	sectionName        string
 	insns              []byte
 	relocs             []elf.Reloc
+	fd                 int
 }
 
 // BpfProgramName returns the function name of the program.
@@ -72,4 +73,13 @@ func BpfProgramInsns(p *BpfProgram) []byte {
 		return nil
 	}
 	return p.insns
+}
+
+// BpfProgramFD returns the loaded program descriptor, or -1 before
+// BpfObjectLoad and after BpfObjectClose.
+func BpfProgramFD(p *BpfProgram) int {
+	if p == nil {
+		return -1
+	}
+	return p.fd
 }
