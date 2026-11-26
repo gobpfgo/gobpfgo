@@ -1,6 +1,6 @@
 # Parity matrix
 
-<!-- anchors-ok: cmd/bpfgen internal/elf internal/sys internal/btf | package paths, not citations -->
+<!-- anchors-ok: cmd/bpfgen internal/elf internal/sys internal/btf internal/mmap | package paths, not citations -->
 
 Status values: not started, in progress, parity tested, deferred.
 
@@ -20,7 +20,7 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | BTF to C | `btf_dump.c` | `btf_dump.go`, `btf_dump_def.go`, `btf_dump_decl.go` | 2 | parity tested (type definitions and declarators, exact text; typed-data printer not started) |
 | Linker | `linker.c` | `linker.go` | 3 | not started |
 | USDT | `usdt.c` | `usdt.go` | 3 | not started |
-| Ring buffer | `ringbuf.c` | `ringbuf.go` | 3 | not started |
+| Ring buffer | `ringbuf.c` | `ringbuf.go`, `internal/mmap`, `internal/sys/atomic*.s` | 3 | parity tested (new/poll/consume/consume_n/add/free; callback API, exact record bytes; 5.10 and 6.18) |
 | Features and probes | `features.c`, `libbpf_probes.c` | `features.go`, `probes.go` | 3 | not started |
 | Zip objects | `zip.c` | `zip.go` | 3 | not started |
 | Program line info | `bpf_prog_linfo.c` | `line_info.go` | 3 | not started |
@@ -54,6 +54,7 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | CO-RE missing target | guarded load test | parity tested (`core_missing.bpf.o`, 5.10 and 6.18) |
 | `btf_dump` type and declaration text | exact text diff (`dump`, `dump-decl`, `dump-decl-strip`) | parity tested (type zoo; 5.10 and 6.18) |
 | `btf_dump` typed data | exact text diff | not started |
+| Ring buffer records | C harness JSON (`ringbuf` scenario) + root test | parity tested (record bytes and poll/consume paths; 5.10 and 6.18) |
 | 5.10 and newer | VM matrix | parity tested (5.10.0-46-cloud-amd64 and 6.18.63-3-lts; arm64 not run) |
 
 The C oracle lives in `oracle/`, is built out of tree, and is never part of `go build`.

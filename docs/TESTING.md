@@ -22,7 +22,7 @@ Scenarios:
 | `dump-decl-strip` | the same declarations with `strip_mods` set |
 | `usdt` | provider, name, arguments, semaphore offset |
 | `linker` | linked object metadata and section layout |
-| `ringbuf` | event bytes and order |
+| `ringbuf` | the record bytes, count and order delivered by a BPF ring buffer |
 | `probe` | map and program type support on the running kernel |
 
 The oracle is development-only. Tests consume checked-in JSON and never need C, clang or libbpf.
@@ -42,6 +42,8 @@ The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `
 The BTF parser has a structural test against the same object: type kinds, strings, the `counts` map definition and the `handle_open` prototype.
 
 The BTF dump test parses `dump.bpf.o` with `BtfParse` and again as raw `.BTF` with `BtfNew`, dumps every type id, and compares the exact text with `dump.txt`. The declaration tests call `BtfDumpEmitTypeDecl` for every non-variable type, once normally and once with `strip_mods`, and compare with `dump-decl.txt` and `dump-decl-strip.txt`. The fixture covers structs, unions, enums, enum64, signed and one-byte enums, bitfields, packed and flexible structs, anonymous members, arrays, function pointers, typedefs, forward declarations, type tags and declaration tags.
+
+The ring buffer test loads `ringbuf.bpf.o`, attaches `handle_ringbuf` to `do_sys_openat2`, creates a `RingBuffer`, adds a separately created ring map, triggers an open, and checks the record bytes through poll, consume and consume_n. The `ringbuf` oracle attaches the same program through libbpf and records the same sample.
 
 ## Tiers
 

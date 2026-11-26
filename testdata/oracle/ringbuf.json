@@ -1,0 +1,12 @@
+{
+  "case": "ringbuf",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object_name": "ringbuf",
+  "program": "handle_ringbuf",
+  "map": "events",
+  "samples": [
+    305419896
+  ]
+}

@@ -1,6 +1,6 @@
 # Decisions
 
-<!-- anchors-ok: BSD-2 LGPL-2 encoding/binary | SPDX identifiers and a package path, not citations -->
+<!-- anchors-ok: BSD-2 LGPL-2 encoding/binary internal/sys sync/atomic internal/mmap | SPDX identifiers and package paths, not citations -->
 
 Irreversible choices, with context and consequences. A new decision supersedes an older one only with a new dated entry.
 
@@ -71,6 +71,14 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 ## D-017: BTF dump covers C declarations, not typed data
 
 2026-11-26. The dump port implements `btf_dump__new`, `btf_dump__dump_type` and `btf_dump__emit_type_decl`, which produce the C declarations and the exact text `bpftool btf dump format c` relies on. The typed-data pretty-printer `btf_dump__dump_type_data` is a separate value formatter and is not ported; `BtfDump` emits types only. The output is compared byte for byte against the C library on a type-zoo object.
+
+## D-018: Core stays a 1:1 libbpf port; higher-level concepts come later
+
+2026-11-26. The operator wants the core `libbpf` package to translate the C library's API and behavior first, including the callback-based ring and perf buffers, with no channels or other higher-level abstractions in the core. Higher-level concepts are built on top in the `bpf` layer or by the consumer later. A channel adapter would allocate per event and add a backpressure policy that libbpf does not have; it is a convenience, not the core contract.
+
+## D-019: Ring buffer positions use per-architecture acquire/release assembly
+
+2026-11-26. The ring buffer reads the producer position with acquire semantics and stores the consumer position with release semantics, like `smp_load_acquire` and `smp_store_release` in the C library. `sync/atomic` needs a `*uint64`, which a mmap `[]byte` cannot provide without `unsafe`, so `internal/sys` has two tiny assembly stubs: a plain load/store on amd64 (TSO) and `LDAR`/`STLR` on arm64. This keeps the no-unsafe rule and the exact memory ordering; the cost is one small assembly file per architecture.
 
 ## Open decisions
 

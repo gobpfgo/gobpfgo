@@ -53,7 +53,10 @@ Phase 2 done.
 - Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18 ([`#27`](https://github.com/gobpfgo/gobpfgo/pull/27)).
 - The load path searches vmlinux and the split module BTFs, merges module types with the vmlinux base, detects ambiguous candidates, and poisons instructions with no target instead of failing the load. `core_missing.bpf.o` loads because the poisoned access is guarded, and `TestLoadKernelBTFs` verifies the split merge. CO-RE is done for libbpf's normal path on 5.10 and 6.18. `TYPE_MATCHES` is rejected, matching libbpf's normal `bpf_core_parse_spec` ([`#28`](https://github.com/gobpfgo/gobpfgo/pull/28)).
 - `BtfParse`, `BtfNew`, `BpfObjectBTF`, `BtfDumpNew`, `BtfDumpDumpType` and `BtfDumpEmitTypeDecl` emit libbpf's C declarations. The `dump`, `dump-decl` and `dump-decl-strip` oracle scenarios compare exact text from a type-zoo object: structs, unions, enums, enum64, bitfields, packed and flexible structs, anonymous members, function pointers, arrays, typedefs, forward declarations, type tags and declaration tags. Phase 2 is done ([`#33`](https://github.com/gobpfgo/gobpfgo/pull/33)).
-- Next: phase 3, starting with the feature and probe matrix and the ring buffer.
+Phase 3, in progress.
+
+- `RingBufferNew`, `RingBufferAdd`, `RingBufferPoll`, `RingBufferConsume`, `RingBufferConsumeN`, `RingBufferEpollFD` and `RingBufferFree` read BPF ring maps through mmap, with libbpf's callback API and no channel in the core. The consumer and producer positions use per-architecture acquire/release assembly, and the map parser now accepts definitions without key or value. The `ringbuf` oracle and root test compare the record bytes on 5.10 and 6.18 ([`#34`](https://github.com/gobpfgo/gobpfgo/pull/34)).
+- Next: the perf buffer and the feature/probe matrix.
 
 Open:
 
@@ -64,3 +67,4 @@ Open:
 - `BpfLinkUpdateProgram` is implemented and layout checked, but no attach type in this surface supports update on the tested kernels, so its success path is unexercised.
 - The remaining CO-RE `TYPE_MATCHES` kind is rejected by libbpf's normal path and is not ported.
 - The BTF typed-data pretty-printer (`btf_dump__dump_type_data`) is not part of the type dump slice and is not ported.
+- BTF DATASEC variable offsets are not relocated from `.rel.BTF`, so an object with two maps of the same definition can emit overlapping offsets and fail the BTF load. The ring Add test uses a separately created map; the multi-map relocation is its own slice.

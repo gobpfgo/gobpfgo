@@ -113,6 +113,12 @@ The generated table has these columns:
 | `btf_dump__dump_type` | `BtfDumpDumpType` | `libbpf/btf_dump.go` | parity tested (exact text) |
 | `btf_dump__emit_type_decl` | `BtfDumpEmitTypeDecl` | `libbpf/btf_dump_decl.go` | parity tested (exact text, with and without modifiers) |
 | `btf_dump__dump_type_data` | `BtfDumpDumpTypeData` | `libbpf/btf_dump_data.go` | not started |
-| `ring_buffer__new` | `RingBufferNew` | `libbpf/ringbuf.go` | not started |
+| `ring_buffer__new` | `RingBufferNew` | `libbpf/ringbuf.go` | parity tested (`ringbuf` scenario) |
+| `ring_buffer__free` | `RingBufferFree` | `libbpf/ringbuf.go` | parity tested (idempotent) |
+| `ring_buffer__add` | `RingBufferAdd` | `libbpf/ringbuf.go` | parity tested (separate map) |
+| `ring_buffer__poll` | `RingBufferPoll` | `libbpf/ringbuf.go` | parity tested |
+| `ring_buffer__consume` | `RingBufferConsume` | `libbpf/ringbuf.go` | parity tested |
+| `ring_buffer__consume_n` | `RingBufferConsumeN` | `libbpf/ringbuf.go` | parity tested |
+| `ring_buffer__epoll_fd` | `RingBufferEpollFD` | `libbpf/ringbuf.go` | parity tested |
 
 Status values: not started, in progress, parity tested, deferred, not portable.
