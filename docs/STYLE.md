@@ -88,6 +88,10 @@ These rules are binding. The core is boring Go that mirrors boring C. If a revie
 - No commented-out code. No TODO without a phase or issue reference.
 - Code comments explain why; the C source explains what.
 
+## Readability
+
+Code is written for humans to read and support. This includes tests, the oracle, tools and CI. Use small functions, named helpers, data tables and the formatter. A quick dump of statements that only its author can follow is a defect, not a shortcut.
+
 ## C formatting
 
 The C sources use the repository [`.clang-format`](../.clang-format), copied from the workspace style:

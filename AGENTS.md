@@ -27,6 +27,7 @@ golbpfgo is a pure-Go port of libbpf, close to 1:1 in behavior and API shape. Th
 - No `unsafe` import. UAPI structs are serialized into `[]byte` with `encoding/binary`; BTF is parsed into Go types; mmap data is read through `[]byte`. The single syscall address helper lives in `internal/sys` and is documented in [docs/DECISIONS.md](docs/DECISIONS.md).
 - C sources are formatted with `clang-format`; `make format-check` must pass. Go stays with `gofmt`.
 - Provenance lives in the file header metadata (`libbpf-source`, `libbpf-commit`, `libbpf-symbols`, or `golbpfgo-origin`); godocs describe the Go behavior, not the C mapping.
+- Write for humans. Tests, the oracle and tools are code too: small functions, shared helpers, clear names and the formatter. No throwaway dumps.
 - No cilium/ebpf code, tests or generated files. Design ideas only, recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 - The libbpf checkout at `../libbpf` is read-only reference. Never modify it.
 - LGPL-2.1-only. Every Go file carries the SPDX header. Dependencies must be license-compatible; flag Apache-2.0 before adding one.
