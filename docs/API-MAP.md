@@ -26,7 +26,8 @@ The generated table has these columns:
 
 | C symbol | Go symbol | Go file | Status |
 |---|---|---|---|
-| `bpf_object__open_file` | `BpfObjectOpenFile` | `libbpf/object.go` | not started |
+| `bpf_object__open_file` | `BpfObjectOpenFile` | `libbpf/object.go` | parity tested (kprobe object) |
+| `bpf_object__open_mem` | `BpfObjectOpenMem` | `libbpf/object.go` | parity tested (metadata; default memory name differs) |
 | `bpf_map_create` | `BpfMapCreate` | `libbpf/map.go` | in progress (map create; `LogOpts` and the name feature probe deferred) |
 | `bpf_object__load` | `BpfObjectLoad` | `libbpf/object.go` | not started |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
