@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path
+// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path, bpf_map__fd
 
 package libbpf
 
@@ -17,6 +17,7 @@ type BpfMap struct {
 	btfKeyTypeID   uint32
 	btfValueTypeID uint32
 	pinPath        string
+	fd             int
 }
 
 // BpfMapName returns the name declared in the map definition, or an empty
@@ -87,6 +88,15 @@ func BpfMapBtfValueTypeID(m *BpfMap) uint32 {
 		return 0
 	}
 	return m.btfValueTypeID
+}
+
+// BpfMapFD returns the loaded map descriptor, or -1 before BpfObjectLoad and
+// after BpfObjectClose.
+func BpfMapFD(m *BpfMap) int {
+	if m == nil {
+		return -1
+	}
+	return m.fd
 }
 
 // BpfMapPinPath returns the pin path set on the map, or an empty string. The

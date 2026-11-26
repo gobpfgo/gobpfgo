@@ -37,5 +37,21 @@
       {"name": "btf_flags", "offset": 32, "size": 4},
       {"name": "btf_token_fd", "offset": 36, "size": 4}
     ]
+  },
+  "prog_load": {
+    "attr_size": 168,
+    "fields": [
+      {"name": "prog_type", "offset": 0, "size": 4},
+      {"name": "insn_cnt", "offset": 4, "size": 4},
+      {"name": "insns", "offset": 8, "size": 8},
+      {"name": "license", "offset": 16, "size": 8},
+      {"name": "log_level", "offset": 24, "size": 4},
+      {"name": "log_size", "offset": 28, "size": 4},
+      {"name": "log_buf", "offset": 32, "size": 8},
+      {"name": "prog_flags", "offset": 44, "size": 4},
+      {"name": "prog_name", "offset": 48, "size": 16},
+      {"name": "expected_attach_type", "offset": 68, "size": 4},
+      {"name": "prog_btf_fd", "offset": 72, "size": 4}
+    ]
   }
 }
