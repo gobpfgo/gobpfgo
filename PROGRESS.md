@@ -39,7 +39,7 @@ Next: phase 1, in progress.
 - The test object now targets `kprobe/do_sys_openat2`, the function the `openat` path reaches.
 - The 5.10 tier passes on Debian 11 with kernel `5.10.0-46-cloud-amd64`: the full root and unprivileged suites, including object load, map lookup and kprobe attach.
 - The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding. The load test compares xlated and jited lengths exactly only on the fixture kernel and requires them nonzero elsewhere.
-- `BpfMapSetPinPath`, `BpfMapPin`, `BpfMapUnpin` and `BpfMapIsPinned` pin and unpin a loaded map on bpffs; `BpfProgramPin` and `BpfProgramUnpin` do the same for a program. The root test pins and unpins both on 5.10 and 6.18.
+- `BpfMapSetPinPath`, `BpfMapPin`, `BpfMapUnpin` and `BpfMapIsPinned` pin and unpin a loaded map on bpffs; `BpfProgramPin` and `BpfProgramUnpin` do the same for a program. The root test pins and unpins both on 5.10 and 6.18 ([`#20`](https://github.com/gobpfgo/gobpfgo/pull/20)).
 - Next: object pinning and reuse.
 
 Open:
