@@ -5,7 +5,7 @@
 
 package libbpf
 
-import "github.com/golbpfgo/golbpfgo/internal/elf"
+import "github.com/gobpfgo/gobpfgo/internal/elf"
 
 // BpfProgram is a program parsed from an object. It carries the section, type,
 // attach type and instruction bytes; the load step adds the kernel descriptor.

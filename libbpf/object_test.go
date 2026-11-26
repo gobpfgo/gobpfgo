@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 
 //go:build linux && (amd64 || arm64)
 
@@ -11,7 +11,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/golbpfgo/golbpfgo/internal/sys"
+	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
 

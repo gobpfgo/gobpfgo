@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original
+// gobpfgo-origin: original
 
 // Package libbpf parses BPF ELF objects and manages their maps and programs
 // in pure Go.
@@ -14,6 +14,6 @@
 // safe for concurrent use.
 //
 // The header of every source file records the libbpf source, commit and
-// symbols it was translated from, or golbpfgo-origin for original code. The
+// symbols it was translated from, or gobpfgo-origin for original code. The
 // godocs describe the Go API, its ownership and its limits.
 package libbpf

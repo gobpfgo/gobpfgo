@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// golbpfgo-origin: original BTF parser
+// gobpfgo-origin: original BTF parser
 // libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
 // libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind

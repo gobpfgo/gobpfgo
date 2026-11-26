@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// Original gobpfgo code.
 
 #include "oracle.h"
 
@@ -22,7 +22,7 @@ static void copy_name(char *dst, const char *src, size_t size) {
 }
 
 int oracle_attr(void) {
-	const char *name        = "golbpfgo-test";
+	const char *name        = "gobpfgo-test";
 	const size_t attr_size  = ORACLE_OFFSETOFEND(union bpf_attr, excl_prog_hash_size);
 	struct oracle_meta meta = {.case_name = "map_create"};
 	union bpf_attr attr;
