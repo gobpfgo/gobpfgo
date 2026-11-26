@@ -137,12 +137,14 @@ func progLoadFieldLayout() []fieldLayout {
 
 // ProgLoad loads a BPF program into the kernel and returns its file
 // descriptor. insns and license are copied by the kernel during the call;
-// logBuf may be nil or a buffer for the verifier log.
+// logBuf may be nil or a buffer for the verifier log. funcInfo and lineInfo
+// may be nil or the struct bpf_func_info and struct bpf_line_info records.
 //
 // The caller sets ProgType, InsnCnt, ProgFlags, ExpectedAttachType and
-// ProgBtfFD before calling. The caller owns the descriptor and must close it
-// with unix.Close.
-func ProgLoad(attr *ProgLoadAttr, insns []byte, license []byte, logBuf []byte, funcInfo []byte) (int, error) {
+// ProgBtfFD before calling, plus the record size and count of each record
+// array it passes. The caller owns the descriptor and must close it with
+// unix.Close.
+func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo []byte) (int, error) {
 	if len(insns) == 0 || len(license) == 0 {
 		return -1, unix.EINVAL
 	}
@@ -156,12 +158,16 @@ func ProgLoad(attr *ProgLoadAttr, insns []byte, license []byte, logBuf []byte, f
 	if len(funcInfo) > 0 {
 		attr.FuncInfo = uint64(addr(funcInfo))
 	}
+	if len(lineInfo) > 0 {
+		attr.LineInfo = uint64(addr(lineInfo))
+	}
 
 	fd, err := bpf(BPF_PROG_LOAD, attr.Marshal())
 	runtime.KeepAlive(insns)
 	runtime.KeepAlive(license)
 	runtime.KeepAlive(logBuf)
 	runtime.KeepAlive(funcInfo)
+	runtime.KeepAlive(lineInfo)
 	if err != nil {
 		return -1, err
 	}

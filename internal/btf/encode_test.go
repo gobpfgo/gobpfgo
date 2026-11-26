@@ -113,7 +113,7 @@ func equalIDs(a, b []uint32) bool {
 
 // TestParseExtRaw checks the raw blocks of an object with a .text subprogram:
 // one function block and one line block per program section, and function
-// records that match ParseExt.
+// and line records that match ParseExt.
 func TestParseExtRaw(t *testing.T) {
 	spec, o := parseObjectBTF(t, "link_text_b.bpf.o")
 
@@ -140,9 +140,25 @@ func TestParseExtRaw(t *testing.T) {
 			t.Fatalf("func block %s type id = %d, want %d", block.Section, got, ext.FuncInfos[i].Records[0].TypeID)
 		}
 	}
-	for _, block := range raw.LineInfo {
-		if block.RecSize != LineInfoMinSize || len(block.Records) == 0 || len(block.Records)%block.RecSize != 0 {
-			t.Fatalf("line block %s: record size %d, %d bytes", block.Section, block.RecSize, len(block.Records))
+	if len(ext.LineInfos) != len(raw.LineInfo) {
+		t.Fatalf("ParseExt line sections = %d, raw blocks = %d", len(ext.LineInfos), len(raw.LineInfo))
+	}
+	for i, block := range raw.LineInfo {
+		records := ext.LineInfos[i].Records
+		if ext.LineInfos[i].Section != block.Section || block.RecSize != LineInfoMinSize || len(block.Records) != LineInfoMinSize*len(records) {
+			t.Fatalf("line block %s: record size %d, %d bytes, %d decoded records", block.Section, block.RecSize, len(block.Records), len(records))
+		}
+		for j, rec := range records {
+			raw := block.Records[j*LineInfoMinSize:]
+			want := LineInfo{
+				InsnOff:     o.ByteOrder.Uint32(raw),
+				FileNameOff: o.ByteOrder.Uint32(raw[4:]),
+				LineOff:     o.ByteOrder.Uint32(raw[8:]),
+				LineCol:     o.ByteOrder.Uint32(raw[12:]),
+			}
+			if rec != want {
+				t.Fatalf("line block %s record %d = %+v, want %+v", block.Section, j, rec, want)
+			}
 		}
 	}
 }

@@ -103,8 +103,22 @@ void json_arr_begin(struct json *j, const char *key) {
 	json_push(j);
 }
 
+void json_arr_begin_compact(struct json *j, const char *key) {
+	json_begin(j, key);
+	fputc('[', j->out);
+	json_push(j);
+	j->compact[j->depth] = true;
+}
+
 void json_arr_end(struct json *j) {
+	bool compact = j->compact[j->depth];
+
 	j->depth--;
+	if (compact) {
+		fputc(']', j->out);
+		return;
+	}
+
 	fputc('\n', j->out);
 	json_indent(j);
 	fputc(']', j->out);
