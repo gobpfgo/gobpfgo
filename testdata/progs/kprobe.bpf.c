@@ -12,13 +12,13 @@ struct {
 } counts SEC(".maps");
 
 SEC("kprobe/do_sys_open")
-int handle_open(void *ctx)
-{
-	__u32 key = 0;
+int handle_open(void *ctx) {
+	__u32 key    = 0;
 	__u64 *value = bpf_map_lookup_elem(&counts, &key);
 
 	if (value)
 		__sync_fetch_and_add(value, 1);
+
 	return 0;
 }
 

@@ -14,8 +14,7 @@
 #include <string.h>
 #include <sys/utsname.h>
 
-static void json_string(const char *s)
-{
+static void json_string(const char *s) {
 	const unsigned char *p = (const unsigned char *)(s ? s : "");
 
 	putchar('"');
@@ -34,20 +33,21 @@ static void json_string(const char *s)
 			break;
 		}
 	}
+
 	putchar('"');
 }
 
-static void print_map(struct bpf_map *map)
-{
+static void print_map(struct bpf_map *map) {
 	struct bpf_map_info info = {};
 	char name[BPF_OBJ_NAME_LEN];
 	__u32 len = sizeof(info);
-	int fd = bpf_map__fd(map);
+	int fd    = bpf_map__fd(map);
 
 	if (bpf_obj_get_info_by_fd(fd, &info, &len) != 0) {
 		fprintf(stderr, "map info %s: %s\n", bpf_map__name(map), strerror(errno));
 		exit(1);
 	}
+
 	memcpy(name, info.name, sizeof(name) - 1);
 	name[sizeof(name) - 1] = '\0';
 
@@ -64,17 +64,17 @@ static void print_map(struct bpf_map *map)
 	printf("}");
 }
 
-static void print_program(struct bpf_program *prog)
-{
+static void print_program(struct bpf_program *prog) {
 	struct bpf_prog_info info = {};
 	char name[BPF_OBJ_NAME_LEN];
 	__u32 len = sizeof(info);
-	int fd = bpf_program__fd(prog);
+	int fd    = bpf_program__fd(prog);
 
 	if (bpf_obj_get_info_by_fd(fd, &info, &len) != 0) {
 		fprintf(stderr, "prog info %s: %s\n", bpf_program__name(prog), strerror(errno));
 		exit(1);
 	}
+
 	memcpy(name, info.name, sizeof(name) - 1);
 	name[sizeof(name) - 1] = '\0';
 
@@ -90,8 +90,7 @@ static void print_program(struct bpf_program *prog)
 	printf("}");
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 	struct bpf_program *prog;
 	struct bpf_object *obj;
 	struct bpf_map *map;
@@ -104,6 +103,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: %s <object>\n", argv[0]);
 		return 2;
 	}
+
 	if (uname(&uts) != 0) {
 		perror("uname");
 		return 1;
@@ -125,8 +125,7 @@ int main(int argc, char **argv)
 
 	printf("{\n");
 	printf("  \"case\": \"load\",\n");
-	printf("  \"libbpf_version\": \"%d.%d.%d\",\n",
-	       LIBBPF_MAJOR_VERSION, LIBBPF_MINOR_VERSION, 0);
+	printf("  \"libbpf_version\": \"%d.%d.%d\",\n", LIBBPF_MAJOR_VERSION, LIBBPF_MINOR_VERSION, 0);
 	printf("  \"arch\": ");
 	json_string(uts.machine);
 	printf(",\n");
@@ -139,24 +138,24 @@ int main(int argc, char **argv)
 
 	printf("  \"maps\": [\n");
 	first = true;
-	for (map = bpf_object__next_map(obj, NULL); map;
-	     map = bpf_object__next_map(obj, map)) {
+	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map)) {
 		if (!first)
 			printf(",\n");
 		print_map(map);
 		first = false;
 	}
+
 	printf("\n  ],\n");
 
 	printf("  \"programs\": [\n");
 	first = true;
-	for (prog = bpf_object__next_program(obj, NULL); prog;
-	     prog = bpf_object__next_program(obj, prog)) {
+	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog)) {
 		if (!first)
 			printf(",\n");
 		print_program(prog);
 		first = false;
 	}
+
 	printf("\n  ]\n");
 	printf("}\n");
 
