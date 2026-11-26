@@ -233,7 +233,7 @@ func parseMaps(spec *btf.Spec) ([]*BpfMap, error) {
 			return nil, fmt.Errorf("map %s has kind %v, want struct", v.Name, st.Kind)
 		}
 
-		m := &BpfMap{name: v.Name, fd: -1}
+		m := &BpfMap{name: v.Name, symbolName: v.Name, fd: -1}
 		if err := fillMapDef(spec, st, m); err != nil {
 			return nil, fmt.Errorf("map %s: %w", v.Name, err)
 		}
@@ -477,6 +477,20 @@ func BpfObjectFindMapByName(obj *BpfObject, name string) *BpfMap {
 	}
 	for _, m := range obj.maps {
 		if m.name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// findMapBySymbol returns the map whose ELF symbol matches, independent of a
+// name changed by BpfMapReuseFD.
+func findMapBySymbol(obj *BpfObject, symbol string) *BpfMap {
+	if obj == nil {
+		return nil
+	}
+	for _, m := range obj.maps {
+		if m.symbolName == symbol {
 			return m
 		}
 	}

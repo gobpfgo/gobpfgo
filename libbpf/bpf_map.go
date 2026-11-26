@@ -14,6 +14,7 @@ import (
 // from the ELF and BTF sections; the load step adds the kernel descriptor.
 type BpfMap struct {
 	name           string
+	symbolName     string
 	mapType        BpfMapType
 	keySize        uint32
 	valueSize      uint32
@@ -23,6 +24,7 @@ type BpfMap struct {
 	btfValueTypeID uint32
 	pinPath        string
 	pinned         bool
+	reused         bool
 	fd             int
 	id             uint32
 }
