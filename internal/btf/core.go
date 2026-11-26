@@ -248,8 +248,17 @@ type CoreReloResult struct {
 // NewVal zero for FIELD_EXISTS and a poisoned result for every other kind.
 // Type-based and enum-value target matching are not implemented yet.
 func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
+	if relo.Kind == CoreTypeIDLocal {
+		return &CoreReloResult{OrigVal: uint64(relo.TypeID), NewVal: uint64(relo.TypeID)}, nil
+	}
 	if target == nil {
 		return nil, fmt.Errorf("btf: nil target spec")
+	}
+	if relo.Kind.typeBased() {
+		return s.calcTypeRelo(relo, target, targetTypeID)
+	}
+	if relo.Kind.enumvalBased() {
+		return s.calcEnumRelo(relo, target, targetTypeID)
 	}
 	if !relo.Kind.fieldBased() {
 		return nil, fmt.Errorf("btf: target matching for %s is not implemented", relo.Kind)
@@ -308,6 +317,138 @@ func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 	}
 
 	return res, nil
+}
+
+// calcTypeRelo computes a type-based relocation against the target type.
+func (s *Spec) calcTypeRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
+	compatible := coreTypesCompatible(s, relo.TypeID, target, targetTypeID)
+	res := &CoreReloResult{Validate: true}
+
+	switch relo.Kind {
+	case CoreTypeIDTarget:
+		res.OrigVal = uint64(relo.TypeID)
+		res.Validate = false
+		if compatible {
+			res.NewVal = uint64(targetTypeID)
+		}
+	case CoreTypeExists:
+		res.OrigVal = 1
+		if compatible {
+			res.NewVal = 1
+		}
+	case CoreTypeSize:
+		size, err := s.SizeOf(relo.TypeID)
+		if err != nil {
+			return nil, err
+		}
+		res.OrigVal = uint64(size)
+		if compatible {
+			size, err := target.SizeOf(targetTypeID)
+			if err != nil {
+				return nil, err
+			}
+			res.NewVal = uint64(size)
+		}
+	default:
+		return nil, fmt.Errorf("btf: unsupported type relocation %s", relo.Kind)
+	}
+
+	return res, nil
+}
+
+// calcEnumRelo computes an enum-value relocation against the target enum.
+func (s *Spec) calcEnumRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
+	local, err := s.ParseCoreSpec(relo)
+	if err != nil {
+		return nil, err
+	}
+	if len(local.Accessors) != 1 {
+		return nil, fmt.Errorf("btf: enum relocation has %d accessors", len(local.Accessors))
+	}
+	localEnum, err := s.TypeByID(local.Accessors[0].TypeID)
+	if err != nil {
+		return nil, err
+	}
+	localValue, err := enumValue(localEnum, local.Accessors[0].Index)
+	if err != nil {
+		return nil, err
+	}
+
+	targetEnum, err := target.TypeByID(targetTypeID)
+	if err != nil {
+		return nil, err
+	}
+	_, targetValue, found, err := findEnumValue(targetEnum, local.Accessors[0].Name)
+	if err != nil {
+		return nil, err
+	}
+
+	res := &CoreReloResult{Validate: true}
+	switch relo.Kind {
+	case CoreEnumvalExists:
+		res.OrigVal = 1
+		if found {
+			res.NewVal = 1
+		}
+	case CoreEnumvalValue:
+		res.OrigVal = localValue
+		if !found {
+			res.Poison = true
+		} else {
+			res.NewVal = targetValue
+		}
+	default:
+		return nil, fmt.Errorf("btf: unsupported enum relocation %s", relo.Kind)
+	}
+
+	return res, nil
+}
+
+// coreTypesCompatible applies the field compatibility rules to a root type.
+func coreTypesCompatible(local *Spec, localID uint32, target *Spec, targetID uint32) bool {
+	return coreFieldsCompatible(local, localID, target, targetID)
+}
+
+// enumValue returns the value of the enum member at index.
+func enumValue(t *Type, index uint32) (uint64, error) {
+	switch t.Kind {
+	case KindEnum:
+		if index >= uint32(len(t.Enums)) {
+			return 0, fmt.Errorf("btf: enum index %d out of range", index)
+		}
+		return uint64(int64(t.Enums[index].Value)), nil
+	case KindEnum64:
+		if index >= uint32(len(t.Enum64s)) {
+			return 0, fmt.Errorf("btf: enum64 index %d out of range", index)
+		}
+		return t.Enum64s[index].Value, nil
+	default:
+		return 0, fmt.Errorf("btf: type %s is not an enum", t.Kind)
+	}
+}
+
+// findEnumValue finds the enumerator by name and returns its index and value.
+func findEnumValue(t *Type, name string) (uint32, uint64, bool, error) {
+	essential := essentialName(name)
+
+	switch t.Kind {
+	case KindEnum:
+		for i := range t.Enums {
+			if essentialName(t.Enums[i].Name) == essential {
+				return uint32(i), uint64(int64(t.Enums[i].Value)), true, nil
+			}
+		}
+	case KindEnum64:
+		for i := range t.Enum64s {
+			if essentialName(t.Enum64s[i].Name) == essential {
+				return uint32(i), t.Enum64s[i].Value, true, nil
+			}
+		}
+	default:
+		return 0, 0, false, fmt.Errorf("btf: type %s is not an enum", t.Kind)
+	}
+
+	return 0, 0, false, nil
 }
 
 // matchCoreSpec walks the target type with the field and array accessors of
