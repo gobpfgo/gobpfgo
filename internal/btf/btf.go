@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sort"
 )
 
 // Header is the BTF header. The type and string offsets are relative to the
@@ -375,6 +376,34 @@ func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// SortDatasecVars orders each DATASEC's variables by their offset, as libbpf
+// does before BPF_BTF_LOAD. The kernel requires the offsets to be ascending.
+func (s *Spec) SortDatasecVars() error {
+	for i := range s.Types {
+		t := &s.Types[i]
+		if t.Kind != KindDatasec || t.ID == 0 || len(t.DataSec) < 2 {
+			continue
+		}
+
+		sorted := append([]VarSecInfo(nil), t.DataSec...)
+		sort.SliceStable(sorted, func(a, b int) bool {
+			return sorted[a].Offset < sorted[b].Offset
+		})
+
+		for j := range sorted {
+			off := s.typeStart + int(t.rawOff) + 12 + j*12
+			if off+12 > len(s.raw) {
+				return fmt.Errorf("btf: datasec %s: variable %d out of bounds", t.Name, j)
+			}
+			s.ByteOrder.PutUint32(s.raw[off:], sorted[j].Type)
+			s.ByteOrder.PutUint32(s.raw[off+4:], sorted[j].Offset)
+			s.ByteOrder.PutUint32(s.raw[off+8:], sorted[j].Size)
+		}
+		t.DataSec = sorted
 	}
 	return nil
 }

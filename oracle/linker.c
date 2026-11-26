@@ -18,21 +18,28 @@
 
 #define LINKER_OUTPUT_NAME "linked.bpf.o"
 
+/* An opened ELF file with its section count, section name table and symbol
+ * table.
+ */
+struct linker_elf {
+	int fd;
+	Elf *elf;
+	size_t shstrndx;
+	size_t shnum;
+	GElf_Shdr symtab;
+	Elf_Data *symbols;
+};
+
+/* One section and its name, for sorting by name. */
 struct linker_section {
-	char *name;
-	uint32_t type;
-	uint64_t flags;
-	uint64_t size;
+	const char *name;
+	Elf_Scn *scn;
 };
 
-struct linker_sections {
-	struct linker_section *items;
-	size_t count;
-};
-
-static int link_object(const char *input, const char *output) {
+static int link_objects(const char *const *inputs, int count, const char *output) {
 	struct bpf_linker *linker;
-	int err;
+	int err = 0;
+	int i;
 
 	linker = bpf_linker__new(output, NULL);
 	if (!linker) {
@@ -40,99 +47,153 @@ static int link_object(const char *input, const char *output) {
 		return -1;
 	}
 
-	err = bpf_linker__add_file(linker, input, NULL);
-	if (err) {
-		fprintf(stderr, "bpf_linker__add_file %s: %s\n", input, strerror(-err));
-		bpf_linker__free(linker);
-		return -1;
+	for (i = 0; i < count && !err; i++) {
+		err = bpf_linker__add_file(linker, inputs[i], NULL);
+		if (err)
+			fprintf(stderr, "bpf_linker__add_file %s: %s\n", inputs[i], strerror(-err));
 	}
 
-	err = bpf_linker__finalize(linker);
-	if (err)
-		fprintf(stderr, "bpf_linker__finalize %s: %s\n", output, strerror(-err));
+	if (!err) {
+		err = bpf_linker__finalize(linker);
+		if (err)
+			fprintf(stderr, "bpf_linker__finalize %s: %s\n", output, strerror(-err));
+	}
 
 	bpf_linker__free(linker);
 	return err ? -1 : 0;
 }
 
-static int section_append(struct linker_sections *secs, const char *name, const GElf_Shdr *shdr) {
-	struct linker_section *items;
-	char *copy;
-
-	copy = strdup(name);
-	if (!copy)
-		return -1;
-
-	items = realloc(secs->items, (secs->count + 1) * sizeof(*items));
-	if (!items) {
-		free(copy);
-		return -1;
-	}
-
-	secs->items              = items;
-	items[secs->count].name  = copy;
-	items[secs->count].type  = shdr->sh_type;
-	items[secs->count].flags = shdr->sh_flags;
-	items[secs->count].size  = shdr->sh_size;
-	secs->count++;
-	return 0;
-}
-
-static int read_elf_sections(Elf *elf, struct linker_sections *secs) {
+static int find_symtab(struct linker_elf *le) {
 	Elf_Scn *scn = NULL;
-	size_t shstrndx;
 
-	if (elf_getshdrstrndx(elf, &shstrndx) != 0) {
-		fprintf(stderr, "elf_getshdrstrndx: %s\n", elf_errmsg(-1));
-		return -1;
-	}
-
-	while ((scn = elf_nextscn(elf, scn)) != NULL) {
-		const char *name;
+	while ((scn = elf_nextscn(le->elf, scn)) != NULL) {
 		GElf_Shdr shdr;
 
-		if (!gelf_getshdr(scn, &shdr)) {
-			fprintf(stderr, "gelf_getshdr: %s\n", elf_errmsg(-1));
-			return -1;
-		}
+		if (!gelf_getshdr(scn, &shdr) || shdr.sh_type != SHT_SYMTAB)
+			continue;
 
-		name = elf_strptr(elf, shstrndx, shdr.sh_name);
-		if (!name || section_append(secs, name, &shdr) != 0) {
-			fprintf(stderr, "section %zu: cannot record name\n", elf_ndxscn(scn));
-			return -1;
-		}
+		le->symtab  = shdr;
+		le->symbols = elf_getdata(scn, NULL);
+		return le->symbols ? 0 : -1;
 	}
 
-	return 0;
+	fprintf(stderr, "no symbol table\n");
+	return -1;
 }
 
-static int read_sections(const char *path, struct linker_sections *secs) {
-	Elf *elf;
-	int err;
-	int fd;
+static void linker_elf_close(struct linker_elf *le) {
+	if (le->elf)
+		elf_end(le->elf);
+	if (le->fd >= 0)
+		close(le->fd);
+}
+
+static int linker_elf_open(const char *path, struct linker_elf *le) {
+	memset(le, 0, sizeof(*le));
+	le->fd = -1;
 
 	if (elf_version(EV_CURRENT) == EV_NONE) {
 		fprintf(stderr, "libelf is out of date\n");
 		return -1;
 	}
 
-	fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
+	le->fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (le->fd < 0) {
 		perror(path);
 		return -1;
 	}
 
-	elf = elf_begin(fd, ELF_C_READ, NULL);
-	if (!elf) {
-		fprintf(stderr, "elf_begin %s: %s\n", path, elf_errmsg(-1));
-		close(fd);
+	le->elf = elf_begin(le->fd, ELF_C_READ, NULL);
+	if (!le->elf || elf_getshdrstrndx(le->elf, &le->shstrndx) != 0 || elf_getshdrnum(le->elf, &le->shnum) != 0) {
+		fprintf(stderr, "%s: %s\n", path, elf_errmsg(-1));
+		linker_elf_close(le);
 		return -1;
 	}
 
-	err = read_elf_sections(elf, secs);
-	elf_end(elf);
-	close(fd);
-	return err;
+	if (find_symtab(le) != 0) {
+		linker_elf_close(le);
+		return -1;
+	}
+	return 0;
+}
+
+static const char *section_name(const struct linker_elf *le, size_t index) {
+	Elf_Scn *scn = elf_getscn(le->elf, index);
+	GElf_Shdr shdr;
+
+	if (!scn || !gelf_getshdr(scn, &shdr))
+		return NULL;
+	return elf_strptr(le->elf, le->shstrndx, shdr.sh_name);
+}
+
+/* symbol_label names a symbol the way readelf does: a section symbol by its
+ * section, every other symbol by its own name.
+ */
+static const char *symbol_label(const struct linker_elf *le, const GElf_Sym *sym) {
+	if (GELF_ST_TYPE(sym->st_info) == STT_SECTION)
+		return section_name(le, sym->st_shndx);
+	return elf_strptr(le->elf, le->symtab.sh_link, sym->st_name);
+}
+
+static const char *symbol_section(const struct linker_elf *le, const GElf_Sym *sym) {
+	if (sym->st_shndx == SHN_UNDEF)
+		return "UND";
+	if (sym->st_shndx == SHN_ABS)
+		return "ABS";
+	return section_name(le, sym->st_shndx);
+}
+
+static bool is_btf_section(const char *name) {
+	return strcmp(name, ".BTF") == 0 || strcmp(name, ".BTF.ext") == 0;
+}
+
+static void relocations_json(struct json *j, const struct linker_elf *le, Elf_Scn *scn) {
+	Elf_Data *data = elf_getdata(scn, NULL);
+	size_t count   = data ? data->d_size / sizeof(Elf64_Rel) : 0;
+	size_t i;
+
+	json_arr_begin(j, "relocations");
+	for (i = 0; i < count; i++) {
+		GElf_Rel rel;
+		GElf_Sym sym;
+
+		if (!gelf_getrel(data, (int)i, &rel) || !gelf_getsym(le->symbols, (int)GELF_R_SYM(rel.r_info), &sym))
+			continue;
+
+		json_obj_begin_compact(j, NULL);
+		json_u64(j, "offset", rel.r_offset);
+		json_u32(j, "type", (uint32_t)GELF_R_TYPE(rel.r_info));
+		json_str(j, "symbol", symbol_label(le, &sym));
+		json_obj_end(j);
+	}
+	json_arr_end(j);
+}
+
+/* section_json prints a section header, the contents of a code or data
+ * section and the entries of a relocation section.
+ */
+static void section_json(struct json *j, const struct linker_elf *le, const struct linker_section *sec) {
+	Elf_Data *data;
+	GElf_Shdr shdr;
+
+	if (!gelf_getshdr(sec->scn, &shdr))
+		return;
+
+	json_obj_begin_compact(j, NULL);
+	json_str(j, "name", sec->name);
+	json_u32(j, "type", shdr.sh_type);
+	json_u64(j, "flags", shdr.sh_flags);
+	json_u64(j, "size", shdr.sh_size);
+	json_u64(j, "align", shdr.sh_addralign);
+
+	if (shdr.sh_type == SHT_PROGBITS && !is_btf_section(sec->name)) {
+		data = elf_getdata(sec->scn, NULL);
+		json_hex(j, "data", data ? data->d_buf : NULL, data ? data->d_size : 0);
+	}
+	if (shdr.sh_type == SHT_REL)
+		relocations_json(j, le, sec->scn);
+
+	json_obj_end(j);
 }
 
 static int section_cmp(const void *a, const void *b) {
@@ -142,12 +203,60 @@ static int section_cmp(const void *a, const void *b) {
 	return strcmp(sa->name, sb->name);
 }
 
-static void sections_free(struct linker_sections *secs) {
+/* sections_json prints every section but the null one, sorted by name. */
+static int sections_json(struct json *j, const struct linker_elf *le) {
+	struct linker_section *secs;
+	Elf_Scn *scn = NULL;
+	size_t count = 0;
 	size_t i;
 
-	for (i = 0; i < secs->count; i++)
-		free(secs->items[i].name);
-	free(secs->items);
+	secs = calloc(le->shnum, sizeof(*secs));
+	if (!secs)
+		return -1;
+
+	while ((scn = elf_nextscn(le->elf, scn)) != NULL && count < le->shnum) {
+		secs[count].scn  = scn;
+		secs[count].name = section_name(le, elf_ndxscn(scn));
+		if (!secs[count].name) {
+			free(secs);
+			return -1;
+		}
+		count++;
+	}
+
+	qsort(secs, count, sizeof(*secs), section_cmp);
+
+	json_arr_begin(j, "sections");
+	for (i = 0; i < count; i++)
+		section_json(j, le, &secs[i]);
+	json_arr_end(j);
+
+	free(secs);
+	return 0;
+}
+
+/* symbols_json prints the symbol table in order, without the null symbol. */
+static void symbols_json(struct json *j, const struct linker_elf *le) {
+	size_t count = le->symtab.sh_size / sizeof(Elf64_Sym);
+	size_t i;
+
+	json_arr_begin(j, "symbols");
+	for (i = 1; i < count; i++) {
+		GElf_Sym sym;
+
+		if (!gelf_getsym(le->symbols, (int)i, &sym))
+			continue;
+
+		json_obj_begin_compact(j, NULL);
+		json_str(j, "name", symbol_label(le, &sym));
+		json_u32(j, "type", GELF_ST_TYPE(sym.st_info));
+		json_u32(j, "bind", GELF_ST_BIND(sym.st_info));
+		json_str(j, "section", symbol_section(le, &sym));
+		json_u64(j, "value", sym.st_value);
+		json_u64(j, "size", sym.st_size);
+		json_obj_end(j);
+	}
+	json_arr_end(j);
 }
 
 static void map_json(struct json *j, const struct bpf_map *map) {
@@ -168,53 +277,34 @@ static void program_json(struct json *j, const struct bpf_program *prog) {
 	json_obj_end(j);
 }
 
-static void section_json(struct json *j, const struct linker_section *sec) {
-	json_obj_begin_compact(j, NULL);
-	json_str(j, "name", sec->name);
-	json_u32(j, "type", sec->type);
-	json_u64(j, "flags", sec->flags);
-	json_u64(j, "size", sec->size);
-	json_obj_end(j);
-}
-
-static void linker_json(const char *input, struct bpf_object *obj, const struct linker_sections *secs) {
-	struct oracle_meta meta = {.case_name = "linker", .version = true};
+static void object_json(struct json *j, struct bpf_object *obj) {
 	struct bpf_program *prog;
 	struct bpf_map *map;
-	struct json j;
-	size_t i;
 
-	json_init(&j, stdout);
-	json_obj_begin(&j, NULL);
-	oracle_meta(&j, &meta);
+	json_str(j, "object_name", bpf_object__name(obj));
 
-	json_str(&j, "object", oracle_basename(input));
-	json_str(&j, "output", LINKER_OUTPUT_NAME);
-	json_str(&j, "object_name", bpf_object__name(obj));
-
-	json_arr_begin(&j, "maps");
+	json_arr_begin(j, "maps");
 	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map))
-		map_json(&j, map);
-	json_arr_end(&j);
+		map_json(j, map);
+	json_arr_end(j);
 
-	json_arr_begin(&j, "programs");
+	json_arr_begin(j, "programs");
 	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog))
-		program_json(&j, prog);
-	json_arr_end(&j);
-
-	json_arr_begin(&j, "sections");
-	for (i = 0; i < secs->count; i++)
-		section_json(&j, &secs->items[i]);
-	json_arr_end(&j);
-
-	json_obj_end(&j);
-	fputc('\n', stdout);
+		program_json(j, prog);
+	json_arr_end(j);
 }
 
-static int report_linked(const char *input, const char *output) {
-	struct linker_sections secs = {0};
+/* report_linked opens the linked object with libbpf and libelf and prints the
+ * inputs, the maps and programs, the sections and the symbols.
+ */
+static int report_linked(const char *const *inputs, int count, const char *output) {
+	struct oracle_meta meta = {.case_name = "linker", .version = true};
+	struct linker_elf le;
 	struct bpf_object *obj;
+	struct json j;
+	int ret = 0;
 	long err;
+	int i;
 
 	obj = bpf_object__open_file(output, NULL);
 	err = libbpf_get_error(obj);
@@ -222,22 +312,35 @@ static int report_linked(const char *input, const char *output) {
 		fprintf(stderr, "open %s: %s\n", output, strerror((int)-err));
 		return 1;
 	}
-
-	if (read_sections(output, &secs) != 0) {
-		sections_free(&secs);
+	if (linker_elf_open(output, &le) != 0) {
 		bpf_object__close(obj);
 		return 1;
 	}
 
-	qsort(secs.items, secs.count, sizeof(*secs.items), section_cmp);
-	linker_json(input, obj, &secs);
+	json_init(&j, stdout);
+	json_obj_begin(&j, NULL);
+	oracle_meta(&j, &meta);
 
-	sections_free(&secs);
+	json_arr_begin(&j, "objects");
+	for (i = 0; i < count; i++)
+		json_str(&j, NULL, oracle_basename(inputs[i]));
+	json_arr_end(&j);
+	json_str(&j, "output", LINKER_OUTPUT_NAME);
+
+	object_json(&j, obj);
+	if (sections_json(&j, &le) != 0)
+		ret = 1;
+	symbols_json(&j, &le);
+
+	json_obj_end(&j);
+	fputc('\n', stdout);
+
+	linker_elf_close(&le);
 	bpf_object__close(obj);
-	return 0;
+	return ret;
 }
 
-int oracle_linker(const char *path) {
+int oracle_linker(const char *const *paths, int count) {
 	char dir[] = "/tmp/gobpfgo-linker-XXXXXX";
 	char output[PATH_MAX];
 	int ret = 1;
@@ -249,8 +352,8 @@ int oracle_linker(const char *path) {
 
 	snprintf(output, sizeof(output), "%s/%s", dir, LINKER_OUTPUT_NAME);
 
-	if (link_object(path, output) == 0)
-		ret = report_linked(path, output);
+	if (link_objects(paths, count, output) == 0)
+		ret = report_linked(paths, count, output);
 
 	unlink(output);
 	rmdir(dir);

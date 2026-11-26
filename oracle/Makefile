@@ -66,6 +66,9 @@ probe-fixture: $(ORACLE)
 linker-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
 	$(ORACLE) linker ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/linker.json
+	$(ORACLE) linker ../testdata/progs/link_a.bpf.o ../testdata/progs/link_b.bpf.o > ../testdata/oracle/linker-merge.json
+	$(ORACLE) linker ../testdata/progs/link_b.bpf.o ../testdata/progs/link_a.bpf.o > ../testdata/oracle/linker-merge-reverse.json
+	$(ORACLE) linker ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/linker-text.json
 
 clean:
 	rm -rf $(BUILD)

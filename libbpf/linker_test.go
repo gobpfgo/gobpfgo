@@ -9,12 +9,16 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/btf"
@@ -23,13 +27,15 @@ import (
 
 const linkerInputPath = "../testdata/progs/kprobe.bpf.o"
 
-// linkerFixture is testdata/oracle/linker.json: the object libbpf's linker
-// writes for kprobe.bpf.o, as bpf_object__open_file and libelf see it.
+// linkerFixture is a linker oracle file: the object libbpf's linker writes
+// for the listed objects, as bpf_object__open_file and libelf see it.
 type linkerFixture struct {
+	Objects    []string               `json:"objects"`
 	ObjectName string                 `json:"object_name"`
 	Maps       []linkerFixtureMap     `json:"maps"`
 	Programs   []linkerFixtureProgram `json:"programs"`
 	Sections   []linkerFixtureSection `json:"sections"`
+	Symbols    []linkerFixtureSymbol  `json:"symbols"`
 }
 
 type linkerFixtureMap struct {
@@ -46,23 +52,51 @@ type linkerFixtureProgram struct {
 	Section string `json:"section"`
 }
 
+// linkerFixtureSection is one section. Data is the hex contents of a code or
+// data section; the BTF sections have none. Relocations are the entries of a
+// relocation section, with each symbol named the way readelf names it.
 type linkerFixtureSection struct {
-	Name  string `json:"name"`
-	Type  uint32 `json:"type"`
-	Flags uint64 `json:"flags"`
-	Size  uint64 `json:"size"`
+	Name        string               `json:"name"`
+	Type        uint32               `json:"type"`
+	Flags       uint64               `json:"flags"`
+	Size        uint64               `json:"size"`
+	Align       uint64               `json:"align"`
+	Data        string               `json:"data,omitempty"`
+	Relocations []linkerFixtureReloc `json:"relocations,omitempty"`
 }
 
-func loadLinkerFixture(t *testing.T) linkerFixture {
+type linkerFixtureReloc struct {
+	Offset uint64 `json:"offset"`
+	Type   uint32 `json:"type"`
+	Symbol string `json:"symbol"`
+}
+
+// linkerFixtureSymbol is one symbol table entry. A section symbol is named
+// after its section, and Section is UND, ABS or the section name.
+type linkerFixtureSymbol struct {
+	Name    string `json:"name"`
+	Type    uint32 `json:"type"`
+	Bind    uint32 `json:"bind"`
+	Section string `json:"section"`
+	Value   uint64 `json:"value"`
+	Size    uint64 `json:"size"`
+}
+
+func loadLinkerFixture(t *testing.T, name string) linkerFixture {
 	t.Helper()
 
-	data, err := os.ReadFile("../testdata/oracle/linker.json")
+	data, err := os.ReadFile(filepath.Join("../testdata/oracle", name))
 	if err != nil {
 		t.Fatalf("read linker fixture: %v", err)
 	}
 	var f linkerFixture
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("parse linker fixture: %v", err)
+	}
+	for i := range f.Sections {
+		if len(f.Sections[i].Relocations) == 0 {
+			f.Sections[i].Relocations = nil
+		}
 	}
 	return f
 }
@@ -99,11 +133,17 @@ func readTestFile(t *testing.T, path string) []byte {
 }
 
 // TestBpfLinkerKprobe compares the linked object with the one libbpf's linker
-// writes: object name, maps and programs after open, and every section's
-// name, type, flags and size.
+// writes: object name, maps and programs after open, and every section and
+// symbol, including the section contents and relocations.
 func TestBpfLinkerKprobe(t *testing.T) {
-	want := loadLinkerFixture(t)
-	path := linkFile(t)
+	compareLinked(t, loadLinkerFixture(t, "linker.json"), linkFile(t))
+}
+
+// compareLinked opens the linked object at path and compares it with the
+// oracle fixture. The sections named in sizeExempt may differ in size from
+// libbpf's, and only in size.
+func compareLinked(t *testing.T, want linkerFixture, path string, sizeExempt ...string) {
+	t.Helper()
 
 	obj, err := BpfObjectOpenFile(path, nil)
 	if err != nil {
@@ -120,8 +160,30 @@ func TestBpfLinkerKprobe(t *testing.T) {
 	if got := linkedPrograms(obj); !reflect.DeepEqual(got, want.Programs) {
 		t.Fatalf("programs = %+v, want %+v", got, want.Programs)
 	}
-	if got := linkedSections(t, path); !reflect.DeepEqual(got, want.Sections) {
-		t.Fatalf("sections = %+v\nwant %+v", got, want.Sections)
+
+	f := openLinkedELF(t, path)
+	if got := linkedSymbols(t, f); !reflect.DeepEqual(got, want.Symbols) {
+		t.Fatalf("symbols = %+v\nwant %+v", got, want.Symbols)
+	}
+	compareSections(t, linkedSections(t, f), want.Sections, sizeExempt)
+}
+
+// compareSections compares two sorted section lists, ignoring the size of the
+// sections named in sizeExempt.
+func compareSections(t *testing.T, got, want []linkerFixtureSection, sizeExempt []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("sections = %+v\nwant %+v", got, want)
+	}
+	for i := range got {
+		g, w := got[i], want[i]
+		if slices.Contains(sizeExempt, w.Name) {
+			g.Size = w.Size
+		}
+		if !reflect.DeepEqual(g, w) {
+			t.Fatalf("section %s = %+v\nwant %+v", w.Name, got[i], w)
+		}
 	}
 }
 
@@ -151,28 +213,123 @@ func linkedPrograms(obj *BpfObject) []linkerFixtureProgram {
 	return programs
 }
 
-// linkedSections returns the sections of the ELF file at path, without the
-// null section, sorted by name like the oracle.
-func linkedSections(t *testing.T, path string) []linkerFixtureSection {
+func openLinkedELF(t *testing.T, path string) *elf.File {
 	t.Helper()
 
 	f, err := elf.Open(path)
 	if err != nil {
 		t.Fatalf("debug/elf: %v", err)
 	}
-	defer f.Close()
+	t.Cleanup(func() { f.Close() })
+	return f
+}
 
+// linkedSections returns the sections of f, without the null section, sorted
+// by name like the oracle.
+func linkedSections(t *testing.T, f *elf.File) []linkerFixtureSection {
+	t.Helper()
+
+	syms := elfSymbols(t, f)
 	var sections []linkerFixtureSection
 	for _, s := range f.Sections[1:] {
-		sections = append(sections, linkerFixtureSection{
+		sec := linkerFixtureSection{
 			Name:  s.Name,
 			Type:  uint32(s.Type),
 			Flags: uint64(s.Flags),
 			Size:  s.Size,
-		})
+			Align: s.Addralign,
+		}
+		switch {
+		case s.Type == elf.SHT_PROGBITS && s.Name != ".BTF" && s.Name != ".BTF.ext":
+			sec.Data = hex.EncodeToString(sectionData(t, s))
+		case s.Type == elf.SHT_REL:
+			sec.Relocations = linkedRelocations(t, f, s, syms)
+		}
+		sections = append(sections, sec)
 	}
 	sort.Slice(sections, func(i, j int) bool { return sections[i].Name < sections[j].Name })
 	return sections
+}
+
+func sectionData(t *testing.T, s *elf.Section) []byte {
+	t.Helper()
+
+	data, err := s.Data()
+	if err != nil {
+		t.Fatalf("section %s: %v", s.Name, err)
+	}
+	return data
+}
+
+// elfSymbols returns the symbol table with the null symbol at index 0, so a
+// relocation's symbol index addresses it directly.
+func elfSymbols(t *testing.T, f *elf.File) []elf.Symbol {
+	t.Helper()
+
+	syms, err := f.Symbols()
+	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+		t.Fatalf("symbols: %v", err)
+	}
+	return append([]elf.Symbol{{}}, syms...)
+}
+
+func linkedRelocations(t *testing.T, f *elf.File, s *elf.Section, syms []elf.Symbol) []linkerFixtureReloc {
+	t.Helper()
+
+	data := sectionData(t, s)
+	var relocs []linkerFixtureReloc
+	for off := 0; off+elfRelSize <= len(data); off += elfRelSize {
+		info := binary.LittleEndian.Uint64(data[off+8:])
+		symIdx := int(elf.R_SYM64(info))
+		if symIdx >= len(syms) {
+			t.Fatalf("%s: relocation symbol %d out of range", s.Name, symIdx)
+		}
+		relocs = append(relocs, linkerFixtureReloc{
+			Offset: binary.LittleEndian.Uint64(data[off:]),
+			Type:   elf.R_TYPE64(info),
+			Symbol: symbolLabel(f, &syms[symIdx]),
+		})
+	}
+	return relocs
+}
+
+// linkedSymbols returns the symbol table of f in order, without the null
+// symbol.
+func linkedSymbols(t *testing.T, f *elf.File) []linkerFixtureSymbol {
+	t.Helper()
+
+	var symbols []linkerFixtureSymbol
+	for _, sym := range elfSymbols(t, f)[1:] {
+		symbols = append(symbols, linkerFixtureSymbol{
+			Name:    symbolLabel(f, &sym),
+			Type:    uint32(elf.ST_TYPE(sym.Info)),
+			Bind:    uint32(elf.ST_BIND(sym.Info)),
+			Section: symbolSection(f, &sym),
+			Value:   sym.Value,
+			Size:    sym.Size,
+		})
+	}
+	return symbols
+}
+
+// symbolLabel names a section symbol after its section, like readelf.
+func symbolLabel(f *elf.File, sym *elf.Symbol) string {
+	if elf.ST_TYPE(sym.Info) == elf.STT_SECTION && int(sym.Section) < len(f.Sections) {
+		return f.Sections[sym.Section].Name
+	}
+	return sym.Name
+}
+
+func symbolSection(f *elf.File, sym *elf.Symbol) string {
+	switch {
+	case sym.Section == elf.SHN_UNDEF:
+		return "UND"
+	case sym.Section == elf.SHN_ABS:
+		return "ABS"
+	case int(sym.Section) < len(f.Sections):
+		return f.Sections[sym.Section].Name
+	}
+	return ""
 }
 
 func readELFSection(t *testing.T, path, name string) []byte {
@@ -196,19 +353,13 @@ func readELFSection(t *testing.T, path, name string) []byte {
 }
 
 // TestBpfLinkerBTF checks the linked BTF: libbpf's 32-byte header, the input
-// types, each DATASEC sized to its ELF section, and .BTF.ext unchanged.
+// types, each DATASEC sized to its ELF section, and the same .BTF.ext records
+// once their type IDs and strings are resolved.
 func TestBpfLinkerBTF(t *testing.T) {
 	path := linkFile(t)
 
-	in, err := btf.Parse(readELFSection(t, linkerInputPath, ".BTF"), binary.LittleEndian)
-	if err != nil {
-		t.Fatalf("parse input BTF: %v", err)
-	}
-	out, err := btf.Parse(readELFSection(t, path, ".BTF"), binary.LittleEndian)
-	if err != nil {
-		t.Fatalf("parse linked BTF: %v", err)
-	}
-
+	in := parseFileBTF(t, linkerInputPath)
+	out := parseFileBTF(t, path)
 	if out.Header.HdrLen != btfHdrLen {
 		t.Fatalf("header length = %d, want %d", out.Header.HdrLen, btfHdrLen)
 	}
@@ -223,16 +374,75 @@ func TestBpfLinkerBTF(t *testing.T) {
 		}
 	}
 
-	if !bytes.Equal(readELFSection(t, path, ".BTF.ext"), readELFSection(t, linkerInputPath, ".BTF.ext")) {
-		t.Fatal(".BTF.ext differs from the input")
+	if got, want := extRecords(t, path, nil), extRecords(t, linkerInputPath, nil); !reflect.DeepEqual(got, want) {
+		t.Fatalf(".BTF.ext records = %q\nwant %q", got, want)
 	}
+}
+
+func parseFileBTF(t *testing.T, path string) *btf.Spec {
+	t.Helper()
+
+	spec, err := btf.Parse(readELFSection(t, path, ".BTF"), binary.LittleEndian)
+	if err != nil {
+		t.Fatalf("parse %s BTF: %v", path, err)
+	}
+	return spec
+}
+
+// extRecords describes every .BTF.ext record of the object at path with its
+// type and strings resolved, so records from different BTF tables compare
+// equal. shift moves the instruction offsets of the named sections.
+func extRecords(t *testing.T, path string, shift map[string]uint32) []string {
+	t.Helper()
+
+	spec := parseFileBTF(t, path)
+	ext, err := btf.ParseExtRaw(readELFSection(t, path, ".BTF.ext"), spec, binary.LittleEndian)
+	if err != nil {
+		t.Fatalf("parse %s .BTF.ext: %v", path, err)
+	}
+
+	le := binary.LittleEndian
+	typeName := func(id uint32) string {
+		ty, err := spec.TypeByID(id)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return ty.Kind.String() + " " + ty.Name
+	}
+	str := func(off uint32) string {
+		s, err := spec.String(off)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return s
+	}
+
+	var recs []string
+	describe := func(kind string, blocks []btf.ExtRecords, fields func(rec []byte) string) {
+		for _, b := range blocks {
+			for off := 0; off+b.RecSize <= len(b.Records); off += b.RecSize {
+				rec := b.Records[off:]
+				insn := le.Uint32(rec) + shift[b.Section]
+				recs = append(recs, fmt.Sprintf("%s %s %d %s", kind, b.Section, insn, fields(rec)))
+			}
+		}
+	}
+	describe("func", ext.FuncInfo, func(rec []byte) string { return typeName(le.Uint32(rec[4:])) })
+	describe("line", ext.LineInfo, func(rec []byte) string {
+		return fmt.Sprintf("%s %q %d", str(le.Uint32(rec[4:])), str(le.Uint32(rec[8:])), le.Uint32(rec[12:]))
+	})
+	describe("core", ext.CoreRelo, func(rec []byte) string {
+		return fmt.Sprintf("%s %s %d", typeName(le.Uint32(rec[4:])), str(le.Uint32(rec[8:])), le.Uint32(rec[12:]))
+	})
+	sort.Strings(recs)
+	return recs
 }
 
 func elfSectionSizes(t *testing.T, path string) map[string]uint64 {
 	t.Helper()
 
 	sizes := make(map[string]uint64)
-	for _, s := range linkedSections(t, path) {
+	for _, s := range linkedSections(t, openLinkedELF(t, path)) {
 		sizes[s.Name] = s.Size
 	}
 	return sizes
@@ -304,9 +514,10 @@ func linkToFD(t *testing.T, add func(*BpfLinker) error) []byte {
 	return readTestFile(t, path)
 }
 
-// TestBpfLinkerOneObject checks that a second object is rejected with
-// EOPNOTSUPP and leaves the first one intact.
-func TestBpfLinkerOneObject(t *testing.T) {
+// TestBpfLinkerConflict adds the same object twice. Its global symbols are
+// strong in both copies, so the second add fails with EINVAL, as in libbpf,
+// and leaves the first object's output unchanged.
+func TestBpfLinkerConflict(t *testing.T) {
 	want := readTestFile(t, linkFile(t))
 	input := readTestFile(t, linkerInputPath)
 
@@ -314,11 +525,9 @@ func TestBpfLinkerOneObject(t *testing.T) {
 		if err := BpfLinkerAddBuf(l, input, nil); err != nil {
 			return err
 		}
-		if err := BpfLinkerAddFile(l, linkerInputPath, nil); !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Fatalf("second BpfLinkerAddFile = %v, want EOPNOTSUPP", err)
-		}
-		if err := BpfLinkerAddBuf(l, input, nil); !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Fatalf("second BpfLinkerAddBuf = %v, want EOPNOTSUPP", err)
+		err := BpfLinkerAddFile(l, linkerInputPath, nil)
+		if !errors.Is(err, unix.EINVAL) || !strings.Contains(err.Error(), "conflicting non-weak symbol") {
+			t.Fatalf("second BpfLinkerAddFile = %v, want a conflicting symbol EINVAL", err)
 		}
 		return nil
 	})
@@ -341,10 +550,10 @@ func TestBpfLinkerEmpty(t *testing.T) {
 	}
 
 	want := []linkerFixtureSection{
-		{Name: ".strtab", Type: uint32(elf.SHT_STRTAB), Flags: uint64(elf.SHF_STRINGS), Size: 17},
-		{Name: ".symtab", Type: uint32(elf.SHT_SYMTAB), Size: elfSymSize},
+		{Name: ".strtab", Type: uint32(elf.SHT_STRTAB), Flags: uint64(elf.SHF_STRINGS), Size: 17, Align: 1},
+		{Name: ".symtab", Type: uint32(elf.SHT_SYMTAB), Size: elfSymSize, Align: 8},
 	}
-	if got := linkedSections(t, path); !reflect.DeepEqual(got, want) {
+	if got := linkedSections(t, openLinkedELF(t, path)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sections = %+v, want %+v", got, want)
 	}
 }

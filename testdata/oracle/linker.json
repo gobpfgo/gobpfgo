@@ -3,7 +3,9 @@
   "libbpf_version": "1.9.0",
   "arch": "x86_64",
   "kernel": "6.18.63-3-lts",
-  "object": "kprobe.bpf.o",
+  "objects": [
+    "kprobe.bpf.o"
+  ],
   "output": "linked.bpf.o",
   "object_name": "linked",
   "maps": [
@@ -13,13 +15,22 @@
     {"name": "handle_open", "type": 2, "section": "kprobe/do_sys_openat2"}
   ],
   "sections": [
-    {"name": ".BTF", "type": 1, "flags": 0, "size": 651},
-    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 160},
-    {"name": ".maps", "type": 1, "flags": 3, "size": 32},
-    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 16},
-    {"name": ".strtab", "type": 3, "flags": 32, "size": 133},
-    {"name": ".symtab", "type": 2, "flags": 0, "size": 144},
-    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 96},
-    {"name": "license", "type": 1, "flags": 3, "size": 4}
+    {"name": ".BTF", "type": 1, "flags": 0, "size": 651, "align": 8},
+    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 160, "align": 8},
+    {"name": ".maps", "type": 1, "flags": 3, "size": 32, "align": 8, "data": "0000000000000000000000000000000000000000000000000000000000000000"},
+    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 16, "align": 8, "relocations": [
+        {"offset": 32, "type": 1, "symbol": "counts"}
+      ]},
+    {"name": ".strtab", "type": 3, "flags": 32, "size": 133, "align": 1},
+    {"name": ".symtab", "type": 2, "flags": 0, "size": 144, "align": 8},
+    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 96, "align": 8, "data": "b701000000000000631afcff00000000bfa200000000000007020000fcffffff1801000000000000000000000000000085000000010000001500020000000000b701000001000000db10000000000000b7000000000000009500000000000000"},
+    {"name": "license", "type": 1, "flags": 3, "size": 4, "align": 1, "data": "47504c00"}
+  ],
+  "symbols": [
+    {"name": "kprobe.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": "kprobe/do_sys_openat2", "type": 3, "bind": 0, "section": "kprobe/do_sys_openat2", "value": 0, "size": 0},
+    {"name": "handle_open", "type": 2, "bind": 1, "section": "kprobe/do_sys_openat2", "value": 0, "size": 96},
+    {"name": "counts", "type": 1, "bind": 1, "section": ".maps", "value": 0, "size": 32},
+    {"name": "LICENSE", "type": 1, "bind": 1, "section": "license", "value": 0, "size": 4}
   ]
 }

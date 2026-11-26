@@ -2,7 +2,7 @@
 // libbpf-source: src/btf.c
 // libbpf-source: src/libbpf_internal.h
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: btf_ext_header, btf_ext_info_sec, bpf_core_relo
+// libbpf-symbols: btf_ext_header, btf_ext_info_sec, bpf_func_info, bpf_line_info, bpf_core_relo
 
 package btf
 
@@ -64,29 +64,16 @@ type extRecordSection struct {
 // section names and access strings are resolved through spec, so spec must be
 // the .BTF blob from the same object.
 func ParseExt(data []byte, spec *Spec, order binary.ByteOrder) (*ExtSpec, error) {
-	if spec == nil {
-		return nil, fmt.Errorf("btf: nil spec")
-	}
-	if len(data) < extHeaderSize {
-		return nil, fmt.Errorf("btf: .BTF.ext header out of bounds")
-	}
-	if order.Uint16(data) != extMagic {
-		return nil, fmt.Errorf("btf: .BTF.ext bad magic %#x", order.Uint16(data))
-	}
-	if data[2] != 1 {
-		return nil, fmt.Errorf("btf: .BTF.ext unsupported version %d", data[2])
-	}
-
-	hdrLen := int(order.Uint32(data[4:]))
-	if hdrLen < extHeaderSize || hdrLen > len(data) {
-		return nil, fmt.Errorf("btf: .BTF.ext header length %d out of bounds", hdrLen)
-	}
-
-	funcSections, err := parseExtRecords(data, spec, order, hdrLen, 8, 8, "func")
+	hdrLen, err := extHeaderLen(data, spec, order)
 	if err != nil {
 		return nil, err
 	}
-	coreSections, err := parseExtRecords(data, spec, order, hdrLen, 24, 16, "core")
+
+	funcSections, err := parseExtRecords(data, spec, order, hdrLen, extFuncInfoField, FuncInfoMinSize, "func")
+	if err != nil {
+		return nil, err
+	}
+	coreSections, err := parseExtRecords(data, spec, order, hdrLen, extCoreReloField, CoreReloMinSize, "core")
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +87,93 @@ func ParseExt(data []byte, spec *Spec, order binary.ByteOrder) (*ExtSpec, error)
 	}
 
 	return &ext, nil
+}
+
+// Minimum record sizes of the .BTF.ext subsections: struct bpf_func_info,
+// struct bpf_line_info and struct bpf_core_relo. A record may be larger.
+const (
+	FuncInfoMinSize = 8
+	LineInfoMinSize = 16
+	CoreReloMinSize = 16
+)
+
+// Offsets of the offset and length pairs of each subsection in the .BTF.ext
+// header.
+const (
+	extFuncInfoField = 8
+	extLineInfoField = 16
+	extCoreReloField = 24
+)
+
+// ExtRecords is one section block of a .BTF.ext subsection: the program
+// section it describes, the record size and the raw records.
+type ExtRecords struct {
+	Section string
+	RecSize int
+	Records []byte
+}
+
+// ExtRaw holds the function, line and CO-RE records of a .BTF.ext section
+// without decoding them, one block per program section in file order.
+type ExtRaw struct {
+	FuncInfo []ExtRecords
+	LineInfo []ExtRecords
+	CoreRelo []ExtRecords
+}
+
+// ParseExtRaw validates the .BTF.ext header and splits the function, line and
+// CO-RE subsections into raw record blocks. Section names are resolved
+// through spec, which must be the .BTF blob from the same object; the records
+// themselves are not checked.
+func ParseExtRaw(data []byte, spec *Spec, order binary.ByteOrder) (*ExtRaw, error) {
+	hdrLen, err := extHeaderLen(data, spec, order)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw ExtRaw
+	subsections := []struct {
+		field, minRec int
+		what          string
+		out           *[]ExtRecords
+	}{
+		{extFuncInfoField, FuncInfoMinSize, "func", &raw.FuncInfo},
+		{extLineInfoField, LineInfoMinSize, "line", &raw.LineInfo},
+		{extCoreReloField, CoreReloMinSize, "core", &raw.CoreRelo},
+	}
+	for _, sub := range subsections {
+		sections, err := parseExtRecords(data, spec, order, hdrLen, sub.field, sub.minRec, sub.what)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range sections {
+			*sub.out = append(*sub.out, ExtRecords{Section: s.name, RecSize: s.recSize, Records: s.records})
+		}
+	}
+	return &raw, nil
+}
+
+// extHeaderLen validates the .BTF.ext magic, version and header length and
+// returns the header length.
+func extHeaderLen(data []byte, spec *Spec, order binary.ByteOrder) (int, error) {
+	if spec == nil {
+		return 0, fmt.Errorf("btf: nil spec")
+	}
+	if len(data) < extHeaderSize {
+		return 0, fmt.Errorf("btf: .BTF.ext header out of bounds")
+	}
+	if order.Uint16(data) != extMagic {
+		return 0, fmt.Errorf("btf: .BTF.ext bad magic %#x", order.Uint16(data))
+	}
+	if data[2] != 1 {
+		return 0, fmt.Errorf("btf: .BTF.ext unsupported version %d", data[2])
+	}
+
+	hdrLen := int(order.Uint32(data[4:]))
+	if hdrLen < extHeaderSize || hdrLen > len(data) {
+		return 0, fmt.Errorf("btf: .BTF.ext header length %d out of bounds", hdrLen)
+	}
+	return hdrLen, nil
 }
 
 // parseExtRecords decodes one .BTF.ext subsection at the given header field
