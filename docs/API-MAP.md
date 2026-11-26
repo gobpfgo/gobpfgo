@@ -52,6 +52,7 @@ The generated table has these columns:
 | `bpf_program__fd` | `BpfProgramFD` | `libbpf/program.go` | parity tested (root load) |
 | `bpf_object__load` | `BpfObjectLoad` | `libbpf/load.go` | parity tested (root load info comparison) |
 | `bpf_map__lookup_elem` | `BpfMapLookupElem` | `libbpf/bpf_map.go` | parity tested (attach counts; buffer sizes validated) |
+| `bpf_map__reuse_fd` | `BpfMapReuseFD` | `libbpf/reuse.go` | parity tested (root reuse test) |
 | `bpf_map__pin_path` | `BpfMapPinPath` | `libbpf/bpf_map.go` | parity tested (root pin test) |
 | `bpf_map__set_pin_path` | `BpfMapSetPinPath` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_map__pin` | `BpfMapPin` | `libbpf/pin.go` | parity tested (root pin test) |

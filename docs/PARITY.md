@@ -14,7 +14,7 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | Maps | `libbpf.c` | `map.go`, `bpf_map.go` | 1 | in progress (create, open, load, lookup) |
 | Programs | `libbpf.c` | `program.go` | 1 | in progress (open, load) |
 | Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `netlink.go` | 1 | in progress (kprobe through tracefs; kprobe multi and perf links not ported) |
-| Pinning and reuse | `libbpf.c` | `pin.go` | 1 | in progress (map, program and object pin/unpin; reuse not ported) |
+| Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go` | 1 | in progress (map, program and object pin/unpin and map reuse; link pinning not ported) |
 | BTF | `btf.c` | `internal/btf` | 2 | in progress (parser) |
 | CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | not started |
 | BTF to C | `btf_dump.c` | `btf_dump.go` | 2 | not started |
@@ -42,6 +42,7 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | Loaded map and program metadata | C harness JSON (root) | parity tested (root info comparison) |
 | kprobe attach and program output | C harness JSON (root) + root test | parity tested (kprobe object, 6.18) |
 | Map, program and object pinning | root pin test on bpffs | parity tested (5.10 and 6.18) |
+| Map reuse | root reuse test | parity tested (5.10 and 6.18) |
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |
 | CO-RE fixups | libbpf internal harness | not started |
 | `btf_dump` text | exact text diff | not started |
