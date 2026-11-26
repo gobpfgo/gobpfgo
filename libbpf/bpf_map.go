@@ -18,6 +18,7 @@ type BpfMap struct {
 	btfValueTypeID uint32
 	pinPath        string
 	fd             int
+	id             uint32
 }
 
 // BpfMapName returns the name declared in the map definition, or an empty

@@ -14,9 +14,10 @@ package sys
 
 // UAPI values from linux/bpf.h used by the first slices.
 const (
-	BPF_MAP_CREATE     = 0
-	BPF_PROG_LOAD      = 5
-	BPF_BTF_LOAD       = 18
-	BPF_MAP_TYPE_ARRAY = 2
-	BPF_OBJ_NAME_LEN   = 16
+	BPF_MAP_CREATE         = 0
+	BPF_PROG_LOAD          = 5
+	BPF_OBJ_GET_INFO_BY_FD = 15
+	BPF_BTF_LOAD           = 18
+	BPF_MAP_TYPE_ARRAY     = 2
+	BPF_OBJ_NAME_LEN       = 16
 )

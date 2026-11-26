@@ -17,6 +17,9 @@ type BpfProgram struct {
 	insns              []byte
 	relocs             []elf.Reloc
 	fd                 int
+	id                 uint32
+	xlatedInsnCnt      int
+	jitedLen           uint32
 }
 
 // BpfProgramName returns the function name of the program.
