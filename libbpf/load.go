@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gobpfgo/gobpfgo/internal/btf"
 	"github.com/gobpfgo/gobpfgo/internal/elf"
 	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
@@ -134,17 +135,34 @@ func BpfObjectLoad(obj *BpfObject) error {
 				Log:   err.Error(),
 			}
 		}
+		if err := resolveAttachBTFID(p); err != nil {
+			obj.closeLoadFDs()
+			return &Error{
+				Op:    "bpf_object__load",
+				Errno: errnoFromError(err),
+				Log:   err.Error(),
+			}
+		}
 
+		funcInfo := programFuncInfo(ext, p)
 		attr := &sys.ProgLoadAttr{
 			ProgType:           uint32(p.progType),
 			InsnCnt:            uint32(len(insns) / 8),
 			LogLevel:           1,
+			ProgFlags:          p.progFlags,
 			ExpectedAttachType: uint32(p.expectedAttachType),
 			ProgBtfFD:          uint32(btfFD),
+			AttachBtfID:        p.attachBTFID,
+			AttachBtfObjFD:     int32(p.attachBTFObjFD),
+			FuncInfoRecSize:    8,
+			FuncInfoCnt:        uint32(len(funcInfo) / 8),
+		}
+		if len(funcInfo) == 0 {
+			attr.FuncInfoRecSize = 0
 		}
 		attr.SetProgName(p.name)
 
-		fd, err := sys.ProgLoad(attr, insns, license, logBuf)
+		fd, err := sys.ProgLoad(attr, insns, license, logBuf, funcInfo)
 		if err != nil {
 			obj.closeLoadFDs()
 			return &Error{
@@ -170,6 +188,34 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 
 	obj.loaded = true
+	return nil
+}
+
+// programFuncInfo encodes the .BTF.ext function records of p's section in the
+// struct bpf_func_info layout BPF_PROG_LOAD expects. Records past the program's
+// instructions are ignored.
+func programFuncInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
+	if ext == nil {
+		return nil
+	}
+
+	insnCnt := len(p.insns) / 8
+	for _, section := range ext.FuncInfos {
+		if section.Section != p.sectionName {
+			continue
+		}
+		var buf []byte
+		for _, info := range section.Records {
+			if int(info.InsnOff) >= insnCnt {
+				continue
+			}
+			rec := make([]byte, 8)
+			binary.NativeEndian.PutUint32(rec, info.InsnOff)
+			binary.NativeEndian.PutUint32(rec[4:], info.TypeID)
+			buf = append(buf, rec...)
+		}
+		return buf
+	}
 	return nil
 }
 

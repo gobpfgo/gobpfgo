@@ -60,6 +60,14 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The kprobe test object is compiled with `-mcpu=v1` so the checked-in fixture loads on the 5.10 floor. The default clang target emits the `BPF_ATOMIC` fetch-add encoding, which 5.10 rejects as reserved fields. The load test compares the verifier and JIT lengths exactly only on the kernel that produced the fixture and requires them to be nonzero elsewhere.
 
+## D-015: Uprobe attach uses the tracefs path
+
+2026-11-26. Uprobe and uretprobe attach write a `uprobe_events` entry and open one tracepoint perf event, the same legacy path as D-012. The uprobe perf PMU takes the binary path in `config1`, a userspace pointer, which the no-unsafe rule keeps out of the API. The cost is that `ref_ctr_offset` and `BpfCookie` return `EOPNOTSUPP` and tracefs must be writable. Recorded in [DEVIATIONS.md](DEVIATIONS.md) item 18.
+
+## D-016: Kprobe multi symbols are resolved by the kernel
+
+2026-11-26. `BpfProgramAttachKprobeMulti` passes its symbol names to `BPF_LINK_CREATE` in the `kprobe_multi.syms` array and lets the kernel resolve them. libbpf's userspace pattern matching over `available_filter_functions`, including wildcards and duplicate detection, is not ported. Exact names are the supported form until a consumer needs patterns. Recorded in [DEVIATIONS.md](DEVIATIONS.md) item 19.
+
 ## Open decisions
 
 None. The `reflect` address helper is accepted in D-003.

@@ -46,7 +46,7 @@ load-fixture: $(ORACLE)
 
 attach-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
-	sudo -n $(ORACLE) attach ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/attach.json
+	sudo -n $(ORACLE) attach ../testdata/progs > ../testdata/oracle/attach.json
 
 clean:
 	rm -rf $(BUILD)

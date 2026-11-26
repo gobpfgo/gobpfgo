@@ -17,9 +17,23 @@ const extMagic = 0xeb9f
 // extHeaderSize is sizeof(struct btf_ext_header).
 const extHeaderSize = 32
 
-// ExtSpec holds the CO-RE relocation records of a .BTF.ext section.
+// ExtSpec holds the function and CO-RE relocation records of a .BTF.ext
+// section.
 type ExtSpec struct {
+	FuncInfos []FuncInfoSection
 	CoreRelos []CoreReloSection
+}
+
+// FuncInfoSection groups the function records of one program section.
+type FuncInfoSection struct {
+	Section string
+	Records []FuncInfo
+}
+
+// FuncInfo is one struct bpf_func_info record.
+type FuncInfo struct {
+	InsnOff uint32
+	TypeID  uint32
 }
 
 // CoreReloSection groups the CO-RE records of one program section.
@@ -36,8 +50,15 @@ type CoreRelo struct {
 	Kind         CoreReloKind
 }
 
-// ParseExt parses the .BTF.ext data against the matching BTF spec. Only the
-// CO-RE subsection is decoded; function and line info are skipped.
+// extRecordSection is one decoded section block of a .BTF.ext subsection.
+type extRecordSection struct {
+	name    string
+	recSize int
+	records []byte
+}
+
+// ParseExt parses the .BTF.ext data against the matching BTF spec. The
+// function and CO-RE subsections are decoded; line info is skipped.
 //
 // The header offsets are relative to hdr_len, as the UAPI defines. The
 // section names and access strings are resolved through spec, so spec must be
@@ -61,66 +82,106 @@ func ParseExt(data []byte, spec *Spec, order binary.ByteOrder) (*ExtSpec, error)
 		return nil, fmt.Errorf("btf: .BTF.ext header length %d out of bounds", hdrLen)
 	}
 
-	coreOff := int(order.Uint32(data[24:]))
-	coreLen := int(order.Uint32(data[28:]))
-	if coreLen == 0 {
-		return &ExtSpec{}, nil
+	funcSections, err := parseExtRecords(data, spec, order, hdrLen, 8, 8, "func")
+	if err != nil {
+		return nil, err
 	}
-	if coreOff > len(data)-hdrLen || coreLen > len(data)-hdrLen-coreOff {
-		return nil, fmt.Errorf("btf: .BTF.ext core section out of bounds")
-	}
-	if coreOff%4 != 0 {
-		return nil, fmt.Errorf("btf: .BTF.ext core section is not 4-byte aligned")
+	coreSections, err := parseExtRecords(data, spec, order, hdrLen, 24, 16, "core")
+	if err != nil {
+		return nil, err
 	}
 
-	block := data[hdrLen+coreOff : hdrLen+coreOff+coreLen]
+	var ext ExtSpec
+	for _, section := range funcSections {
+		ext.FuncInfos = append(ext.FuncInfos, FuncInfoSection{Section: section.name, Records: decodeFuncInfos(order, section)})
+	}
+	for _, section := range coreSections {
+		ext.CoreRelos = append(ext.CoreRelos, CoreReloSection{Section: section.name, Relos: decodeCoreRelos(order, section)})
+	}
+
+	return &ext, nil
+}
+
+// parseExtRecords decodes one .BTF.ext subsection at the given header field
+// offset. A subsection starts with its record size, followed by section
+// blocks of a name offset, a record count and the records.
+func parseExtRecords(data []byte, spec *Spec, order binary.ByteOrder, hdrLen, fieldOff, minRec int, what string) ([]extRecordSection, error) {
+	off := int(order.Uint32(data[fieldOff:]))
+	length := int(order.Uint32(data[fieldOff+4:]))
+	if length == 0 {
+		return nil, nil
+	}
+	if off > len(data)-hdrLen || length > len(data)-hdrLen-off {
+		return nil, fmt.Errorf("btf: .BTF.ext %s section out of bounds", what)
+	}
+	if off%4 != 0 {
+		return nil, fmt.Errorf("btf: .BTF.ext %s section is not 4-byte aligned", what)
+	}
+
+	block := data[hdrLen+off : hdrLen+off+length]
 	if len(block) < 4 {
-		return nil, fmt.Errorf("btf: .BTF.ext core section has no record size")
+		return nil, fmt.Errorf("btf: .BTF.ext %s section has no record size", what)
 	}
 	recSize := int(order.Uint32(block))
-	if recSize < 16 || recSize%4 != 0 {
-		return nil, fmt.Errorf("btf: .BTF.ext core record size %d is invalid", recSize)
+	if recSize < minRec || recSize%4 != 0 {
+		return nil, fmt.Errorf("btf: .BTF.ext %s record size %d is invalid", what, recSize)
 	}
 	block = block[4:]
 
-	var ext ExtSpec
+	var sections []extRecordSection
 	for len(block) > 0 {
 		if len(block) < 8 {
-			return nil, fmt.Errorf("btf: .BTF.ext core section header is truncated")
+			return nil, fmt.Errorf("btf: .BTF.ext %s section header is truncated", what)
 		}
-		secNameOff := order.Uint32(block)
+		nameOff := order.Uint32(block)
 		numInfo := int(order.Uint32(block[4:]))
 		block = block[8:]
 
 		if numInfo <= 0 {
-			return nil, fmt.Errorf("btf: .BTF.ext core section has no records")
+			return nil, fmt.Errorf("btf: .BTF.ext %s section has no records", what)
 		}
 		recordsLen := numInfo * recSize
 		if recordsLen/recSize != numInfo || recordsLen > len(block) {
-			return nil, fmt.Errorf("btf: .BTF.ext core records are truncated")
+			return nil, fmt.Errorf("btf: .BTF.ext %s records are truncated", what)
 		}
 
-		section, err := spec.String(secNameOff)
+		name, err := spec.String(nameOff)
 		if err != nil {
-			return nil, fmt.Errorf("btf: .BTF.ext core section name: %w", err)
+			return nil, fmt.Errorf("btf: .BTF.ext %s section name: %w", what, err)
 		}
-		if section == "" {
-			return nil, fmt.Errorf("btf: .BTF.ext core section has an empty name")
+		if name == "" {
+			return nil, fmt.Errorf("btf: .BTF.ext %s section has an empty name", what)
 		}
 
-		relos := make([]CoreRelo, 0, numInfo)
-		for i := 0; i < numInfo; i++ {
-			rec := block[i*recSize:]
-			relos = append(relos, CoreRelo{
-				InsnOff:      order.Uint32(rec),
-				TypeID:       order.Uint32(rec[4:]),
-				AccessStrOff: order.Uint32(rec[8:]),
-				Kind:         CoreReloKind(order.Uint32(rec[12:])),
-			})
-		}
+		sections = append(sections, extRecordSection{name: name, recSize: recSize, records: block[:recordsLen]})
 		block = block[recordsLen:]
-		ext.CoreRelos = append(ext.CoreRelos, CoreReloSection{Section: section, Relos: relos})
 	}
 
-	return &ext, nil
+	return sections, nil
+}
+
+func decodeFuncInfos(order binary.ByteOrder, section extRecordSection) []FuncInfo {
+	records := make([]FuncInfo, 0, len(section.records)/section.recSize)
+	for i := 0; i < len(section.records); i += section.recSize {
+		rec := section.records[i:]
+		records = append(records, FuncInfo{
+			InsnOff: order.Uint32(rec),
+			TypeID:  order.Uint32(rec[4:]),
+		})
+	}
+	return records
+}
+
+func decodeCoreRelos(order binary.ByteOrder, section extRecordSection) []CoreRelo {
+	records := make([]CoreRelo, 0, len(section.records)/section.recSize)
+	for i := 0; i < len(section.records); i += section.recSize {
+		rec := section.records[i:]
+		records = append(records, CoreRelo{
+			InsnOff:      order.Uint32(rec),
+			TypeID:       order.Uint32(rec[4:]),
+			AccessStrOff: order.Uint32(rec[8:]),
+			Kind:         CoreReloKind(order.Uint32(rec[12:])),
+		})
+	}
+	return records
 }

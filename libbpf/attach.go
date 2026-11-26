@@ -1,0 +1,534 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// libbpf-source: src/libbpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_uprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
+
+//go:build linux && (amd64 || arm64)
+
+package libbpf
+
+import (
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/gobpfgo/gobpfgo/internal/sys"
+	"golang.org/x/sys/unix"
+)
+
+// BPF_F_KPROBE_MULTI_RETURN makes a kprobe multi link call the program when
+// the probed functions return.
+const BPF_F_KPROBE_MULTI_RETURN uint32 = 1
+
+// BpfKprobeOpts are the optional settings of BpfProgramAttachKprobeOpts.
+// BpfCookie requires the perf link path, which the tracefs kprobe path does
+// not provide.
+type BpfKprobeOpts struct {
+	Retprobe  bool
+	Offset    uint64
+	BpfCookie uint64
+}
+
+// BpfUprobeOpts are the optional settings of BpfProgramAttachUprobeOpts.
+// FuncName resolves to a file offset in binaryPath and is added to the
+// explicit offset. RefCtrOffset and BpfCookie require the uprobe PMU, which
+// the tracefs uprobe path does not provide.
+type BpfUprobeOpts struct {
+	Retprobe     bool
+	RefCtrOffset uint64
+	FuncName     string
+	BpfCookie    uint64
+}
+
+// BpfTracepointOpts are the optional settings of
+// BpfProgramAttachTracepointOpts.
+type BpfTracepointOpts struct {
+	BpfCookie uint64
+}
+
+// BpfPerfEventOpts are the optional settings of
+// BpfProgramAttachPerfEventOpts.
+type BpfPerfEventOpts struct {
+	BpfCookie        uint64
+	ForceIoctlAttach bool
+	DontEnable       bool
+}
+
+// BpfRawTracepointOpts are the optional settings of
+// BpfProgramAttachRawTracepointOpts.
+type BpfRawTracepointOpts struct {
+	Cookie uint64
+}
+
+// BpfKprobeMultiOpts are the optional settings of
+// BpfProgramAttachKprobeMulti. Exactly one of Symbols and Addrs is used;
+// Cookies, when present, has one entry per symbol or address.
+type BpfKprobeMultiOpts struct {
+	Symbols  []string
+	Addrs    []uint64
+	Cookies  []uint64
+	Retprobe bool
+}
+
+// BpfTraceOpts are the optional settings of BpfProgramAttachTraceOpts.
+type BpfTraceOpts struct {
+	BpfCookie uint64
+}
+
+// BpfProgramAttachKprobe attaches a loaded program to funcName on every CPU.
+// retprobe selects a kretprobe instead of a kprobe.
+//
+// The call creates a tracefs event under the kprobes or kretprobes group and
+// one perf event, then attaches the program with PERF_EVENT_IOC_SET_BPF. The
+// caller must release the link with BpfLinkDestroy. Root or CAP_BPF plus write
+// access to tracefs is required.
+func BpfProgramAttachKprobe(prog *BpfProgram, retprobe bool, funcName string) (*BpfLink, error) {
+	return BpfProgramAttachKprobeOpts(prog, funcName, &BpfKprobeOpts{Retprobe: retprobe})
+}
+
+// BpfProgramAttachKprobeOpts attaches a loaded program to funcName with the
+// given options. Offset is the byte offset into the function. A nonzero
+// BpfCookie returns EOPNOTSUPP on the tracefs path.
+func BpfProgramAttachKprobeOpts(prog *BpfProgram, funcName string, opts *BpfKprobeOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_kprobe"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if funcName == "" {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+	if opts == nil {
+		opts = &BpfKprobeOpts{}
+	}
+	if opts.BpfCookie != 0 {
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+
+	root, err := tracefsRoot()
+	if err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	kind := probeKprobe
+	prefix := byte('p')
+	if opts.Retprobe {
+		kind = probeKretprobe
+		prefix = 'r'
+	}
+	event := &legacyEvent{
+		root: root,
+		kind: kind,
+		name: probeEventName(fmt.Sprintf("%s_0x%x", funcName, opts.Offset)),
+	}
+	line := fmt.Sprintf("%c:%s/%s %s+0x%x\n", prefix, event.group(), event.name, funcName, opts.Offset)
+	if err := event.add(line); err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	id, err := event.id()
+	if err != nil {
+		_ = event.remove()
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	perfFD, err := openTracepointPerf(id, -1, 0)
+	if err != nil {
+		_ = event.remove()
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	link := &BpfLink{fd: perfFD, perfFD: perfFD, legacy: event}
+	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
+		BpfLinkDestroy(link)
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	return link, nil
+}
+
+// BpfProgramAttachUprobe attaches a loaded program to binaryPath at offset.
+// pid -1 attaches for every process; pid 0 attaches to the calling process.
+//
+// The call uses the tracefs uprobe path and one perf event, and the caller
+// must release the link with BpfLinkDestroy.
+func BpfProgramAttachUprobe(prog *BpfProgram, pid int, binaryPath string, offset uint64) (*BpfLink, error) {
+	return BpfProgramAttachUprobeOpts(prog, pid, binaryPath, offset, nil)
+}
+
+// BpfProgramAttachUprobeOpts attaches a loaded program to binaryPath with the
+// given options. FuncName, when set, is resolved to a file offset in
+// binaryPath. A nonzero RefCtrOffset or BpfCookie returns EOPNOTSUPP on the
+// tracefs path; a nonzero offset on a uretprobe returns EINVAL.
+func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, offset uint64, opts *BpfUprobeOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_uprobe"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if binaryPath == "" {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+	if opts == nil {
+		opts = &BpfUprobeOpts{}
+	}
+	if opts.FuncName != "" {
+		funcOffset, err := findFuncOffset(binaryPath, opts.FuncName)
+		if err != nil {
+			return nil, attachErr(op, errnoFromError(err))
+		}
+		offset += funcOffset
+	}
+	if opts.RefCtrOffset != 0 || opts.BpfCookie != 0 {
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+
+	root, err := tracefsRoot()
+	if err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	kind := probeUprobe
+	prefix := byte('p')
+	if opts.Retprobe {
+		kind = probeUretprobe
+		prefix = 'r'
+	}
+	label := fmt.Sprintf("%s_0x%x", filepath.Base(binaryPath), offset)
+	event := &legacyEvent{root: root, kind: kind, name: probeEventName(label)}
+	line := fmt.Sprintf("%c:%s/%s %s:0x%x\n", prefix, event.group(), event.name, binaryPath, offset)
+	if err := event.add(line); err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	id, err := event.id()
+	if err != nil {
+		_ = event.remove()
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	cpu := -1
+	if pid == -1 {
+		cpu = 0
+	}
+	perfFD, err := openTracepointPerf(id, pid, cpu)
+	if err != nil {
+		_ = event.remove()
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	link := &BpfLink{fd: perfFD, perfFD: perfFD, legacy: event}
+	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
+		BpfLinkDestroy(link)
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	return link, nil
+}
+
+// BpfProgramAttachTracepoint attaches a loaded program to a tracepoint named
+// category/name, such as syscalls/sys_enter_openat.
+func BpfProgramAttachTracepoint(prog *BpfProgram, category, name string) (*BpfLink, error) {
+	return BpfProgramAttachTracepointOpts(prog, category, name, nil)
+}
+
+// BpfProgramAttachTracepointOpts attaches a loaded program to a tracepoint
+// with the given options. BpfCookie requires a kernel with BPF perf link
+// support and returns EOPNOTSUPP on the ioctl fallback.
+func BpfProgramAttachTracepointOpts(prog *BpfProgram, category, name string, opts *BpfTracepointOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_tracepoint"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if category == "" || name == "" {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+	if opts == nil {
+		opts = &BpfTracepointOpts{}
+	}
+
+	id, err := tracepointID(category, name)
+	if err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	perfFD, err := openTracepointPerf(id, -1, 0)
+	if err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+
+	perfOpts := &BpfPerfEventOpts{BpfCookie: opts.BpfCookie}
+	link, err := BpfProgramAttachPerfEventOpts(prog, perfFD, perfOpts)
+	if err != nil {
+		unix.Close(perfFD)
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	return link, nil
+}
+
+// BpfProgramAttachPerfEvent attaches a loaded program to an already open perf
+// event descriptor. On success the link takes ownership of pfd and releases
+// it in BpfLinkDestroy; on failure pfd stays open and belongs to the caller.
+func BpfProgramAttachPerfEvent(prog *BpfProgram, pfd int) (*BpfLink, error) {
+	return BpfProgramAttachPerfEventOpts(prog, pfd, nil)
+}
+
+// BpfProgramAttachPerfEventOpts attaches a loaded program to a perf event
+// with the given options.
+//
+// When the kernel supports BPF perf links and ForceIoctlAttach is false, the
+// program is attached with BPF_LINK_CREATE, which carries BpfCookie. Otherwise
+// the call uses PERF_EVENT_IOC_SET_BPF; a nonzero BpfCookie then returns
+// EOPNOTSUPP, matching libbpf's fallback.
+func BpfProgramAttachPerfEventOpts(prog *BpfProgram, pfd int, opts *BpfPerfEventOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_perf_event"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if pfd < 0 {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+	if opts == nil {
+		opts = &BpfPerfEventOpts{}
+	}
+
+	if !opts.ForceIoctlAttach && perfLinkSupported() {
+		attr := &sys.LinkCreateAttr{
+			ProgFD:          uint32(prog.fd),
+			TargetFD:        uint32(pfd),
+			AttachType:      uint32(BPF_PERF_EVENT),
+			PerfEventCookie: opts.BpfCookie,
+		}
+		linkFD, err := sys.LinkCreate(attr, nil)
+		if err != nil {
+			return nil, attachErr(op, errnoFromError(err))
+		}
+		link := &BpfLink{fd: linkFD, perfFD: pfd}
+		if !opts.DontEnable {
+			if err := unix.IoctlSetInt(pfd, unix.PERF_EVENT_IOC_ENABLE, 0); err != nil {
+				unix.Close(linkFD)
+				return nil, attachErr(op, errnoFromError(err))
+			}
+		}
+		return link, nil
+	}
+
+	if opts.BpfCookie != 0 {
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+	link := &BpfLink{fd: pfd, perfFD: pfd}
+	if err := unix.IoctlSetInt(pfd, unix.PERF_EVENT_IOC_SET_BPF, prog.fd); err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	if !opts.DontEnable {
+		if err := unix.IoctlSetInt(pfd, unix.PERF_EVENT_IOC_ENABLE, 0); err != nil {
+			return nil, attachErr(op, errnoFromError(err))
+		}
+	}
+	return link, nil
+}
+
+// BpfProgramAttachRawTracepoint attaches a loaded program to a raw
+// tracepoint, such as sys_enter.
+func BpfProgramAttachRawTracepoint(prog *BpfProgram, name string) (*BpfLink, error) {
+	return BpfProgramAttachRawTracepointOpts(prog, name, nil)
+}
+
+// BpfProgramAttachRawTracepointOpts attaches a loaded program to a raw
+// tracepoint with the given options. Cookie requires kernel 5.15 or newer.
+func BpfProgramAttachRawTracepointOpts(prog *BpfProgram, name string, opts *BpfRawTracepointOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_raw_tracepoint"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+	if opts == nil {
+		opts = &BpfRawTracepointOpts{}
+	}
+
+	fd, err := sys.RawTracepointOpen(name, prog.fd, opts.Cookie)
+	if err != nil {
+		return nil, attachErr(op, errnoFromError(err))
+	}
+	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// BpfProgramAttachKprobeMulti attaches a loaded kprobe.multi program to
+// several functions in one link. Exactly one of Symbols and Addrs must be
+// set. The kernel must support BPF_TRACE_KPROBE_MULTI (5.18 or newer); older
+// kernels return EINVAL.
+func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_kprobe_multi"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if opts == nil || len(opts.Symbols) > 0 && len(opts.Addrs) > 0 || len(opts.Symbols) == 0 && len(opts.Addrs) == 0 {
+		return nil, attachErr(op, unix.EINVAL)
+	}
+
+	flags := uint32(0)
+	if opts.Retprobe {
+		flags = BPF_F_KPROBE_MULTI_RETURN
+	}
+	attr := &sys.LinkCreateAttr{
+		ProgFD:     uint32(prog.fd),
+		AttachType: uint32(BPF_TRACE_KPROBE_MULTI),
+	}
+	km := &sys.LinkKprobeMulti{
+		Flags:   flags,
+		Syms:    opts.Symbols,
+		Addrs:   opts.Addrs,
+		Cookies: opts.Cookies,
+	}
+	fd, err := sys.LinkCreate(attr, km)
+	if err != nil {
+		errno := errnoFromError(err)
+		if errors.Is(err, unix.ESRCH) {
+			errno = unix.ENOENT
+		}
+		return nil, &Error{Op: op, Errno: errno}
+	}
+	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// BpfProgramAttachTrace attaches a loaded fentry, fexit, fmod_ret or tp_btf
+// program to the function resolved at load time.
+func BpfProgramAttachTrace(prog *BpfProgram) (*BpfLink, error) {
+	return BpfProgramAttachTraceOpts(prog, nil)
+}
+
+// BpfProgramAttachTraceOpts attaches a loaded tracing program with the given
+// options. BpfCookie is passed to the program through
+// bpf_get_attach_cookie.
+func BpfProgramAttachTraceOpts(prog *BpfProgram, opts *BpfTraceOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_trace"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if opts == nil {
+		opts = &BpfTraceOpts{}
+	}
+
+	attr := &sys.LinkCreateAttr{
+		ProgFD:        uint32(prog.fd),
+		AttachType:    uint32(prog.expectedAttachType),
+		TracingCookie: opts.BpfCookie,
+	}
+	fd, err := sys.LinkCreate(attr, nil)
+	if err != nil {
+		// Kernels before 5.15 only attach tracing programs through the
+		// raw tracepoint open command with a NULL name; the link is
+		// still a tracing link. The raw command has no cookie support.
+		if errors.Is(err, unix.EINVAL) && opts.BpfCookie == 0 {
+			fd, err = sys.RawTracepointOpenProgram(prog.fd, 0)
+		}
+		if err != nil {
+			return nil, attachErr(op, errnoFromError(err))
+		}
+	}
+	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// BpfProgramAttachLsm attaches a loaded LSM program to the hook resolved at
+// load time.
+func BpfProgramAttachLsm(prog *BpfProgram) (*BpfLink, error) {
+	link, err := BpfProgramAttachTraceOpts(prog, nil)
+	if err != nil {
+		return nil, &Error{Op: "bpf_program__attach_lsm", Errno: errnoFromError(err)}
+	}
+	return link, nil
+}
+
+// BpfProgramAttach attaches a loaded program using the section name, like the
+// library's automatic attach. It supports the sections this package can
+// attach: kprobe, kretprobe, kprobe.multi, uprobe, uretprobe, tracepoint, tp,
+// raw tracepoint, fentry, fexit, fmod_ret, tp_btf and lsm.
+func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
+	const op = "bpf_program__attach"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+
+	def, ok := secDefFor(prog.sectionName)
+	if !ok {
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+	target := strings.TrimPrefix(prog.sectionName, def.prefix)
+
+	switch def.prefix {
+	case "kprobe/", "kretprobe/":
+		funcName, offset := splitFuncOffset(target)
+		if def.prefix == "kretprobe/" && offset != 0 {
+			return nil, attachErr(op, unix.EINVAL)
+		}
+		return BpfProgramAttachKprobeOpts(prog, funcName, &BpfKprobeOpts{Retprobe: def.prefix == "kretprobe/", Offset: offset})
+	case "kprobe.multi/", "kretprobe.multi/":
+		return BpfProgramAttachKprobeMulti(prog, &BpfKprobeMultiOpts{
+			Symbols:  []string{target},
+			Retprobe: def.prefix == "kretprobe.multi/",
+		})
+	case "uprobe/", "uretprobe/", "uprobe.s/", "uretprobe.s/":
+		sep := strings.LastIndexByte(target, ':')
+		if sep < 0 {
+			return nil, attachErr(op, unix.EINVAL)
+		}
+		funcName, offset := splitFuncOffset(target[sep+1:])
+		retprobe := strings.HasPrefix(def.prefix, "uretprobe")
+		if retprobe && offset != 0 {
+			return nil, attachErr(op, unix.EINVAL)
+		}
+		return BpfProgramAttachUprobeOpts(prog, -1, target[:sep], offset, &BpfUprobeOpts{
+			Retprobe: retprobe,
+			FuncName: funcName,
+		})
+	case "tracepoint/", "tp/", "tracepoint.s/", "tp.s/":
+		category, name, ok := strings.Cut(target, "/")
+		if !ok {
+			return nil, attachErr(op, unix.EINVAL)
+		}
+		return BpfProgramAttachTracepoint(prog, category, name)
+	case "raw_tracepoint/", "raw_tp/", "raw_tracepoint.w/", "raw_tp.w/",
+		"raw_tracepoint.s/", "raw_tp.s/":
+		return BpfProgramAttachRawTracepoint(prog, target)
+	case "fentry/", "fexit/", "fmod_ret/", "tp_btf/",
+		"fentry.s/", "fexit.s/", "fmod_ret.s/", "tp_btf.s/":
+		return BpfProgramAttachTrace(prog)
+	case "lsm/", "lsm.s/":
+		return BpfProgramAttachLsm(prog)
+	default:
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+}
+
+// checkAttachProgram rejects a nil or unloaded program.
+func checkAttachProgram(prog *BpfProgram, op string) error {
+	if prog == nil || prog.fd < 0 {
+		return &Error{Op: op, Errno: unix.EINVAL}
+	}
+	return nil
+}
+
+// splitFuncOffset splits "name+123" into name and 123. A suffix that is not a
+// decimal number is part of the name, matching libbpf's section parser.
+func splitFuncOffset(spec string) (string, uint64) {
+	plus := strings.LastIndexByte(spec, '+')
+	if plus < 0 {
+		return spec, 0
+	}
+	offset, err := strconv.ParseUint(spec[plus+1:], 10, 64)
+	if err != nil {
+		return spec, 0
+	}
+	return spec[:plus], offset
+}
+
+// attachErr wraps a syscall error for an attach operation.
+func attachErr(op string, err error) error {
+	return &Error{Op: op, Errno: errnoFromError(err)}
+}
+
+// attachPerfEvent attaches the program with the ioctl path and enables the
+// perf event.
+func attachPerfEvent(perfFD, progFD int) error {
+	if err := unix.IoctlSetInt(perfFD, unix.PERF_EVENT_IOC_SET_BPF, progFD); err != nil {
+		return err
+	}
+	return unix.IoctlSetInt(perfFD, unix.PERF_EVENT_IOC_ENABLE, 0)
+}

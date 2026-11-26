@@ -6,7 +6,11 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/kprobe.bpf.c testdata/progs/core.bpf.c \
 	testdata/progs/core_kernel.bpf.c testdata/progs/core_missing.bpf.c \
 	testdata/progs/core_module.bpf.c testdata/progs/core_module_target.bpf.c \
-	testdata/progs/core_target.c
+	testdata/progs/core_target.c testdata/progs/tracepoint.bpf.c \
+	testdata/progs/tracepoint_alt.bpf.c testdata/progs/uprobe.bpf.c \
+	testdata/progs/fentry.bpf.c \
+	testdata/progs/raw_tp.bpf.c testdata/progs/cookie.bpf.c \
+	testdata/progs/kprobe_multi.bpf.c testdata/progs/lsm.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h
 
 .PHONY: format format-check

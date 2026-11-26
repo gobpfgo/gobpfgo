@@ -42,6 +42,7 @@ Phase 1, in progress.
 - `BpfMapSetPinPath`, `BpfMapPin`, `BpfMapUnpin` and `BpfMapIsPinned` pin and unpin a loaded map on bpffs; `BpfProgramPin` and `BpfProgramUnpin` do the same for a program. The root test pins and unpins both on 5.10 and 6.18 ([`#20`](https://github.com/gobpfgo/gobpfgo/pull/20)).
 - `BpfObjectPinMaps`, `BpfObjectUnpinMaps`, `BpfObjectPinPrograms`, `BpfObjectUnpinPrograms`, `BpfObjectPin` and `BpfObjectUnpin` pin and unpin the whole object under one directory. The root test covers the object path on 5.10 and 6.18 ([`#21`](https://github.com/gobpfgo/gobpfgo/pull/21)).
 - `BpfMapReuseFD` makes an object map use an existing kernel map. The load path skips creating it, the relocation resolves maps by ELF symbol after the reused name replaces the object name, and the root test proves the program increments the reused map on 5.10 and 6.18 ([`#22`](https://github.com/gobpfgo/gobpfgo/pull/22)).
+- The attach surface now covers kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi and perf event links, plus automatic attach from the section name. Links pin, unpin, open and update, and BPF cookies reach the program on the perf link and kprobe multi paths. The `attach` oracle runs twelve cases and the root table test repeats them; all pass on 6.18, and on 5.10 the kprobe multi and cookie cases skip because the kernel does not support them. The LSM test skips unless the BPF LSM is active ([`#29`](https://github.com/gobpfgo/gobpfgo/pull/29)).
 
 Phase 2, in progress.
 
@@ -50,12 +51,13 @@ Phase 2, in progress.
 - The load path parses `.BTF.ext`, finds the target type in `/sys/kernel/btf/vmlinux`, applies the field relocation, and loads `core_kernel.bpf.o` with the kernel `pt_regs.sp` offset patched. The root test passes on 5.10 and 6.18 ([`#25`](https://github.com/gobpfgo/gobpfgo/pull/25)).
 - The `core-reloc` oracle now covers field offsets, type ids, type existence, type size and enum values; the engine adds type/enum target matching and 64-bit immediate patching. The Go result and patched instructions match libbpf on 5.10 and 6.18 ([`#26`](https://github.com/gobpfgo/gobpfgo/pull/26)).
 - Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18 ([`#27`](https://github.com/gobpfgo/gobpfgo/pull/27)).
-- The load path searches vmlinux and the split module BTFs, merges module types with the vmlinux base, detects ambiguous candidates, and poisons instructions with no target instead of failing the load. `core_missing.bpf.o` loads because the poisoned access is guarded, and `TestLoadKernelBTFs` verifies the split merge. CO-RE is done for libbpf's normal path on 5.10 and 6.18. `TYPE_MATCHES` is rejected, matching libbpf.s normal `bpf_core_parse_spec` ([`#28`](https://github.com/gobpfgo/gobpfgo/pull/28)).
+- The load path searches vmlinux and the split module BTFs, merges module types with the vmlinux base, detects ambiguous candidates, and poisons instructions with no target instead of failing the load. `core_missing.bpf.o` loads because the poisoned access is guarded, and `TestLoadKernelBTFs` verifies the split merge. CO-RE is done for libbpf's normal path on 5.10 and 6.18. `TYPE_MATCHES` is rejected, matching libbpf's normal `bpf_core_parse_spec` ([`#28`](https://github.com/gobpfgo/gobpfgo/pull/28)).
 - Next: BTF dump, the remaining phase 2 item.
 
 Open:
 
 - The arm64 half of the 5.10 tier has not run.
-- kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.
-- Link pinning and the remaining attach types are not ported.
+- The specialized attach APIs are not ported: cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT. USDT and uprobe multi belong to phase 3; the others need their own slice.
+- Attach targets in kernel modules (`fentry/module:function`) are not resolved.
+- `BpfLinkUpdateProgram` is implemented and layout checked, but no attach type in this surface supports update on the tested kernels, so its success path is unexercised.
 - BTF dump and the remaining CO-RE `TYPE_MATCHES` kind (rejected by libbpf's normal path) are not ported.

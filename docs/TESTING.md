@@ -14,7 +14,7 @@ Scenarios:
 | `attr` | the serialized bytes of a `bpf_attr` for a known input |
 | `open` | object name, map specs, program specs, BTF type summary |
 | `load` | loaded map and program info |
-| `attach` | object, program and function, and whether the program counted a real call |
+| `attach` | one case per attach type: kind, object, program, target, retprobe and cookie flags, whether libbpf supports it, and whether the program counted a real call or received the cookie |
 | `core` | CO-RE access specs: section, instruction, kind, access string, bit offset and accessors |
 | `core-reloc` | the field, type, enum or flexible array target match, resolved values and the patched instruction |
 | `dump` | the exact `btf_dump` text |
@@ -25,9 +25,11 @@ Scenarios:
 
 The oracle is development-only. Tests consume checked-in JSON and never need C, clang or libbpf.
 
-`layout` covers `BPF_MAP_CREATE`, `BPF_MAP_LOOKUP_ELEM`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open`, `load` and `attach` are implemented for the kprobe object and are linked against the pinned libbpf. `load` and `attach` have oracle fixtures generated with `sudo`.
+`layout` covers `BPF_MAP_CREATE`, `BPF_MAP_LOOKUP_ELEM`, `BPF_BTF_LOAD`, `BPF_PROG_LOAD`, `BPF_LINK_CREATE`, `BPF_LINK_UPDATE` and `BPF_RAW_TRACEPOINT_OPEN`; `attr` covers `BPF_MAP_CREATE`. `open` and `load` run on the kprobe object; `attach` runs all attach fixtures and is linked against the pinned libbpf. `load` and `attach` have oracle fixtures generated with `sudo`.
 
-The BTF load test, the object load test, the kprobe attach test, the pin test, the reuse test, the CO-RE load test and the missing-target load test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts, the loaded info comparison, the CO-RE spec and relocation tests and the split module merge test run in CI. The root object load test compares the map info and the program info with `load.json`. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test. The pin test creates a temporary directory on bpffs, pins and unpins the map and program, and removes the directory; it skips when bpffs is unavailable.
+The BTF load test, the object load test, the attach table, the perf event attach, the auto attach, the link pin and update tests, the pin test, the reuse test, the CO-RE load test and the missing-target load test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts, the loaded info comparison, the CO-RE spec and relocation tests and the split module merge test run in CI. The root object load test compares the map info and the program info with `load.json`. The root attach table loads one object per case, attaches the program, triggers the event, and requires the map to change, so a link that never fires fails the test; the uprobe and uretprobe cases attach to `uprobeTarget` in the test binary and call it. The perf event ioctl test attaches a tracepoint perf event without the link path. The link pin test pins an fentry link, destroys the original descriptor, reopens the link from bpffs, proves it still fires, and unpins it. The link update test replaces a tracepoint program on a perf link and skips when the kernel link type does not implement update. The pin test creates a temporary directory on bpffs, pins and unpins the map and program, and removes the directory; it skips when bpffs is unavailable.
+
+On 5.10 the kprobe multi and cookie cases skip because the kernel lacks the link types, and the LSM case skips because the BPF LSM is not in the active LSM list. The fentry, fexit and LSM attaches use the raw tracepoint open fallback on that kernel, which the table exercises.
 
 The loaded xlated instruction count and jited length are verifier and JIT outputs. The test compares them exactly on the kernel that produced `load.json` and requires them to be nonzero on any other kernel; the map geometry, BTF ids and program type are compared everywhere. The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding.
 
@@ -40,7 +42,7 @@ The BTF parser has a structural test against the same object: type kinds, string
 | Tier | Runs | Needs | Covers |
 |---|---|---|---|
 | 0 | every PR | nothing beyond Go | serialization bytes, ELF parse, BTF parse, CO-RE fixups, `btf_dump` text, linker, USDT, layout constants |
-| 1 | main and nightly | a Linux kernel, root or `CAP_BPF` | open, load, attach, link types, pinning, ring buffer, perf events, syscall transcript |
+| 1 | main and nightly | a Linux kernel, root or `CAP_BPF` | open, load, every attach type, link pin/open/update, pinning, ring buffer, perf events, syscall transcript |
 | 2 | nightly or manual | VMs | kernels 5.10, 6.x and latest; amd64 and arm64 |
 
 Tier 0 is the bulk of the suite, because most parity is data in and data out. Tier 1 proves the syscalls. Tier 2 proves the old-kernel fallbacks.
@@ -55,6 +57,7 @@ Tier 2 is running on Debian 11 with kernel `5.10.0-46-cloud-amd64` and on the 6.
 - **Syscalls.** The command order and every attribute field must match after load. File descriptors, map IDs, program IDs, PIDs and timestamps are normalized away; everything else is compared.
 - **CO-RE access spec, relocation and load path.** The access spec, the target match, the resolved values and the patched instruction must match for fields, flexible array elements, types and enum values. The `core-reloc` scenario covers the engine with a synthetic target; the load tests check the live kernel `pt_regs.sp` offset, the guarded missing-target poison, module candidates and the split module merge on 5.10 and 6.18.
 - **Text.** `btf_dump` output is compared byte for byte.
+- **Attach types.** The C harness and the Go table load the same objects, attach the same program to the same target, trigger it, and compare the map result: a count, or the cookie the program read with `bpf_get_attach_cookie`. The cases cover kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, raw tracepoint, kprobe multi, kretprobe multi, LSM and the cookie path.
 - **Errors.** The errno and the failing operation are compared. Kernel log text is compared only on selected lines, because it changes between kernel versions.
 
 ## Fixtures and updates
