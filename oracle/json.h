@@ -25,6 +25,7 @@ void json_obj_end(struct json *j);
 void json_arr_begin(struct json *j, const char *key);
 void json_arr_end(struct json *j);
 void json_str(struct json *j, const char *key, const char *value);
+void json_bool(struct json *j, const char *key, bool value);
 void json_u32(struct json *j, const char *key, uint32_t value);
 void json_s32(struct json *j, const char *key, int32_t value);
 void json_u64(struct json *j, const char *key, uint64_t value);

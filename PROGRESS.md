@@ -1,6 +1,6 @@
 # Progress
 
-<!-- anchors-ok: LGPL-2 internal/sys internal/elf internal/btf oracle oracle/build | an SPDX identifier and package paths, not citations -->
+<!-- anchors-ok: LGPL-2 internal/sys internal/elf internal/btf oracle oracle/build kprobe/do_sys_openat2 | an SPDX identifier, package paths and a section name, not citations -->
 
 ## 2026-11-26
 
@@ -24,17 +24,20 @@ Done:
 - The oracle is now one binary with `layout`, `attr`, `open` and `load` subcommands. A small JSON writer owns the formatting; the layout, attr and open fixtures are unchanged and the load ids were regenerated.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.
 - `internal/btf`: header, type table, string table, all type kinds and `SizeOf`.
-- `oracle`: `layout`, `attr`, `open` and `load`; the linked scenarios build the pinned libbpf under `oracle/build`.
+- `oracle`: `layout`, `attr`, `open`, `load` and `attach`; the linked scenarios build the pinned libbpf under `oracle/build`.
 - `libbpf.BpfObjectOpenFile`, `BpfObjectOpenMem`, the map and program metadata accessors, and the SEC table for the kprobe path.
 - The open test compares the object name, map fields and program fields with `testdata/oracle/open.json`.
-- The load fixture records map id 716, program id 300, 18 xlated instructions and 100 jited bytes on 6.18.
+- The load fixture records the loaded map and program info on 6.18; the map and program ids are ephemeral.
 - File provenance now lives in the `libbpf-source`, `libbpf-commit` and `libbpf-symbols` headers; godocs describe the Go API.
 
 Next: phase 1, in progress.
 
 - BTF load, map create with the BTF ids, the map-FD relocation, the program load and the loaded info comparison are done; the root load test passes.
-- Next: the kprobe attach.
+- `BpfMapLookupElem` reads a map element; the `BPF_MAP_LOOKUP_ELEM` layout comes from the test object.
+- `BpfProgramAttachKprobe` creates a tracefs kprobe event, attaches the program with a perf event, and removes both on detach. The root attach test proves the program increments `counts` on a real `do_sys_openat2` call.
+- The test object now targets `kprobe/do_sys_openat2`, the function the `openat` path reaches.
+- Next: the 5.10 VM tier, then pinning and reuse.
 
 Open:
 
-- The 5.10 VM tier comes after load and attach.
+- kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.

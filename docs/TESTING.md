@@ -4,7 +4,7 @@ The port is correct only when it does what libbpf does. Source similarity is not
 
 ## The oracle
 
-`oracle/` is a single C binary with `layout`, `attr`, `open` and `load` subcommands. The output goes through a small JSON writer in `json.c`; the scenarios live in `layout.c`, `attr.c`, `open.c` and `load.c`, and the shared metadata and UAPI field block live in `oracle.c`. The `open` and `load` scenarios link the libbpf commit recorded in [NOTICE](../NOTICE).
+`oracle/` is a single C binary with `layout`, `attr`, `open`, `load` and `attach` subcommands. The output goes through a small JSON writer in `json.c`; the scenarios live in `layout.c`, `attr.c`, `open.c`, `load.c` and `attach.c`, and the shared metadata and UAPI field block live in `oracle.c`. The `open`, `load` and `attach` scenarios link the libbpf commit recorded in [NOTICE](../NOTICE).
 
 Scenarios:
 
@@ -13,8 +13,8 @@ Scenarios:
 | `layout` | `sizeof` and `offsetof` for every UAPI field used by the port |
 | `attr` | the serialized bytes of a `bpf_attr` for a known input |
 | `open` | object name, map specs, program specs, BTF type summary |
-| `load` | ordered `bpf()` and `perf_event_open()` calls, attribute bytes, return codes |
-| `attach` | link type, attach arguments, tracefs writes |
+| `load` | loaded map and program info |
+| `attach` | object, program and function, and whether the program counted a real call |
 | `core` | every CO-RE fixup: instruction index, kind, spec, access string, old and new value |
 | `dump` | the exact `btf_dump` text |
 | `usdt` | provider, name, arguments, semaphore offset |
@@ -24,11 +24,11 @@ Scenarios:
 
 The oracle is development-only. Tests consume checked-in JSON and never need C, clang or libbpf.
 
-`layout` covers `BPF_MAP_CREATE`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open` is implemented for the kprobe object and is linked against the pinned libbpf. `load` has an oracle fixture generated with `sudo`; the Go object load is in place and the loaded info comparison is next. The remaining scenarios land with the slice that needs them.
+`layout` covers `BPF_MAP_CREATE`, `BPF_MAP_LOOKUP_ELEM`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open`, `load` and `attach` are implemented for the kprobe object and are linked against the pinned libbpf. `load` and `attach` have oracle fixtures generated with `sudo`.
 
-The BTF load test and the object load test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts and the loaded info comparison run in CI. The root object load test compares the map info and the program info with `load.json`, including the 18 xlated instructions and 100 jited bytes.
+The BTF load test, the object load test and the kprobe attach test run under root and skip with `EPERM`; the DATASEC fixup, the attribute layouts and the loaded info comparison run in CI. The root object load test compares the map info and the program info with `load.json`, including the 18 xlated instructions and 100 jited bytes. The root attach test attaches `handle_open` to `do_sys_openat2`, opens a file, and requires the `counts` map to increase, so a link that never fires fails the test.
 
-The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario will compare that same object with libbpf.
+The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario compares that same object with libbpf.
 
 The BTF parser has a structural test against the same object: type kinds, strings, the `counts` map definition and the `handle_open` prototype.
 

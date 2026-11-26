@@ -48,6 +48,10 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. The libbpf source, commit and symbol list live in `libbpf-source`, `libbpf-commit` and `libbpf-symbols` comments at the top of each file. Godocs describe what the Go API does, its ownership, errors and limits; they do not say "mirrors X" or repeat the C symbol. The API map generator reads the metadata. Original files use `golbpfgo-origin: original`; a reimplementation of a C module uses both tags.
 
+## D-012: kprobe attach uses the tracefs path
+
+2026-11-26. The kprobe attach writes a `kprobe_events` entry and opens one tracepoint perf event with `pid=-1, cpu=0`, then attaches the program with `PERF_EVENT_IOC_SET_BPF`. libbpf's modern path uses the kprobe perf PMU, whose `config1` is a pointer to the function name; forming that pointer needs `unsafe` or a second reflect address helper, and D-003 keeps the address conversion in one place. The tracefs path is libbpf's legacy mode, works on the 5.10 floor, and keeps the link lifecycle in Go. The cost is that tracefs must be mounted and writable, and `BpfLinkFD` returns the perf event descriptor rather than a BPF link descriptor. Recorded in [DEVIATIONS.md](DEVIATIONS.md) item 15.
+
 ## Open decisions
 
 None. The `reflect` address helper is accepted in D-003.

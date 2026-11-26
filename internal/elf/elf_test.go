@@ -32,7 +32,7 @@ func TestOpenKprobe(t *testing.T) {
 
 	var prog *Program
 	for i := range o.Programs {
-		if o.Programs[i].Name == "kprobe/do_sys_open" {
+		if o.Programs[i].Name == "kprobe/do_sys_openat2" {
 			prog = &o.Programs[i]
 			break
 		}
@@ -54,7 +54,7 @@ func TestOpenKprobe(t *testing.T) {
 	if handle == nil {
 		t.Fatal("handle_open FUNC symbol not found")
 	}
-	if handle.Section != "kprobe/do_sys_open" {
+	if handle.Section != "kprobe/do_sys_openat2" {
 		t.Fatalf("handle_open section = %q", handle.Section)
 	}
 
@@ -68,7 +68,7 @@ func TestOpenKprobe(t *testing.T) {
 	if mapReloc == nil {
 		t.Fatal("counts R_BPF_64_64 relocation not found")
 	}
-	if mapReloc.Section != "kprobe/do_sys_open" {
+	if mapReloc.Section != "kprobe/do_sys_openat2" {
 		t.Fatalf("relocation target = %q", mapReloc.Section)
 	}
 	if len(prog.Relocs) == 0 {

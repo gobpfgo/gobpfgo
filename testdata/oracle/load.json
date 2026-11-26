@@ -5,9 +5,9 @@
   "kernel": "6.18.63-3-lts",
   "object_name": "kprobe",
   "maps": [
-    {"name": "counts", "type": 2, "id": 721, "key_size": 4, "value_size": 8, "max_entries": 1, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11}
+    {"name": "counts", "type": 2, "id": 726, "key_size": 4, "value_size": 8, "max_entries": 1, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11}
   ],
   "programs": [
-    {"name": "handle_open", "type": 2, "id": 309, "section": "kprobe/do_sys_open", "insn_cnt": 12, "xlated_insn_cnt": 18, "jited_prog_len": 100}
+    {"name": "handle_open", "type": 2, "id": 333, "section": "kprobe/do_sys_openat2", "insn_cnt": 12, "xlated_insn_cnt": 18, "jited_prog_len": 100}
   ]
 }

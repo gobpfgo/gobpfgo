@@ -9,6 +9,6 @@
     {"name": "counts", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11, "pin_path": ""}
   ],
   "programs": [
-    {"name": "handle_open", "type": 2, "expected_attach_type": 0, "section": "kprobe/do_sys_open", "insn_cnt": 12}
+    {"name": "handle_open", "type": 2, "expected_attach_type": 0, "section": "kprobe/do_sys_openat2", "insn_cnt": 12}
   ]
 }
