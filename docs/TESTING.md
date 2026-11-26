@@ -16,7 +16,7 @@ Scenarios:
 | `load` | loaded map and program info |
 | `attach` | object, program and function, and whether the program counted a real call |
 | `core` | CO-RE access specs: section, instruction, kind, access string, bit offset and accessors |
-| `core-reloc` | the target match, resolved values and the patched instruction |
+| `core-reloc` | the field, type or enum target match, resolved values and the patched instruction |
 | `dump` | the exact `btf_dump` text |
 | `usdt` | provider, name, arguments, semaphore offset |
 | `linker` | linked object metadata and section layout |
@@ -53,7 +53,7 @@ Tier 2 is running on Debian 11 with kernel `5.10.0-46-cloud-amd64` and on the 6.
 - **Attributes.** The Go serializer's bytes must equal the `attr` scenario, field by field.
 - **Object metadata.** Map and program names, types, key and value sizes, max entries, flags, BTF IDs and pin paths must match after open.
 - **Syscalls.** The command order and every attribute field must match after load. File descriptors, map IDs, program IDs, PIDs and timestamps are normalized away; everything else is compared.
-- **CO-RE access spec, field relocation and load path.** The access spec, the target match, the resolved values and the patched instruction must match. The `core-reloc` scenario covers the engine with a synthetic target, and the load test checks the live kernel `pt_regs.sp` offset and the verifier load on 5.10 and 6.18.
+- **CO-RE access spec, relocation and load path.** The access spec, the target match, the resolved values and the patched instruction must match for fields, types and enum values. The `core-reloc` scenario covers the engine with a synthetic target, and the load test checks the live kernel `pt_regs.sp` offset and the verifier load on 5.10 and 6.18.
 - **Text.** `btf_dump` output is compared byte for byte.
 - **Errors.** The errno and the failing operation are compared. Kernel log text is compared only on selected lines, because it changes between kernel versions.
 

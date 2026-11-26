@@ -3,6 +3,12 @@
 
 #include <linux/bpf.h>
 #include <bpf_helpers.h>
+#include <bpf_core_read.h>
+
+enum core_enum {
+	CORE_FIRST  = 1,
+	CORE_SECOND = 2,
+};
 
 struct core_sample {
 	int first;
@@ -23,7 +29,15 @@ int handle_core(void *ctx) {
 
 	if (!sample)
 		return 0;
-	return __builtin_preserve_access_index(sample->second);
+	if (!bpf_core_type_exists(struct core_sample))
+		return 0;
+	if (bpf_core_type_size(struct core_sample) != sizeof(struct core_sample))
+		return 0;
+	if (bpf_core_type_id_local(struct core_sample) == 0)
+		return 0;
+	if (bpf_core_type_id_kernel(struct core_sample) == 0)
+		return 0;
+	return __builtin_preserve_access_index(sample->second) + bpf_core_enum_value(enum core_enum, CORE_SECOND);
 }
 
 char LICENSE[] SEC("license") = "GPL";

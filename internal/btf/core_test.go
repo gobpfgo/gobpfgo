@@ -112,11 +112,21 @@ func TestCalcCoreRelo(t *testing.T) {
 	if targetType == nil {
 		t.Fatal("target core_sample not found")
 	}
-	if len(ext.CoreRelos) != 1 || len(ext.CoreRelos[0].Relos) != 1 {
-		t.Fatalf("unexpected core relos: %+v", ext.CoreRelos)
+	var relo CoreRelo
+	found := false
+	for _, section := range ext.CoreRelos {
+		for _, candidate := range section.Relos {
+			if candidate.Kind == CoreFieldByteOffset {
+				relo = candidate
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no field relocation in %+v", ext.CoreRelos)
 	}
 
-	res, err := local.CalcCoreRelo(ext.CoreRelos[0].Relos[0], target, targetType.ID)
+	res, err := local.CalcCoreRelo(relo, target, targetType.ID)
 	if err != nil {
 		t.Fatalf("CalcCoreRelo: %v", err)
 	}

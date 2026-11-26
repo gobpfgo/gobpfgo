@@ -85,15 +85,19 @@ func relocateCore(p *BpfProgram, insns []byte, ext *btf.ExtSpec, local, kernel *
 			if err != nil {
 				return fmt.Errorf("core relocation type %d: %w", relo.TypeID, err)
 			}
-			if localType.Name == "" {
-				return fmt.Errorf("core relocation type %d is anonymous", relo.TypeID)
-			}
-			targetType := kernel.Find(localType.Name, localType.Kind)
-			if targetType == nil {
-				return fmt.Errorf("core relocation target %s not found", localType.Name)
+			var targetTypeID uint32
+			if relo.Kind != btf.CoreTypeIDLocal {
+				if localType.Name == "" {
+					return fmt.Errorf("core relocation type %d is anonymous", relo.TypeID)
+				}
+				targetType := kernel.Find(localType.Name, localType.Kind)
+				if targetType == nil {
+					return fmt.Errorf("core relocation target %s not found", localType.Name)
+				}
+				targetTypeID = targetType.ID
 			}
 
-			res, err := local.CalcCoreRelo(relo, kernel, targetType.ID)
+			res, err := local.CalcCoreRelo(relo, kernel, targetTypeID)
 			if err != nil {
 				return fmt.Errorf("core relocation %s: %w", localType.Name, err)
 			}
@@ -102,11 +106,9 @@ func relocateCore(p *BpfProgram, insns []byte, ext *btf.ExtSpec, local, kernel *
 			if off < 0 || off+bpfInsnLength > len(insns) {
 				return fmt.Errorf("core relocation at insn %d is out of bounds", relo.InsnOff)
 			}
-			insn := decodeBpfInsn(insns[off:])
-			if err := patchCoreInsn(&insn, res); err != nil {
+			if err := patchCoreInsn(insns[off:], res); err != nil {
 				return fmt.Errorf("core relocation at insn %d: %w", relo.InsnOff, err)
 			}
-			encodeBpfInsn(insns[off:], insn)
 		}
 	}
 
