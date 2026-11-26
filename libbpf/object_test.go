@@ -11,6 +11,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/golbpfgo/golbpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
 
@@ -46,6 +47,44 @@ func loadOpenFixture(t *testing.T) openFixture {
 	var f openFixture
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("parse fixture: %v", err)
+	}
+	return f
+}
+
+type loadFixture struct {
+	ObjectName string `json:"object_name"`
+	Maps       []struct {
+		Name           string `json:"name"`
+		Type           uint32 `json:"type"`
+		ID             uint32 `json:"id"`
+		KeySize        uint32 `json:"key_size"`
+		ValueSize      uint32 `json:"value_size"`
+		MaxEntries     uint32 `json:"max_entries"`
+		MapFlags       uint32 `json:"map_flags"`
+		BtfKeyTypeID   uint32 `json:"btf_key_type_id"`
+		BtfValueTypeID uint32 `json:"btf_value_type_id"`
+	} `json:"maps"`
+	Programs []struct {
+		Name          string `json:"name"`
+		Type          uint32 `json:"type"`
+		ID            uint32 `json:"id"`
+		Section       string `json:"section"`
+		InsnCnt       int    `json:"insn_cnt"`
+		XlatedInsnCnt int    `json:"xlated_insn_cnt"`
+		JitedProgLen  uint32 `json:"jited_prog_len"`
+	} `json:"programs"`
+}
+
+func loadLoadFixture(t *testing.T) loadFixture {
+	t.Helper()
+
+	data, err := os.ReadFile("../testdata/oracle/load.json")
+	if err != nil {
+		t.Fatalf("read load fixture: %v", err)
+	}
+	var f loadFixture
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatalf("parse load fixture: %v", err)
 	}
 	return f
 }
@@ -137,6 +176,8 @@ func TestBpfObjectOpenKprobe(t *testing.T) {
 }
 
 func TestBpfObjectLoad(t *testing.T) {
+	f := loadLoadFixture(t)
+
 	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
 	if err != nil {
 		t.Fatalf("BpfObjectOpenFile: %v", err)
@@ -149,13 +190,64 @@ func TestBpfObjectLoad(t *testing.T) {
 	}
 	defer BpfObjectClose(obj)
 
+	if got := BpfObjectName(obj); got != f.ObjectName {
+		t.Fatalf("object name = %q, want %q", got, f.ObjectName)
+	}
+	if len(f.Maps) != 1 || len(f.Programs) != 1 {
+		t.Fatalf("fixture has %d maps and %d programs", len(f.Maps), len(f.Programs))
+	}
+
 	m := BpfObjectNextMap(obj, nil)
 	if m == nil || BpfMapFD(m) < 0 {
 		t.Fatalf("map fd = %d", BpfMapFD(m))
 	}
+	wantMap := f.Maps[0]
+	mi, err := sys.MapInfoByFD(BpfMapFD(m))
+	if err != nil {
+		t.Fatalf("MapInfoByFD: %v", err)
+	}
+	if mi.Name != wantMap.Name || mi.Type != wantMap.Type {
+		t.Fatalf("map info = %+v, want name %q type %d", mi, wantMap.Name, wantMap.Type)
+	}
+	if mi.KeySize != wantMap.KeySize || mi.ValueSize != wantMap.ValueSize ||
+		mi.MaxEntries != wantMap.MaxEntries || mi.MapFlags != wantMap.MapFlags {
+		t.Fatalf("map geometry = %+v, want %+v", mi, wantMap)
+	}
+	if mi.BtfKeyTypeID != wantMap.BtfKeyTypeID || mi.BtfValueTypeID != wantMap.BtfValueTypeID {
+		t.Fatalf("map BTF ids = %d/%d, want %d/%d",
+			mi.BtfKeyTypeID, mi.BtfValueTypeID, wantMap.BtfKeyTypeID, wantMap.BtfValueTypeID)
+	}
+	if mi.ID == 0 || m.id != mi.ID {
+		t.Fatalf("map id = %d, info id = %d", m.id, mi.ID)
+	}
+
 	p := BpfObjectNextProgram(obj, nil)
 	if p == nil || BpfProgramFD(p) < 0 {
 		t.Fatalf("program fd = %d", BpfProgramFD(p))
+	}
+	wantProg := f.Programs[0]
+	if got := BpfProgramSectionName(p); got != wantProg.Section {
+		t.Fatalf("section = %q, want %q", got, wantProg.Section)
+	}
+	if got := BpfProgramInsnCnt(p); got != wantProg.InsnCnt {
+		t.Fatalf("insn count = %d, want %d", got, wantProg.InsnCnt)
+	}
+	pi, err := sys.ProgInfoByFD(BpfProgramFD(p))
+	if err != nil {
+		t.Fatalf("ProgInfoByFD: %v", err)
+	}
+	if pi.Name != wantProg.Name || pi.Type != wantProg.Type {
+		t.Fatalf("program info = %+v, want name %q type %d", pi, wantProg.Name, wantProg.Type)
+	}
+	if got := int(pi.XlatedProgLen / 8); got != wantProg.XlatedInsnCnt {
+		t.Fatalf("xlated insn count = %d, want %d", got, wantProg.XlatedInsnCnt)
+	}
+	if pi.JitedProgLen != wantProg.JitedProgLen {
+		t.Fatalf("jited length = %d, want %d", pi.JitedProgLen, wantProg.JitedProgLen)
+	}
+	if pi.ID == 0 || p.id != pi.ID || p.xlatedInsnCnt != int(pi.XlatedProgLen/8) || p.jitedLen != pi.JitedProgLen {
+		t.Fatalf("program id/lengths = %d/%d/%d, info = %d/%d/%d",
+			p.id, p.xlatedInsnCnt, p.jitedLen, pi.ID, pi.XlatedProgLen/8, pi.JitedProgLen)
 	}
 
 	if err := BpfObjectLoad(obj); err == nil {

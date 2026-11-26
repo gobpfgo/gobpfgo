@@ -19,7 +19,8 @@ Done:
 - [`#9`](https://github.com/golbpfgo/golbpfgo/pull/9) merged: the C clang-format rules and the CI format gate.
 - [`#10`](https://github.com/golbpfgo/golbpfgo/pull/10) merged: provenance metadata in file headers and real godocs.
 - [`#11`](https://github.com/golbpfgo/golbpfgo/pull/11) merged: the BTF load path and DATASEC fixup.
-- Object load path: BTF, maps with their BTF ids, the map-FD relocation and the programs; the root load test passes.
+- [`#12`](https://github.com/golbpfgo/golbpfgo/pull/12) merged: the object load path (BTF, maps, programs).
+- The loaded map and program info matches `load.json`: map `counts`, program `handle_open`, 18 xlated instructions and 100 jited bytes.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.
 - `internal/btf`: header, type table, string table, all type kinds and `SizeOf`.
 - `oracle`: `layout`, `attr`, `open` and `load`; the linked scenarios build the pinned libbpf under `oracle/build`.
@@ -30,8 +31,8 @@ Done:
 
 Next: phase 1, in progress.
 
-- BTF load, map create with the BTF ids, the map-FD relocation and the program load are done; the root load test passes.
-- Next: the loaded map and program info comparison, then the kprobe attach.
+- BTF load, map create with the BTF ids, the map-FD relocation, the program load and the loaded info comparison are done; the root load test passes.
+- Next: the kprobe attach.
 
 Open:
 

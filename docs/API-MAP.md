@@ -47,9 +47,10 @@ The generated table has these columns:
 | `bpf_map_create` | `BpfMapCreate` | `libbpf/map.go` | in progress (basic create and root test; `LogOpts` deferred) |
 | `bpf_btf_load` | `BtfLoad` (internal; public wrapper later) | `internal/sys/btf.go` | in progress (layout and root load) |
 | `bpf_prog_load` | `ProgLoad` (internal; public wrapper later) | `internal/sys/prog.go` | in progress (layout and object load) |
+| `bpf_obj_get_info_by_fd` | `MapInfoByFD`, `ProgInfoByFD` (internal) | `internal/sys/info.go` | in progress (layout and root info comparison) |
 | `bpf_map__fd` | `BpfMapFD` | `libbpf/bpf_map.go` | parity tested (root load) |
 | `bpf_program__fd` | `BpfProgramFD` | `libbpf/program.go` | parity tested (root load) |
-| `bpf_object__load` | `BpfObjectLoad` | `libbpf/load.go` | in progress (BTF, maps, programs; info and attach next) |
+| `bpf_object__load` | `BpfObjectLoad` | `libbpf/load.go` | in progress (BTF, maps, programs, info; attach next) |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |
 | `btf__parse` | `BtfParse` | `libbpf/btf.go` | not started |
 | `btf_dump__new` | `BtfDumpNew` | `libbpf/btf_dump.go` | not started |

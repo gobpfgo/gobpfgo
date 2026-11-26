@@ -76,6 +76,17 @@ func BpfObjectLoad(obj *BpfObject) error {
 			}
 		}
 		m.fd = fd
+
+		info, err := sys.MapInfoByFD(fd)
+		if err != nil {
+			obj.closeLoadFDs()
+			return &Error{
+				Op:    "bpf_obj_get_info_by_fd",
+				Errno: errnoFromError(err),
+				Log:   m.name,
+			}
+		}
+		m.id = info.ID
 	}
 
 	license := append([]byte(obj.license), 0)
@@ -109,6 +120,19 @@ func BpfObjectLoad(obj *BpfObject) error {
 			}
 		}
 		p.fd = fd
+
+		info, err := sys.ProgInfoByFD(fd)
+		if err != nil {
+			obj.closeLoadFDs()
+			return &Error{
+				Op:    "bpf_obj_get_info_by_fd",
+				Errno: errnoFromError(err),
+				Log:   p.name,
+			}
+		}
+		p.id = info.ID
+		p.xlatedInsnCnt = int(info.XlatedProgLen / 8)
+		p.jitedLen = info.JitedProgLen
 	}
 
 	obj.loaded = true

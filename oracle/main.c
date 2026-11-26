@@ -23,6 +23,8 @@ struct field {
 };
 
 #define F(name) {#name, offsetof(union bpf_attr, name), sizeof(((union bpf_attr *)0)->name)}
+#define FMAP(name) {#name, offsetof(struct bpf_map_info, name), sizeof(((struct bpf_map_info *)0)->name)}
+#define FPROG(name) {#name, offsetof(struct bpf_prog_info, name), sizeof(((struct bpf_prog_info *)0)->name)}
 
 static void json_string(const char *s) {
 	const unsigned char *p = (const unsigned char *)s;
@@ -106,6 +108,29 @@ static void print_layout(void) {
 		F(expected_attach_type),
 		F(prog_btf_fd),
 	};
+	static const struct field obj_info_fields[] = {
+		{"bpf_fd", offsetof(union bpf_attr, info), 4},
+		{"info_len", offsetof(union bpf_attr, info) + 4, 4},
+		{"info", offsetof(union bpf_attr, info) + 8, 8},
+	};
+	static const struct field map_info_fields[] = {
+		FMAP(type),
+		FMAP(id),
+		FMAP(key_size),
+		FMAP(value_size),
+		FMAP(max_entries),
+		FMAP(map_flags),
+		FMAP(name),
+		FMAP(btf_key_type_id),
+		FMAP(btf_value_type_id),
+	};
+	static const struct field prog_info_fields[] = {
+		FPROG(type),
+		FPROG(id),
+		FPROG(jited_prog_len),
+		FPROG(xlated_prog_len),
+		FPROG(name),
+	};
 	struct utsname uts;
 
 	if (uname(&uts) != 0) {
@@ -123,7 +148,10 @@ static void print_layout(void) {
 	printf(",\n");
 	print_field_block("map_create", map_fields, ARRAY_SIZE(map_fields), offsetofend(union bpf_attr, excl_prog_hash_size), true);
 	print_field_block("btf_load", btf_fields, ARRAY_SIZE(btf_fields), offsetofend(union bpf_attr, btf_token_fd), true);
-	print_field_block("prog_load", prog_fields, ARRAY_SIZE(prog_fields), offsetofend(union bpf_attr, keyring_id), false);
+	print_field_block("prog_load", prog_fields, ARRAY_SIZE(prog_fields), offsetofend(union bpf_attr, keyring_id), true);
+	print_field_block("obj_info", obj_info_fields, ARRAY_SIZE(obj_info_fields), offsetofend(union bpf_attr, info), true);
+	print_field_block("map_info", map_info_fields, ARRAY_SIZE(map_info_fields), sizeof(struct bpf_map_info), true);
+	print_field_block("prog_info", prog_info_fields, ARRAY_SIZE(prog_info_fields), sizeof(struct bpf_prog_info), false);
 	printf("}\n");
 }
 

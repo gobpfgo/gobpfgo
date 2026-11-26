@@ -39,7 +39,7 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | BTF load layout and DATASEC fixup | C harness JSON + root load | parity tested |
 | Object load (BTF, maps, programs) | root load test | parity tested (kprobe object, 6.18) |
 | ELF sections, symbols and relocations | checked-in `kprobe.bpf.o` | structural test |
-| Loaded map and program metadata | C harness JSON (root) | fixture generated (kprobe object, 6.18) |
+| Loaded map and program metadata | C harness JSON (root) | parity tested (root info comparison) |
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |
 | CO-RE fixups | libbpf internal harness | not started |
 | `btf_dump` text | exact text diff | not started |
