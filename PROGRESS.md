@@ -19,13 +19,14 @@ Done:
 - `oracle`: `layout`, `attr` and `open`; `open` links the pinned libbpf built from a copy under `oracle/build`.
 - `libbpf.BpfObjectOpenFile`, `BpfObjectOpenMem`, the map and program metadata accessors, and the SEC table for the kprobe path.
 - The open test compares the object name, map fields and program fields with `testdata/oracle/open.json`.
+- `oracle/load.c` loads the kprobe object with the pinned libbpf under `sudo` and writes `testdata/oracle/load.json`: map id 716, program id 300, 18 xlated instructions, 100 jited bytes.
 - Kernel floor set to 5.10. The 4.9-era fallbacks are out of scope.
 
 Next:
 
-- Load and kprobe attach.
-- The host disables unprivileged BPF, but passwordless `sudo -n` works, so the load-only fixture can be generated with `sudo`.
+- Go load path: BTF load, map create with the BTF ids, map-FD relocation, program load, and the loaded info comparison.
+- Kprobe attach after load.
 
 Open:
 
-- None for the load slice. The 5.10 VM tier comes after load and attach.
+- The 5.10 VM tier comes after load and attach.
