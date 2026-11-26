@@ -35,27 +35,42 @@ const (
 	linkCreateOffKprobeMultiCook = 40
 	linkCreateOffTracingBTFID    = 16
 	linkCreateOffTracingCookie   = 24
+	linkCreateOffUprobeMultiPath = 16
+	linkCreateOffUprobeMultiOffs = 24
+	linkCreateOffUprobeMultiRef  = 32
+	linkCreateOffUprobeMultiCook = 40
+	linkCreateOffUprobeMultiCnt  = 48
+	linkCreateOffUprobeMultiFlag = 52
+	linkCreateOffUprobeMultiPID  = 56
 )
 
 // LinkCreateAttr is the BPF_LINK_CREATE view of union bpf_attr.
 //
-// Only one of TargetBTFID, PerfEventCookie, the KprobeMulti fields and
-// TracingCookie may be set: they share the anonymous union. LinkCreate fills
-// the pointer fields for the kprobe multi variant; the other callers set the
-// value fields directly.
+// Only one of TargetBTFID, PerfEventCookie, the KprobeMulti fields, the
+// UprobeMulti fields and TracingCookie may be set: they share the anonymous
+// union. LinkCreate fills the pointer fields for the kprobe multi variant and
+// LinkCreateUprobeMulti for the uprobe multi variant; the other callers set
+// the value fields directly.
 type LinkCreateAttr struct {
-	ProgFD             uint32
-	TargetFD           uint32
-	AttachType         uint32
-	Flags              uint32
-	TargetBTFID        uint32
-	PerfEventCookie    uint64
-	KprobeMultiFlags   uint32
-	KprobeMultiCnt     uint32
-	KprobeMultiSyms    uint64
-	KprobeMultiAddrs   uint64
-	KprobeMultiCookies uint64
-	TracingCookie      uint64
+	ProgFD                   uint32
+	TargetFD                 uint32
+	AttachType               uint32
+	Flags                    uint32
+	TargetBTFID              uint32
+	PerfEventCookie          uint64
+	KprobeMultiFlags         uint32
+	KprobeMultiCnt           uint32
+	KprobeMultiSyms          uint64
+	KprobeMultiAddrs         uint64
+	KprobeMultiCookies       uint64
+	TracingCookie            uint64
+	UprobeMultiPath          uint64
+	UprobeMultiOffsets       uint64
+	UprobeMultiRefCtrOffsets uint64
+	UprobeMultiCookies       uint64
+	UprobeMultiCnt           uint32
+	UprobeMultiFlags         uint32
+	UprobeMultiPID           uint32
 }
 
 // LinkKprobeMulti carries the symbol or address arrays of a kprobe multi
@@ -66,6 +81,18 @@ type LinkKprobeMulti struct {
 	Syms    []string
 	Addrs   []uint64
 	Cookies []uint64
+}
+
+// LinkUprobeMulti carries the path and arrays of a uprobe multi link. Offsets
+// holds one file offset per probe; RefCtrOffsets and Cookies, when present,
+// have one entry per offset. PID 0 probes every process.
+type LinkUprobeMulti struct {
+	Path          string
+	Offsets       []uint64
+	RefCtrOffsets []uint64
+	Cookies       []uint64
+	Flags         uint32
+	PID           uint32
 }
 
 // Marshal returns the bytes passed to bpf(BPF_LINK_CREATE, ...).
@@ -86,6 +113,14 @@ func (a *LinkCreateAttr) Marshal() []byte {
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiSyms:], a.KprobeMultiSyms)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiAddr:], a.KprobeMultiAddrs)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiCook:], a.KprobeMultiCookies)
+	case a.UprobeMultiCnt != 0:
+		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiPath:], a.UprobeMultiPath)
+		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiOffs:], a.UprobeMultiOffsets)
+		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiRef:], a.UprobeMultiRefCtrOffsets)
+		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiCook:], a.UprobeMultiCookies)
+		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiCnt:], a.UprobeMultiCnt)
+		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiFlag:], a.UprobeMultiFlags)
+		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiPID:], a.UprobeMultiPID)
 	case a.PerfEventCookie != 0:
 		binary.NativeEndian.PutUint64(buf[linkCreateOffPerfEventCookie:], a.PerfEventCookie)
 	case a.TracingCookie != 0:
@@ -141,6 +176,68 @@ func LinkCreate(attr *LinkCreateAttr, km *LinkKprobeMulti) (int, error) {
 		}
 	}
 
+	return linkCreate(attr, keeps)
+}
+
+// LinkCreateUprobeMulti calls BPF_LINK_CREATE for a uprobe multi link and
+// returns the new link descriptor. The path and arrays of um are copied into
+// the attribute and kept alive until the syscall returns. It returns EINVAL
+// when the path is empty or contains a NUL byte, when Offsets is empty, when
+// RefCtrOffsets or Cookies is set with a different length, or when attr
+// already uses another member of the union.
+func LinkCreateUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) (int, error) {
+	keeps, err := setUprobeMulti(attr, um)
+	if err != nil {
+		return -1, err
+	}
+	return linkCreate(attr, keeps)
+}
+
+// setUprobeMulti validates um, copies its path and arrays into new buffers and
+// points the uprobe multi fields of attr at them. It returns the buffers,
+// which must stay alive until the syscall returns.
+func setUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) ([][]byte, error) {
+	if attr == nil || um == nil {
+		return nil, unix.EINVAL
+	}
+	if attr.TargetBTFID != 0 || attr.PerfEventCookie != 0 || attr.TracingCookie != 0 || attr.KprobeMultiCnt != 0 {
+		return nil, unix.EINVAL
+	}
+	cnt := len(um.Offsets)
+	if cnt == 0 || len(um.RefCtrOffsets) > 0 && len(um.RefCtrOffsets) != cnt || len(um.Cookies) > 0 && len(um.Cookies) != cnt {
+		return nil, unix.EINVAL
+	}
+	if um.Path == "" {
+		return nil, unix.EINVAL
+	}
+	path, err := unix.ByteSliceFromString(um.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	offsets := u64Bytes(um.Offsets)
+	keeps := [][]byte{path, offsets}
+	attr.UprobeMultiPath = uint64(addr(path))
+	attr.UprobeMultiOffsets = uint64(addr(offsets))
+	attr.UprobeMultiCnt = uint32(cnt)
+	attr.UprobeMultiFlags = um.Flags
+	attr.UprobeMultiPID = um.PID
+	if len(um.RefCtrOffsets) > 0 {
+		buf := u64Bytes(um.RefCtrOffsets)
+		attr.UprobeMultiRefCtrOffsets = uint64(addr(buf))
+		keeps = append(keeps, buf)
+	}
+	if len(um.Cookies) > 0 {
+		buf := u64Bytes(um.Cookies)
+		attr.UprobeMultiCookies = uint64(addr(buf))
+		keeps = append(keeps, buf)
+	}
+	return keeps, nil
+}
+
+// linkCreate issues BPF_LINK_CREATE and keeps the buffers the attribute points
+// to alive until the syscall returns.
+func linkCreate(attr *LinkCreateAttr, keeps [][]byte) (int, error) {
 	fd, err := bpf(BPF_LINK_CREATE, attr.Marshal())
 	runtime.KeepAlive(keeps)
 	if err != nil {
@@ -306,6 +403,13 @@ func linkCreateFieldLayout() []fieldLayout {
 		{"kprobe_multi.cookies", linkCreateOffKprobeMultiCook, 8},
 		{"tracing.target_btf_id", linkCreateOffTracingBTFID, 4},
 		{"tracing.cookie", linkCreateOffTracingCookie, 8},
+		{"uprobe_multi.path", linkCreateOffUprobeMultiPath, 8},
+		{"uprobe_multi.offsets", linkCreateOffUprobeMultiOffs, 8},
+		{"uprobe_multi.ref_ctr_offsets", linkCreateOffUprobeMultiRef, 8},
+		{"uprobe_multi.cookies", linkCreateOffUprobeMultiCook, 8},
+		{"uprobe_multi.cnt", linkCreateOffUprobeMultiCnt, 4},
+		{"uprobe_multi.flags", linkCreateOffUprobeMultiFlag, 4},
+		{"uprobe_multi.pid", linkCreateOffUprobeMultiPID, 4},
 	}
 }
 

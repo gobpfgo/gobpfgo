@@ -101,6 +101,13 @@ int oracle_layout(void) {
 		FC(kprobe_multi.cookies),
 		FC(tracing.target_btf_id),
 		FC(tracing.cookie),
+		FC(uprobe_multi.path),
+		FC(uprobe_multi.offsets),
+		FC(uprobe_multi.ref_ctr_offsets),
+		FC(uprobe_multi.cookies),
+		FC(uprobe_multi.cnt),
+		FC(uprobe_multi.flags),
+		FC(uprobe_multi.pid),
 	};
 	static const struct oracle_field link_update_fields[] = {
 		FU(link_fd),

@@ -79,7 +79,14 @@
       {"name": "kprobe_multi.addrs", "offset": 32, "size": 8},
       {"name": "kprobe_multi.cookies", "offset": 40, "size": 8},
       {"name": "tracing.target_btf_id", "offset": 16, "size": 4},
-      {"name": "tracing.cookie", "offset": 24, "size": 8}
+      {"name": "tracing.cookie", "offset": 24, "size": 8},
+      {"name": "uprobe_multi.path", "offset": 16, "size": 8},
+      {"name": "uprobe_multi.offsets", "offset": 24, "size": 8},
+      {"name": "uprobe_multi.ref_ctr_offsets", "offset": 32, "size": 8},
+      {"name": "uprobe_multi.cookies", "offset": 40, "size": 8},
+      {"name": "uprobe_multi.cnt", "offset": 48, "size": 4},
+      {"name": "uprobe_multi.flags", "offset": 52, "size": 4},
+      {"name": "uprobe_multi.pid", "offset": 56, "size": 4}
     ]
   },
   "link_update": {

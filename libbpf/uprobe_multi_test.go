@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// gobpfgo-origin: original
+
+//go:build linux && (amd64 || arm64)
+
+package libbpf
+
+import (
+	"errors"
+	"path/filepath"
+	"syscall"
+	"testing"
+
+	"golang.org/x/sys/unix"
+)
+
+// Kernel versions, as KERNEL_VERSION values, that introduced the uprobe multi
+// link and its session attach type.
+const (
+	uprobeMultiKernel   = 6<<16 | 6<<8
+	uprobeSessionKernel = 6<<16 | 13<<8
+)
+
+// uprobeMultiCookie is the cookie the cookie case expects the program to read.
+const uprobeMultiCookie = 0x5eed_c0de_0bad_f00d
+
+func TestCheckUprobeMultiInputs(t *testing.T) {
+	const path = "/bin/true"
+	tests := []struct {
+		name    string
+		path    string
+		pattern string
+		opts    BpfUprobeMultiOpts
+		want    error
+	}{
+		{"offsets", path, "", BpfUprobeMultiOpts{Offsets: []uint64{0x10, 0x20}}, nil},
+		{"syms with optional arrays", path, "", BpfUprobeMultiOpts{
+			Syms:          []string{"a", "b"},
+			RefCtrOffsets: []uint64{1, 2},
+			Cookies:       []uint64{3, 4},
+		}, nil},
+		{"retprobe", path, "", BpfUprobeMultiOpts{Offsets: []uint64{0x10}, Retprobe: true}, nil},
+		{"session", path, "", BpfUprobeMultiOpts{Offsets: []uint64{0x10}, Session: true}, nil},
+		{"pattern alone", path, "main*", BpfUprobeMultiOpts{}, nil},
+		{"empty path", "", "", BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
+		{"empty path with pattern", "", "main*", BpfUprobeMultiOpts{}, unix.EINVAL},
+		{"no locations", path, "", BpfUprobeMultiOpts{}, unix.EINVAL},
+		{"only cookies", path, "", BpfUprobeMultiOpts{Cookies: []uint64{1}}, unix.EINVAL},
+		{"only ref_ctr_offsets", path, "", BpfUprobeMultiOpts{RefCtrOffsets: []uint64{1}}, unix.EINVAL},
+		{"syms and offsets", path, "", BpfUprobeMultiOpts{Syms: []string{"a"}, Offsets: []uint64{0x10}}, unix.EINVAL},
+		{"pattern and syms", path, "main*", BpfUprobeMultiOpts{Syms: []string{"a"}}, unix.EINVAL},
+		{"pattern and offsets", path, "main*", BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
+		{"pattern and ref_ctr_offsets", path, "main*", BpfUprobeMultiOpts{RefCtrOffsets: []uint64{1}}, unix.EINVAL},
+		{"pattern and cookies", path, "main*", BpfUprobeMultiOpts{Cookies: []uint64{1}}, unix.EINVAL},
+		{"short ref_ctr_offsets", path, "", BpfUprobeMultiOpts{Offsets: []uint64{0x10, 0x20}, RefCtrOffsets: []uint64{1}}, unix.EINVAL},
+		{"long cookies", path, "", BpfUprobeMultiOpts{Syms: []string{"a"}, Cookies: []uint64{1, 2}}, unix.EINVAL},
+		{"retprobe and session", path, "", BpfUprobeMultiOpts{Offsets: []uint64{0x10}, Retprobe: true, Session: true}, unix.EINVAL},
+		{"pattern with retprobe and session", path, "main*", BpfUprobeMultiOpts{Retprobe: true, Session: true}, unix.EINVAL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkUprobeMultiInputs(tt.path, tt.pattern, &tt.opts)
+			if tt.want == nil && err != nil {
+				t.Fatalf("checkUprobeMultiInputs = %v, want nil", err)
+			}
+			if tt.want != nil && !errors.Is(err, tt.want) {
+				t.Fatalf("checkUprobeMultiInputs = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestBpfProgramAttachUprobeMultiErrors covers the errors returned before the
+// kernel is called. The program descriptor is a number no process has open,
+// so a case that wrongly reached BPF_LINK_CREATE would fail with EBADF or
+// EPERM instead of the expected errno.
+func TestBpfProgramAttachUprobeMultiErrors(t *testing.T) {
+	loaded := &BpfProgram{name: "fake", fd: 1 << 30}
+	missing := filepath.Join(t.TempDir(), "missing")
+	tests := []struct {
+		name    string
+		prog    *BpfProgram
+		path    string
+		pattern string
+		opts    *BpfUprobeMultiOpts
+		want    syscall.Errno
+	}{
+		{"nil program", nil, funcTestObject, "", &BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
+		{"unloaded program", &BpfProgram{name: "fake", fd: -1}, funcTestObject, "", &BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
+		{"nil options", loaded, funcTestObject, "", nil, unix.EINVAL},
+		{"pattern", loaded, funcTestObject, "handle_*", nil, unix.EOPNOTSUPP},
+		{"pattern with retprobe", loaded, funcTestObject, "handle_*", &BpfUprobeMultiOpts{Retprobe: true}, unix.EOPNOTSUPP},
+		{"invalid options before pattern", loaded, funcTestObject, "handle_*", &BpfUprobeMultiOpts{Cookies: []uint64{1}}, unix.EINVAL},
+		{"missing symbol", loaded, funcTestObject, "", &BpfUprobeMultiOpts{Syms: []string{funcTestName, "no_such_function"}}, unix.ENOENT},
+		{"missing binary", loaded, missing, "", &BpfUprobeMultiOpts{Syms: []string{funcTestName}}, unix.ENOENT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			link, err := BpfProgramAttachUprobeMulti(tt.prog, 0, tt.path, tt.pattern, tt.opts)
+			if link != nil {
+				BpfLinkDestroy(link)
+				t.Fatal("attach returned a link")
+			}
+			var libErr *Error
+			if !errors.As(err, &libErr) || libErr.Op != "bpf_program__attach_uprobe_multi" {
+				t.Fatalf("attach error = %v, want a bpf_program__attach_uprobe_multi error", err)
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("attach error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestUprobeMultiOffsets(t *testing.T) {
+	want, err := findFuncOffset(funcTestObject, funcTestName)
+	if err != nil {
+		t.Fatalf("findFuncOffset: %v", err)
+	}
+
+	got, err := uprobeMultiOffsets(funcTestObject, &BpfUprobeMultiOpts{Syms: []string{funcTestName, funcTestName}})
+	if err != nil {
+		t.Fatalf("uprobeMultiOffsets(syms): %v", err)
+	}
+	if len(got) != 2 || got[0] != want || got[1] != want {
+		t.Fatalf("symbol offsets = %#x, want [%#x %#x]", got, want, want)
+	}
+
+	explicit := []uint64{0x10, 0x20, 0x30}
+	got, err = uprobeMultiOffsets(funcTestObject, &BpfUprobeMultiOpts{Offsets: explicit})
+	if err != nil {
+		t.Fatalf("uprobeMultiOffsets(offsets): %v", err)
+	}
+	if len(got) != len(explicit) || got[0] != explicit[0] || got[1] != explicit[1] || got[2] != explicit[2] {
+		t.Fatalf("explicit offsets = %#x, want %#x", got, explicit)
+	}
+}
+
+// uprobeMultiCase is one root attach case. The program is retyped as a
+// uprobe multi program before the load, attached at uprobeTarget's offset in
+// the test binary, and must leave want in the map, or any nonzero count when
+// want is zero.
+type uprobeMultiCase struct {
+	name       string
+	object     string
+	program    string
+	attachType BpfAttachType
+	minKernel  uint32
+	opts       BpfUprobeMultiOpts
+	mapName    string
+	want       uint64
+}
+
+func TestBpfProgramAttachUprobeMulti(t *testing.T) {
+	cases := []uprobeMultiCase{
+		{name: "uprobe", object: "uprobe.bpf.o", program: "handle_uprobe", attachType: BPF_TRACE_UPROBE_MULTI, minKernel: uprobeMultiKernel, mapName: "counts"},
+		{name: "uretprobe", object: "uprobe.bpf.o", program: "handle_uretprobe", attachType: BPF_TRACE_UPROBE_MULTI, minKernel: uprobeMultiKernel,
+			opts: BpfUprobeMultiOpts{Retprobe: true}, mapName: "counts"},
+		{name: "session", object: "uprobe.bpf.o", program: "handle_uprobe", attachType: BPF_TRACE_UPROBE_SESSION, minKernel: uprobeSessionKernel,
+			opts: BpfUprobeMultiOpts{Session: true}, mapName: "counts"},
+		{name: "cookie", object: "cookie.bpf.o", program: "handle_cookie", attachType: BPF_TRACE_UPROBE_MULTI, minKernel: uprobeMultiKernel,
+			opts: BpfUprobeMultiOpts{Cookies: []uint64{uprobeMultiCookie}}, mapName: "cookies", want: uprobeMultiCookie},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			runUprobeMultiCase(t, c)
+		})
+	}
+}
+
+// runUprobeMultiCase skips before the load on kernels older than the case
+// needs: they reject the attach type with EINVAL, and before 5.15 the
+// verifier also rejects the cookie helper. A newer kernel built without
+// uprobes rejects the link with EOPNOTSUPP, which also skips; any other error,
+// EINVAL included, means the attribute is wrong and fails.
+func runUprobeMultiCase(t *testing.T, c uprobeMultiCase) {
+	if version := getKernelVersion(); version < c.minKernel {
+		t.Skipf("kernel version %#x predates the link type (%#x)", version, c.minKernel)
+	}
+	obj, prog := loadUprobeMultiObject(t, "../testdata/progs/"+c.object, c.program, c.attachType)
+	defer BpfObjectClose(obj)
+
+	opts := c.opts
+	opts.Offsets = []uint64{uprobeTargetOffset(t)}
+	link, err := BpfProgramAttachUprobeMulti(prog, 0, "/proc/self/exe", "", &opts)
+	if err != nil {
+		if errors.Is(err, unix.EOPNOTSUPP) {
+			t.Skipf("uprobe multi links are not supported by this kernel: %v", err)
+		}
+		t.Fatalf("attach: %v", err)
+	}
+	if fd := BpfLinkFD(link); fd < 0 {
+		t.Fatalf("link fd = %d", fd)
+	}
+
+	uprobeTarget()
+
+	got := mapValue(t, obj, c.mapName)
+	if c.want != 0 && got != c.want {
+		t.Fatalf("%s value = %#x, want %#x", c.mapName, got, c.want)
+	}
+	if c.want == 0 && got == 0 {
+		t.Fatalf("%s value = 0, want a nonzero count", c.mapName)
+	}
+
+	if err := BpfLinkDetach(link); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	if fd := BpfLinkFD(link); fd != -1 {
+		t.Fatalf("link fd after detach = %d, want -1", fd)
+	}
+	BpfLinkDestroy(link)
+}
+
+// loadUprobeMultiObject opens path, retypes the program name as a kprobe
+// program with the expected attach type attachType, and loads the object. The
+// kernel creates uprobe multi links only for such programs. The section table
+// has no uprobe.multi entries and the package has no program type setters
+// yet, so the test sets the fields the way bpf_program__set_type and
+// bpf_program__set_expected_attach_type would before the load.
+func loadUprobeMultiObject(t *testing.T, path, name string, attachType BpfAttachType) (*BpfObject, *BpfProgram) {
+	t.Helper()
+
+	obj, err := BpfObjectOpenFile(path, nil)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	prog := BpfObjectFindProgramByName(obj, name)
+	if prog == nil {
+		BpfObjectClose(obj)
+		t.Fatalf("program %q not found in %s", name, path)
+	}
+	prog.progType = BPF_PROG_TYPE_KPROBE
+	prog.expectedAttachType = attachType
+
+	if err := BpfObjectLoad(obj); err != nil {
+		BpfObjectClose(obj)
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+			t.Skipf("bpf() not permitted: %v", err)
+		}
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return obj, prog
+}
