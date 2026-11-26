@@ -6,7 +6,7 @@ Repository: [gobpfgo/gobpfgo](https://github.com/gobpfgo/gobpfgo).
 
 A pure-Go port of libbpf, close to 1:1 in behavior and API shape, with no cgo and no unsafe.
 
-Status: phase 1. Object open, load, map lookup, kprobe attach and map/program pinning are ported and tested on 5.10 and 6.18; object pinning and reuse come next.
+Status: phase 1. Object open, load, map lookup, kprobe attach and map, program and object pinning are ported and tested on 5.10 and 6.18; map reuse comes next.
 
 ## Non-goals
 
