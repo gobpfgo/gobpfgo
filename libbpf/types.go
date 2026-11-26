@@ -107,6 +107,8 @@ const (
 	BPF_PERF_EVENT           BpfAttachType = 41
 	BPF_TRACE_KPROBE_MULTI   BpfAttachType = 42
 	BPF_NETFILTER            BpfAttachType = 45
+	BPF_TRACE_UPROBE_MULTI   BpfAttachType = 48
+	BPF_TRACE_UPROBE_SESSION BpfAttachType = 57
 )
 
 // BpfFuncID is a helper id from enum bpf_func_id.
@@ -126,3 +128,7 @@ const (
 
 // BPF_F_SLEEPABLE marks a sleepable program when passed in prog_flags.
 const BPF_F_SLEEPABLE uint32 = 1 << 4
+
+// BPF_F_UPROBE_MULTI_RETURN makes a uprobe multi link call the program when
+// the probed functions return.
+const BPF_F_UPROBE_MULTI_RETURN uint32 = 1 << 0

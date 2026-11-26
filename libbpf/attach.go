@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_uprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
+// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_uprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_uprobe_multi, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
 
 //go:build linux && (amd64 || arm64)
 
 package libbpf
 
 import (
+	"debug/elf"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -70,6 +72,21 @@ type BpfKprobeMultiOpts struct {
 	Addrs    []uint64
 	Cookies  []uint64
 	Retprobe bool
+}
+
+// BpfUprobeMultiOpts are the optional settings of
+// BpfProgramAttachUprobeMulti. Exactly one of Syms and Offsets selects the
+// probe locations, and its length is the probe count. Syms are function names
+// resolved to file offsets in the binary; Offsets are file offsets used as
+// given. RefCtrOffsets and Cookies are optional and, when set, have one entry
+// per probe. Retprobe and Session are mutually exclusive.
+type BpfUprobeMultiOpts struct {
+	Syms          []string
+	Offsets       []uint64
+	RefCtrOffsets []uint64
+	Cookies       []uint64
+	Retprobe      bool
+	Session       bool
 }
 
 // BpfTraceOpts are the optional settings of BpfProgramAttachTraceOpts.
@@ -399,6 +416,143 @@ func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*B
 		return nil, &Error{Op: op, Errno: errno}
 	}
 	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// BpfProgramAttachUprobeMulti attaches a loaded program to several locations
+// in binaryPath through one uprobe multi link, and returns a link the caller
+// releases with BpfLinkDestroy. The link pins, unpins and detaches like the
+// other BPF links.
+//
+// opts selects the locations with Syms or Offsets and may add one reference
+// counter offset and one BPF cookie per location. Retprobe calls the program
+// when the functions return; Session calls it on entry and, unless the entry
+// run returns nonzero, on return. pid 0 probes the calling process, a
+// positive pid probes that process, and a negative pid probes every process.
+//
+// The kernel must support uprobe multi links (Linux 6.6 or newer, 6.13 for
+// Session), and the program must have been loaded with the expected attach
+// type BPF_TRACE_UPROBE_MULTI, or BPF_TRACE_UPROBE_SESSION for Session; the
+// kernel rejects other programs and older kernels with EINVAL.
+//
+// funcPattern, the function-name pattern alternative to opts, is not
+// supported: a non-empty pattern returns EOPNOTSUPP after the input checks.
+// The call returns EINVAL for an unloaded program, an empty binaryPath, a
+// pattern combined with Syms, Offsets, RefCtrOffsets or Cookies, no locations
+// at all, both Syms and Offsets, RefCtrOffsets or Cookies whose length is not
+// the probe count, or both Retprobe and Session. A symbol missing from
+// binaryPath returns ENOENT.
+func BpfProgramAttachUprobeMulti(prog *BpfProgram, pid int, binaryPath string, funcPattern string, opts *BpfUprobeMultiOpts) (*BpfLink, error) {
+	const op = "bpf_program__attach_uprobe_multi"
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
+	}
+	if opts == nil {
+		opts = &BpfUprobeMultiOpts{}
+	}
+	if err := checkUprobeMultiInputs(binaryPath, funcPattern, opts); err != nil {
+		return nil, attachErr(op, err)
+	}
+	if funcPattern != "" {
+		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+	offsets, err := uprobeMultiOffsets(binaryPath, opts)
+	if err != nil {
+		return nil, attachErr(op, err)
+	}
+
+	attachType := BPF_TRACE_UPROBE_MULTI
+	if opts.Session {
+		attachType = BPF_TRACE_UPROBE_SESSION
+	}
+	um := &sys.LinkUprobeMulti{
+		Path:          binaryPath,
+		Offsets:       offsets,
+		RefCtrOffsets: opts.RefCtrOffsets,
+		Cookies:       opts.Cookies,
+	}
+	if opts.Retprobe {
+		um.Flags = BPF_F_UPROBE_MULTI_RETURN
+	}
+	if pid == 0 {
+		pid = os.Getpid()
+	}
+	if pid > 0 {
+		um.PID = uint32(pid)
+	}
+
+	attr := &sys.LinkCreateAttr{
+		ProgFD:     uint32(prog.fd),
+		AttachType: uint32(attachType),
+	}
+	fd, err := sys.LinkCreateUprobeMulti(attr, um)
+	if err != nil {
+		return nil, attachErr(op, err)
+	}
+	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// checkUprobeMultiInputs applies the uprobe multi input rules: a path is
+// required; a pattern excludes every explicit array; without a pattern,
+// exactly one of Syms and Offsets is set and the optional arrays match its
+// length; Retprobe excludes Session.
+func checkUprobeMultiInputs(binaryPath, funcPattern string, opts *BpfUprobeMultiOpts) error {
+	cnt := len(opts.Syms)
+	if cnt == 0 {
+		cnt = len(opts.Offsets)
+	}
+
+	if binaryPath == "" {
+		return unix.EINVAL
+	}
+	if funcPattern == "" && cnt == 0 {
+		return unix.EINVAL
+	}
+	if funcPattern != "" {
+		if cnt != 0 || len(opts.RefCtrOffsets) != 0 || len(opts.Cookies) != 0 {
+			return unix.EINVAL
+		}
+	} else {
+		if len(opts.Syms) != 0 && len(opts.Offsets) != 0 {
+			return unix.EINVAL
+		}
+		if !optionalArrayLen(len(opts.RefCtrOffsets), cnt) || !optionalArrayLen(len(opts.Cookies), cnt) {
+			return unix.EINVAL
+		}
+	}
+	if opts.Retprobe && opts.Session {
+		return unix.EINVAL
+	}
+	return nil
+}
+
+// optionalArrayLen reports whether an optional per-probe array of length n is
+// absent or has one entry per probe.
+func optionalArrayLen(n, cnt int) bool {
+	return n == 0 || n == cnt
+}
+
+// uprobeMultiOffsets returns the probe offsets: Offsets as given, or the file
+// offset of each name in Syms, resolved in binaryPath in order.
+func uprobeMultiOffsets(binaryPath string, opts *BpfUprobeMultiOpts) ([]uint64, error) {
+	if len(opts.Syms) == 0 {
+		return opts.Offsets, nil
+	}
+
+	f, err := elf.Open(binaryPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	offsets := make([]uint64, len(opts.Syms))
+	for i, sym := range opts.Syms {
+		offset, err := elfFuncOffset(f, binaryPath, sym)
+		if err != nil {
+			return nil, err
+		}
+		offsets[i] = offset
+	}
+	return offsets, nil
 }
 
 // BpfProgramAttachTrace attaches a loaded fentry, fexit, fmod_ret or tp_btf

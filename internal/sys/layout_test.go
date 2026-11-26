@@ -6,6 +6,8 @@
 package sys
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"runtime"
@@ -165,4 +167,67 @@ func TestMapInfoLayout(t *testing.T) {
 func TestProgInfoLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "prog_info", f.ProgInfo, ProgInfoSize, progInfoFieldLayout())
+}
+
+// TestLinkCreateUprobeMultiAttrBytes places known values at the offsets and
+// sizes libbpf's headers report for the uprobe multi fields and requires
+// Marshal to produce exactly those bytes, with every other byte zero.
+func TestLinkCreateUprobeMultiAttrBytes(t *testing.T) {
+	f := loadLayoutFixture(t)
+
+	attr := &LinkCreateAttr{
+		ProgFD:                   7,
+		AttachType:               48,
+		UprobeMultiPath:          0x1111111111111111,
+		UprobeMultiOffsets:       0x2222222222222222,
+		UprobeMultiRefCtrOffsets: 0x3333333333333333,
+		UprobeMultiCookies:       0x4444444444444444,
+		UprobeMultiCnt:           3,
+		UprobeMultiFlags:         1,
+		UprobeMultiPID:           4242,
+	}
+	values := map[string]uint64{
+		"prog_fd":                      7,
+		"attach_type":                  48,
+		"uprobe_multi.path":            0x1111111111111111,
+		"uprobe_multi.offsets":         0x2222222222222222,
+		"uprobe_multi.ref_ctr_offsets": 0x3333333333333333,
+		"uprobe_multi.cookies":         0x4444444444444444,
+		"uprobe_multi.cnt":             3,
+		"uprobe_multi.flags":           1,
+		"uprobe_multi.pid":             4242,
+	}
+
+	want := fixtureBytes(t, f.LinkCreate, values)
+	if got := attr.Marshal(); !bytes.Equal(got, want) {
+		t.Fatalf("link_create bytes:\n got %x\nwant %x", got, want)
+	}
+}
+
+// fixtureBytes builds an attribute of block.AttrSize bytes with each named
+// value written at the offset and size the fixture records for that field.
+func fixtureBytes(t *testing.T, block fixtureBlock, values map[string]uint64) []byte {
+	t.Helper()
+
+	buf := make([]byte, block.AttrSize)
+	written := 0
+	for _, field := range block.Fields {
+		value, ok := values[field.Name]
+		if !ok {
+			continue
+		}
+		switch field.Size {
+		case 4:
+			binary.NativeEndian.PutUint32(buf[field.Offset:], uint32(value))
+		case 8:
+			binary.NativeEndian.PutUint64(buf[field.Offset:], value)
+		default:
+			t.Fatalf("field %s has unsupported size %d", field.Name, field.Size)
+		}
+		written++
+	}
+	if written != len(values) {
+		t.Fatalf("fixture has %d of the %d fields the test writes", written, len(values))
+	}
+	return buf
 }
