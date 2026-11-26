@@ -93,6 +93,19 @@ static void print_layout(void) {
 		F(btf_flags),
 		F(btf_token_fd),
 	};
+	static const struct field prog_fields[] = {
+		F(prog_type),
+		F(insn_cnt),
+		F(insns),
+		F(license),
+		F(log_level),
+		F(log_size),
+		F(log_buf),
+		F(prog_flags),
+		F(prog_name),
+		F(expected_attach_type),
+		F(prog_btf_fd),
+	};
 	struct utsname uts;
 
 	if (uname(&uts) != 0) {
@@ -109,7 +122,8 @@ static void print_layout(void) {
 	json_string(uts.release);
 	printf(",\n");
 	print_field_block("map_create", map_fields, ARRAY_SIZE(map_fields), offsetofend(union bpf_attr, excl_prog_hash_size), true);
-	print_field_block("btf_load", btf_fields, ARRAY_SIZE(btf_fields), offsetofend(union bpf_attr, btf_token_fd), false);
+	print_field_block("btf_load", btf_fields, ARRAY_SIZE(btf_fields), offsetofend(union bpf_attr, btf_token_fd), true);
+	print_field_block("prog_load", prog_fields, ARRAY_SIZE(prog_fields), offsetofend(union bpf_attr, keyring_id), false);
 	printf("}\n");
 }
 

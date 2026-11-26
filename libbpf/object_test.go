@@ -136,6 +136,33 @@ func TestBpfObjectOpenKprobe(t *testing.T) {
 	}
 }
 
+func TestBpfObjectLoad(t *testing.T) {
+	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("BpfObjectOpenFile: %v", err)
+	}
+	if err := BpfObjectLoad(obj); err != nil {
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+			t.Skipf("bpf() not permitted: %v", err)
+		}
+		t.Fatalf("BpfObjectLoad: %v", err)
+	}
+	defer BpfObjectClose(obj)
+
+	m := BpfObjectNextMap(obj, nil)
+	if m == nil || BpfMapFD(m) < 0 {
+		t.Fatalf("map fd = %d", BpfMapFD(m))
+	}
+	p := BpfObjectNextProgram(obj, nil)
+	if p == nil || BpfProgramFD(p) < 0 {
+		t.Fatalf("program fd = %d", BpfProgramFD(p))
+	}
+
+	if err := BpfObjectLoad(obj); err == nil {
+		t.Fatal("second load succeeded")
+	}
+}
+
 func TestBpfObjectOpenMem(t *testing.T) {
 	data, err := os.ReadFile("../testdata/progs/kprobe.bpf.o")
 	if err != nil {

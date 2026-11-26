@@ -24,9 +24,9 @@ Scenarios:
 
 The oracle is development-only. Tests consume checked-in JSON and never need C, clang or libbpf.
 
-`layout` covers `BPF_MAP_CREATE` and `BPF_BTF_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open` is implemented for the kprobe object and is linked against the pinned libbpf. `load` has an oracle fixture generated with `sudo`; the Go load consumer is next. The remaining scenarios land with the slice that needs them.
+`layout` covers `BPF_MAP_CREATE`, `BPF_BTF_LOAD` and `BPF_PROG_LOAD`; `attr` covers `BPF_MAP_CREATE`. `open` is implemented for the kprobe object and is linked against the pinned libbpf. `load` has an oracle fixture generated with `sudo`; the Go object load is in place and the loaded info comparison is next. The remaining scenarios land with the slice that needs them.
 
-The BTF load test runs under root and skips with `EPERM`; the DATASEC fixup is tested in the BTF package.
+The BTF load test and the object load test run under root and skip with `EPERM`; the DATASEC fixup and the attribute layouts run in CI.
 
 The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario will compare that same object with libbpf.
 

@@ -29,6 +29,9 @@ type BpfObject struct {
 	programs []*BpfProgram
 	btf      *btf.Spec
 	elf      *elf.Object
+	license  string
+	btfFD    int
+	loaded   bool
 	closed   bool
 }
 
@@ -178,6 +181,8 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 		programs: programs,
 		btf:      spec,
 		elf:      e,
+		license:  e.License,
+		btfFD:    -1,
 	}, nil
 }
 
@@ -228,7 +233,7 @@ func parseMaps(spec *btf.Spec) ([]*BpfMap, error) {
 			return nil, fmt.Errorf("map %s has kind %v, want struct", v.Name, st.Kind)
 		}
 
-		m := &BpfMap{name: v.Name}
+		m := &BpfMap{name: v.Name, fd: -1}
 		if err := fillMapDef(spec, st, m); err != nil {
 			return nil, fmt.Errorf("map %s: %w", v.Name, err)
 		}
@@ -340,6 +345,7 @@ func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
 			sectionName:        p.Name,
 			insns:              p.Insns,
 			relocs:             p.Relocs,
+			fd:                 -1,
 		})
 	}
 	return programs, nil
@@ -373,17 +379,40 @@ func errnoFromError(err error) syscall.Errno {
 	return unix.EINVAL
 }
 
-// BpfObjectClose releases the object and invalidates its maps and programs.
-// It is safe to call more than once and on a nil object.
+// BpfObjectClose releases the object, closes any loaded descriptors and
+// invalidates its maps and programs. It is safe to call more than once and on
+// a nil object.
 func BpfObjectClose(obj *BpfObject) {
 	if obj == nil {
 		return
 	}
+	obj.closeLoadFDs()
 	obj.closed = true
 	obj.maps = nil
 	obj.programs = nil
 	obj.btf = nil
 	obj.elf = nil
+}
+
+// closeLoadFDs closes the BTF, map and program descriptors created by
+// BpfObjectLoad. It is idempotent and ignores close errors.
+func (obj *BpfObject) closeLoadFDs() {
+	if obj.btfFD >= 0 {
+		unix.Close(obj.btfFD)
+		obj.btfFD = -1
+	}
+	for _, m := range obj.maps {
+		if m.fd >= 0 {
+			unix.Close(m.fd)
+			m.fd = -1
+		}
+	}
+	for _, p := range obj.programs {
+		if p.fd >= 0 {
+			unix.Close(p.fd)
+			p.fd = -1
+		}
+	}
 }
 
 // BpfObjectName returns the object name used in diagnostics and pin paths.
