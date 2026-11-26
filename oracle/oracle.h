@@ -31,6 +31,9 @@ int oracle_attr(void);
 int oracle_open(const char *path);
 int oracle_load(const char *path);
 int oracle_attach(const char *path);
+int oracle_dump(const char *path);
+int oracle_dump_decl(const char *path);
+int oracle_dump_decl_strip(const char *path);
 int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
 
