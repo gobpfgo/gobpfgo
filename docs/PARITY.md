@@ -15,9 +15,9 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | Programs | `libbpf.c` | `program.go` | 1 | in progress (open, load) |
 | Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `attach.go`, `perf.go`, `elf_func.go`, `attach_btf.go` | 1 | parity tested (kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, LSM, raw tracepoint, kprobe multi, perf event and auto attach); fmod_ret and tp_btf use the same tracing path and are ported but not fixture-tested; cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT not started |
 | Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go`, `link.go` | 1 | parity tested (map, program, object and link pin/unpin; map reuse) |
-| BTF | `btf.c` | `internal/btf` | 2 | in progress (parser and split module merge; BTF dump separate) |
+| BTF | `btf.c` | `internal/btf` | 2 | parity tested (parser, split module merge, alignment; typed-data printer separate) |
 | CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | parity tested (access specs, field/flexible array/type/enum relocations, vmlinux and split module BTFs, no-target poison; `TYPE_MATCHES` rejected like libbpf's normal path) |
-| BTF to C | `btf_dump.c` | `btf_dump.go` | 2 | not started |
+| BTF to C | `btf_dump.c` | `btf_dump.go`, `btf_dump_def.go`, `btf_dump_decl.go` | 2 | parity tested (type definitions and declarators, exact text; typed-data printer not started) |
 | Linker | `linker.c` | `linker.go` | 3 | not started |
 | USDT | `usdt.c` | `usdt.go` | 3 | not started |
 | Ring buffer | `ringbuf.c` | `ringbuf.go` | 3 | not started |
@@ -52,7 +52,8 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | CO-RE load path | live kernel BTF + root load test | parity tested (`pt_regs.sp`, 5.10 and 6.18) |
 | CO-RE module BTFs | synthetic module candidate + split merge test | parity tested (5.10 and 6.18) |
 | CO-RE missing target | guarded load test | parity tested (`core_missing.bpf.o`, 5.10 and 6.18) |
-| `btf_dump` text | exact text diff | not started |
+| `btf_dump` type and declaration text | exact text diff (`dump`, `dump-decl`, `dump-decl-strip`) | parity tested (type zoo; 5.10 and 6.18) |
+| `btf_dump` typed data | exact text diff | not started |
 | 5.10 and newer | VM matrix | parity tested (5.10.0-46-cloud-amd64 and 6.18.63-3-lts; arm64 not run) |
 
 The C oracle lives in `oracle/`, is built out of tree, and is never part of `go build`.

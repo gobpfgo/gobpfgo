@@ -44,7 +44,7 @@ Phase 1, in progress.
 - `BpfMapReuseFD` makes an object map use an existing kernel map. The load path skips creating it, the relocation resolves maps by ELF symbol after the reused name replaces the object name, and the root test proves the program increments the reused map on 5.10 and 6.18 ([`#22`](https://github.com/gobpfgo/gobpfgo/pull/22)).
 - The attach surface now covers kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi and perf event links, plus automatic attach from the section name. Links pin, unpin, open and update, and BPF cookies reach the program on the perf link and kprobe multi paths. The `attach` oracle runs twelve cases and the root table test repeats them; all pass on 6.18, and on 5.10 the kprobe multi and cookie cases skip because the kernel does not support them. The LSM test skips unless the BPF LSM is active ([`#29`](https://github.com/gobpfgo/gobpfgo/pull/29)).
 
-Phase 2, in progress.
+Phase 2 done.
 
 - `internal/btf.ParseExt` reads the `.BTF.ext` CO-RE records; `ParseCoreSpec` resolves field, type and enum access specs against the local BTF, matching libbpf's spec for the test object (`0:1`, bit offset 32, two accessors). The `core` oracle scenario checks it and runs in CI and on 5.10 ([`#23`](https://github.com/gobpfgo/gobpfgo/pull/23)).
 - `CalcCoreRelo` matches a field access against a target BTF and computes the local and target values; `patchCoreInsn` rewrites the load instruction. The `core-reloc` oracle scenario matches libbpf when `second` moves from offset 4 to 8 in the target ([`#24`](https://github.com/gobpfgo/gobpfgo/pull/24)).
@@ -52,7 +52,8 @@ Phase 2, in progress.
 - The `core-reloc` oracle now covers field offsets, type ids, type existence, type size and enum values; the engine adds type/enum target matching and 64-bit immediate patching. The Go result and patched instructions match libbpf on 5.10 and 6.18 ([`#26`](https://github.com/gobpfgo/gobpfgo/pull/26)).
 - Flexible array elements resolve in both the local spec and the target; the `core_flex.values[0]` relocation matches libbpf (offset 4 to 8) on 5.10 and 6.18 ([`#27`](https://github.com/gobpfgo/gobpfgo/pull/27)).
 - The load path searches vmlinux and the split module BTFs, merges module types with the vmlinux base, detects ambiguous candidates, and poisons instructions with no target instead of failing the load. `core_missing.bpf.o` loads because the poisoned access is guarded, and `TestLoadKernelBTFs` verifies the split merge. CO-RE is done for libbpf's normal path on 5.10 and 6.18. `TYPE_MATCHES` is rejected, matching libbpf's normal `bpf_core_parse_spec` ([`#28`](https://github.com/gobpfgo/gobpfgo/pull/28)).
-- Next: BTF dump, the remaining phase 2 item.
+- `BtfParse`, `BtfNew`, `BpfObjectBTF`, `BtfDumpNew`, `BtfDumpDumpType` and `BtfDumpEmitTypeDecl` emit libbpf's C declarations. The `dump`, `dump-decl` and `dump-decl-strip` oracle scenarios compare exact text from a type-zoo object: structs, unions, enums, enum64, bitfields, packed and flexible structs, anonymous members, function pointers, arrays, typedefs, forward declarations, type tags and declaration tags. Phase 2 is done ([`#33`](https://github.com/gobpfgo/gobpfgo/pull/33)).
+- Next: phase 3, starting with the feature and probe matrix and the ring buffer.
 
 Open:
 
@@ -61,4 +62,5 @@ Open:
 - LSM attach is implemented (`BpfProgramAttachLsm`, `lsm/` and `lsm.s/`, `bpf_lsm_` target resolution) and fires on 6.18. The 5.10 VM has `CONFIG_BPF_LSM=y` but no `bpf` in its boot `lsm=` list, so the case skips. After rebooting it with `lsm=lockdown,capability,yama,apparmor,tomoyo,bpf`, confirm `/sys/kernel/security/lsm` contains `bpf` and run `sudo go test -v -run 'TestBpfProgramAttachTypes/lsm' ./libbpf`.
 - Attach targets in kernel modules (`fentry/module:function`) are not resolved.
 - `BpfLinkUpdateProgram` is implemented and layout checked, but no attach type in this surface supports update on the tested kernels, so its success path is unexercised.
-- BTF dump and the remaining CO-RE `TYPE_MATCHES` kind (rejected by libbpf's normal path) are not ported.
+- The remaining CO-RE `TYPE_MATCHES` kind is rejected by libbpf's normal path and is not ported.
+- The BTF typed-data pretty-printer (`btf_dump__dump_type_data`) is not part of the type dump slice and is not ported.

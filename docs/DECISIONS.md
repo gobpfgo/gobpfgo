@@ -68,6 +68,10 @@ Irreversible choices, with context and consequences. A new decision supersedes a
 
 2026-11-26. `BpfProgramAttachKprobeMulti` passes its symbol names to `BPF_LINK_CREATE` in the `kprobe_multi.syms` array and lets the kernel resolve them. libbpf's userspace pattern matching over `available_filter_functions`, including wildcards and duplicate detection, is not ported. Exact names are the supported form until a consumer needs patterns. Recorded in [DEVIATIONS.md](DEVIATIONS.md) item 19.
 
+## D-017: BTF dump covers C declarations, not typed data
+
+2026-11-26. The dump port implements `btf_dump__new`, `btf_dump__dump_type` and `btf_dump__emit_type_decl`, which produce the C declarations and the exact text `bpftool btf dump format c` relies on. The typed-data pretty-printer `btf_dump__dump_type_data` is a separate value formatter and is not ported; `BtfDump` emits types only. The output is compared byte for byte against the C library on a type-zoo object.
+
 ## Open decisions
 
 None. The `reflect` address helper is accepted in D-003.
