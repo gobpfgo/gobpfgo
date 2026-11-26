@@ -36,6 +36,7 @@ int oracle_dump_decl(const char *path);
 int oracle_dump_decl_strip(const char *path);
 int oracle_ringbuf(const char *path);
 int oracle_perfbuf(const char *path);
+int oracle_probe(void);
 int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
 
