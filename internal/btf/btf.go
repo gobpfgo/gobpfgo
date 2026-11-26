@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original BTF parser
+// libbpf-source: src/btf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind
 
-// Package btf parses the BTF wire format used by BPF object files.
+// Package btf parses the BTF wire format used by BPF ELF objects.
+//
+// A Spec holds the header, the type table and the string table from a .BTF
+// section. Type IDs index the table, with ID 0 reserved for void. Parse
+// validates the header, the section bounds and every type record; it does not
+// load anything into the kernel.
+//
+// The type model is a Go value per type with a kind-specific payload. It stays
+// close to the wire format so later stages such as CO-RE can walk it without
+// re-parsing.
 package btf
 
 import (
@@ -10,7 +22,8 @@ import (
 	"fmt"
 )
 
-// Header is the BTF header.
+// Header is the BTF header. The type and string offsets are relative to the
+// end of the header, not to the start of the blob.
 type Header struct {
 	Magic   uint16
 	Version uint8
@@ -22,7 +35,8 @@ type Header struct {
 	StrLen  uint32
 }
 
-// Spec is a parsed BTF object.
+// Spec is a parsed BTF object. Types[0] is the void placeholder, so a type ID
+// is also its index in Types. Strings is the NUL-separated string table.
 type Spec struct {
 	Header    Header
 	ByteOrder binary.ByteOrder
@@ -30,8 +44,11 @@ type Spec struct {
 	Strings   []byte
 }
 
-// Parse parses a BTF blob. Types[0] is the void placeholder, so a type ID is
-// also its index in Types.
+// Parse validates and decodes a BTF blob. order is the byte order of the ELF
+// object that contains the blob.
+//
+// Parse returns an error for a bad magic, an unsupported version, sections
+// outside the blob, truncated type records or an unknown type kind.
 func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 	if len(data) < 24 {
 		return nil, fmt.Errorf("btf: header too short: %d bytes", len(data))
@@ -253,7 +270,8 @@ func (s *Spec) resolveNames(t *Type) error {
 	return nil
 }
 
-// String returns the NUL-terminated string at off.
+// String returns the NUL-terminated string at off. Offset 0 is the empty
+// string; an out-of-range or unterminated string is an error.
 func (s *Spec) String(off uint32) (string, error) {
 	if off == 0 {
 		return "", nil
@@ -269,7 +287,8 @@ func (s *Spec) String(off uint32) (string, error) {
 	return string(b[:i]), nil
 }
 
-// TypeByID returns the type with the given ID. ID 0 is the void type.
+// TypeByID returns the type with id. ID 0 is the void placeholder; an
+// out-of-range ID is an error.
 func (s *Spec) TypeByID(id uint32) (*Type, error) {
 	if id >= uint32(len(s.Types)) {
 		return nil, fmt.Errorf("btf: type id %d out of range", id)
@@ -277,7 +296,8 @@ func (s *Spec) TypeByID(id uint32) (*Type, error) {
 	return &s.Types[id], nil
 }
 
-// Find returns the first type with the given name and kind, or nil.
+// Find returns the first type with the given name and kind, or nil. Names are
+// compared exactly; an empty name matches only empty names.
 func (s *Spec) Find(name string, kind Kind) *Type {
 	for i := 1; i < len(s.Types); i++ {
 		if s.Types[i].Name == name && s.Types[i].Kind == kind {
@@ -287,7 +307,8 @@ func (s *Spec) Find(name string, kind Kind) *Type {
 	return nil
 }
 
-// Member returns the named member of a struct or union, or nil.
+// Member returns the named member of a struct or union, or nil. It is a
+// convenience for the map definition parser.
 func (s *Spec) Member(t *Type, name string) *Member {
 	if t == nil {
 		return nil

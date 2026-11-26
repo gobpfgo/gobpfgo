@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original
 
 package elf
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/libbpf.c at 4f05fb0.
+// libbpf-source: src/libbpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object__init_maps, bpf_object_init_progs
 
 package libbpf
 
@@ -17,7 +19,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BpfObject is an opened BPF object. It mirrors struct bpf_object.
+// BpfObject is an opened BPF object. It owns the parsed ELF and BTF data and
+// the map and program lists. Opening does not touch the kernel; the load step
+// adds the descriptors.
 type BpfObject struct {
 	name     string
 	path     string
@@ -28,36 +32,61 @@ type BpfObject struct {
 	closed   bool
 }
 
-// BpfObjectOpenOpts mirrors struct bpf_object_open_opts. Only ObjectName and
-// Sz are honored by the current open path.
+// BpfObjectOpenOpts controls how an object is opened. Zero is the default.
+//
+// Only Sz, ObjectName and the fields used by the current open path take
+// effect. The remaining fields are accepted so a caller can share one options
+// value with the loader as it is ported.
 type BpfObjectOpenOpts struct {
+	// Sz is the layout size for forward compatibility. Set it with
+	// NewBpfObjectOpenOpts; zero means the current layout.
 	Sz uintptr
 
-	ObjectName  *string
+	// ObjectName overrides the object name. When nil, the name comes from
+	// the file basename up to the first dot.
+	ObjectName *string
+	// RelaxedMaps allows extra map definition fields. The current parser is
+	// strict.
 	RelaxedMaps bool
+	// PinRootPath is the base directory for maps that request pinning.
 	PinRootPath *string
 
-	Kconfig       *string
+	// Kconfig augments the kernel config used for CONFIG_ externs.
+	Kconfig *string
+	// BtfCustomPath supplies a custom BTF for CO-RE relocations.
 	BtfCustomPath *string
 
-	KernelLogBuf   []byte
-	KernelLogSize  uintptr
+	// KernelLogBuf receives kernel logs during load.
+	KernelLogBuf []byte
+	// KernelLogSize is the length of KernelLogBuf.
+	KernelLogSize uintptr
+	// KernelLogLevel requests verifier log verbosity.
 	KernelLogLevel uint32
 
+	// BpfTokenPath is the BPF filesystem path used to derive a token.
 	BpfTokenPath *string
 
+	// BtfModuleAllowlist limits the kernel module BTFs consulted for CO-RE.
 	BtfModuleAllowlist []string
 }
 
 var bpfObjectOpenOptsSize = reflect.TypeOf(BpfObjectOpenOpts{}).Size()
 
-// NewBpfObjectOpenOpts returns options with Sz set to the current size.
+// NewBpfObjectOpenOpts returns options with Sz set to the current layout.
 func NewBpfObjectOpenOpts() *BpfObjectOpenOpts {
 	return &BpfObjectOpenOpts{Sz: bpfObjectOpenOptsSize}
 }
 
-// BpfObjectOpenFile opens a BPF ELF file, mirroring bpf_object__open_file()
-// in libbpf src/libbpf.c.
+// BpfObjectOpenFile reads a BPF ELF object from path and returns it with its
+// maps and programs described. It parses the ELF sections, the BTF types and
+// the BTF-defined map definitions; it does not load anything into the kernel.
+//
+// The object name is the file basename up to the first dot, unless
+// opts.ObjectName overrides it. opts may be nil. The caller must call
+// BpfObjectClose when done.
+//
+// The current parser requires a 64-bit BPF ELF object with a .BTF section and
+// BTF-defined maps. A malformed object returns an *Error with EINVAL.
 func BpfObjectOpenFile(path string, opts *BpfObjectOpenOpts) (*BpfObject, error) {
 	if path == "" {
 		return nil, &Error{Op: "bpf_object__open_file", Errno: unix.EINVAL}
@@ -83,9 +112,11 @@ func BpfObjectOpenFile(path string, opts *BpfObjectOpenOpts) (*BpfObject, error)
 	return openBytes(path, data, name)
 }
 
-// BpfObjectOpenMem opens a BPF ELF object from memory, mirroring
-// bpf_object__open_mem(). libbpf derives a pointer-based default name for a
-// memory buffer; this port uses "mem" unless ObjectName is set.
+// BpfObjectOpenMem parses a BPF ELF object from data. The object name is
+// "mem" unless opts.ObjectName is set. The caller must call BpfObjectClose.
+//
+// libbpf uses a pointer-based default name for memory buffers; golbpfgo uses
+// a stable name so diagnostics and pin paths are reproducible.
 func BpfObjectOpenMem(data []byte, opts *BpfObjectOpenOpts) (*BpfObject, error) {
 	if len(data) == 0 {
 		return nil, &Error{Op: "bpf_object__open_mem", Errno: unix.EINVAL}
@@ -101,6 +132,8 @@ func BpfObjectOpenMem(data []byte, opts *BpfObjectOpenOpts) (*BpfObject, error) 
 	return openBytes("", data, name)
 }
 
+// validateOpenOpts rejects an options value whose Sz does not match the
+// current layout. A nil or zero-Sz value is accepted.
 func validateOpenOpts(opts *BpfObjectOpenOpts) error {
 	if opts != nil && opts.Sz != 0 && opts.Sz != bpfObjectOpenOptsSize {
 		return &Error{Op: "bpf_object__open", Errno: unix.EINVAL}
@@ -108,6 +141,8 @@ func validateOpenOpts(opts *BpfObjectOpenOpts) error {
 	return nil
 }
 
+// openBytes parses data and builds the object for the file and memory paths.
+// It requires a BPF ELF object with a .BTF section.
 func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	e, err := elf.OpenBytes(data)
 	if err != nil {
@@ -143,6 +178,8 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	}, nil
 }
 
+// openError wraps a parse failure in the public Error type. The current parser
+// reports malformed objects as EINVAL with the parser reason in Log.
 func openError(path string, err error) error {
 	return &Error{
 		Op:    "bpf_object__open",
@@ -152,6 +189,8 @@ func openError(path string, err error) error {
 	}
 }
 
+// parseMaps turns the .maps BTF data section into map specs. Each variable's
+// struct members encode the map type, sizes and key and value types.
 func parseMaps(spec *btf.Spec) ([]*BpfMap, error) {
 	ds := spec.Find(".maps", btf.KindDatasec)
 	if ds == nil {
@@ -185,6 +224,8 @@ func parseMaps(spec *btf.Spec) ([]*BpfMap, error) {
 	return maps, nil
 }
 
+// fillMapDef reads the type, max_entries, key, value and optional map_flags
+// members from a BTF map definition.
 func fillMapDef(spec *btf.Spec, st *btf.Type, m *BpfMap) error {
 	typeMember := spec.Member(st, "type")
 	if typeMember == nil {
@@ -266,6 +307,8 @@ func mapTypeID(spec *btf.Spec, id uint32) (uint32, error) {
 	return t.SizeOrType, nil
 }
 
+// parsePrograms turns executable ELF sections into program specs using the SEC
+// table and the function symbol that names each program.
 func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
 	var programs []*BpfProgram
 	for _, p := range e.Programs {
@@ -298,6 +341,8 @@ func programSymbol(e *elf.Object, section string) string {
 	return ""
 }
 
+// objectNameFromPath derives the object name from the base name up to the
+// first dot, matching libbpf's file-name rule.
 func objectNameFromPath(path string) string {
 	base := filepath.Base(path)
 	if i := strings.IndexByte(base, '.'); i >= 0 {
@@ -306,6 +351,7 @@ func objectNameFromPath(path string) string {
 	return base
 }
 
+// errnoFromError extracts a syscall errno from an os or fs error.
 func errnoFromError(err error) syscall.Errno {
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
@@ -314,7 +360,8 @@ func errnoFromError(err error) syscall.Errno {
 	return unix.EINVAL
 }
 
-// BpfObjectClose releases an object, mirroring bpf_object__close().
+// BpfObjectClose releases the object and invalidates its maps and programs.
+// It is safe to call more than once and on a nil object.
 func BpfObjectClose(obj *BpfObject) {
 	if obj == nil {
 		return
@@ -326,7 +373,7 @@ func BpfObjectClose(obj *BpfObject) {
 	obj.elf = nil
 }
 
-// BpfObjectName mirrors bpf_object__name().
+// BpfObjectName returns the object name used in diagnostics and pin paths.
 func BpfObjectName(obj *BpfObject) string {
 	if obj == nil {
 		return ""
@@ -334,7 +381,9 @@ func BpfObjectName(obj *BpfObject) string {
 	return obj.name
 }
 
-// BpfObjectNextMap mirrors bpf_object__next_map().
+// BpfObjectNextMap returns the next map in the order of the .maps BTF data
+// section. Pass nil to start; it returns nil after the last map. The order is
+// stable for the lifetime of the object.
 func BpfObjectNextMap(obj *BpfObject, prev *BpfMap) *BpfMap {
 	if obj == nil {
 		return nil
@@ -356,7 +405,8 @@ func BpfObjectNextMap(obj *BpfObject, prev *BpfMap) *BpfMap {
 	return nil
 }
 
-// BpfObjectNextProgram mirrors bpf_object__next_program().
+// BpfObjectNextProgram returns the next program in ELF section order. Pass nil
+// to start; it returns nil after the last program.
 func BpfObjectNextProgram(obj *BpfObject, prev *BpfProgram) *BpfProgram {
 	if obj == nil {
 		return nil
@@ -378,7 +428,7 @@ func BpfObjectNextProgram(obj *BpfObject, prev *BpfProgram) *BpfProgram {
 	return nil
 }
 
-// BpfObjectFindMapByName mirrors bpf_object__find_map_by_name().
+// BpfObjectFindMapByName returns the map with the given name, or nil.
 func BpfObjectFindMapByName(obj *BpfObject, name string) *BpfMap {
 	if obj == nil {
 		return nil
@@ -391,7 +441,7 @@ func BpfObjectFindMapByName(obj *BpfObject, name string) *BpfMap {
 	return nil
 }
 
-// BpfObjectFindProgramByName mirrors bpf_object__find_program_by_name().
+// BpfObjectFindProgramByName returns the program with the exact name, or nil.
 func BpfObjectFindProgramByName(obj *BpfObject, name string) *BpfProgram {
 	if obj == nil {
 		return nil

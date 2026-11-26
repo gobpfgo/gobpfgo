@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/libbpf.c at 4f05fb0.
+// libbpf-source: src/libbpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path
 
 package libbpf
 
-// BpfMap is a map opened from an object. It mirrors struct bpf_map.
+// BpfMap is a map parsed from an object. It carries the definition metadata
+// from the ELF and BTF sections; the load step adds the kernel descriptor.
 type BpfMap struct {
 	name           string
 	mapType        BpfMapType
@@ -16,7 +19,8 @@ type BpfMap struct {
 	pinPath        string
 }
 
-// BpfMapName mirrors bpf_map__name().
+// BpfMapName returns the name declared in the map definition, or an empty
+// string when the map is unnamed.
 func BpfMapName(m *BpfMap) string {
 	if m == nil {
 		return ""
@@ -24,7 +28,10 @@ func BpfMapName(m *BpfMap) string {
 	return m.name
 }
 
-// BpfMapType returns bpf_map__type().
+// BpfMapTypeOf returns the map type declared in the definition.
+//
+// The accessor has the Of suffix because BpfMapType is the Go type name. The
+// value is the enum bpf_map_type from linux/bpf.h.
 func BpfMapTypeOf(m *BpfMap) BpfMapType {
 	if m == nil {
 		return 0
@@ -32,7 +39,7 @@ func BpfMapTypeOf(m *BpfMap) BpfMapType {
 	return m.mapType
 }
 
-// BpfMapKeySize mirrors bpf_map__key_size().
+// BpfMapKeySize returns the key size in bytes.
 func BpfMapKeySize(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -40,7 +47,7 @@ func BpfMapKeySize(m *BpfMap) uint32 {
 	return m.keySize
 }
 
-// BpfMapValueSize mirrors bpf_map__value_size().
+// BpfMapValueSize returns the value size in bytes.
 func BpfMapValueSize(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -48,7 +55,7 @@ func BpfMapValueSize(m *BpfMap) uint32 {
 	return m.valueSize
 }
 
-// BpfMapMaxEntries mirrors bpf_map__max_entries().
+// BpfMapMaxEntries returns the maximum number of entries.
 func BpfMapMaxEntries(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -56,7 +63,7 @@ func BpfMapMaxEntries(m *BpfMap) uint32 {
 	return m.maxEntries
 }
 
-// BpfMapMapFlags mirrors bpf_map__map_flags().
+// BpfMapMapFlags returns the BPF_F_* flags from the map definition.
 func BpfMapMapFlags(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -64,7 +71,8 @@ func BpfMapMapFlags(m *BpfMap) uint32 {
 	return m.mapFlags
 }
 
-// BpfMapBtfKeyTypeID mirrors bpf_map__btf_key_type_id().
+// BpfMapBtfKeyTypeID returns the BTF type ID of the map key, or zero when the
+// definition has no BTF key type.
 func BpfMapBtfKeyTypeID(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -72,7 +80,8 @@ func BpfMapBtfKeyTypeID(m *BpfMap) uint32 {
 	return m.btfKeyTypeID
 }
 
-// BpfMapBtfValueTypeID mirrors bpf_map__btf_value_type_id().
+// BpfMapBtfValueTypeID returns the BTF type ID of the map value, or zero when
+// the definition has no BTF value type.
 func BpfMapBtfValueTypeID(m *BpfMap) uint32 {
 	if m == nil {
 		return 0
@@ -80,7 +89,8 @@ func BpfMapBtfValueTypeID(m *BpfMap) uint32 {
 	return m.btfValueTypeID
 }
 
-// BpfMapPinPath mirrors bpf_map__pin_path().
+// BpfMapPinPath returns the pin path set on the map, or an empty string. The
+// path is empty at open time unless the map definition or the caller set it.
 func BpfMapPinPath(m *BpfMap) string {
 	if m == nil {
 		return ""

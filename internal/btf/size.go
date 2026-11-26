@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original size resolver
+// libbpf-source: src/btf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: btf__resolve_size
 
 package btf
 

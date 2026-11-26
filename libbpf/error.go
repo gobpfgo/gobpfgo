@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Original golbpfgo code.
+// golbpfgo-origin: original
 
 package libbpf
 
 import "syscall"
 
-// Error is the error returned by the libbpf wrappers. Errno preserves the
-// code from the failed operation, so errors.Is(err, unix.EINVAL) works.
+// Error is a libbpf operation error.
+//
+// Errno preserves the kernel error code, Op names the Go operation, and Path
+// and Log add context when the operation had them. Unwrap returns Errno, so
+// errors.Is and errors.As work with syscall errno values:
+//
+//	if errors.Is(err, unix.EINVAL) {
+//		...
+//	}
 type Error struct {
 	Op    string
 	Errno syscall.Errno

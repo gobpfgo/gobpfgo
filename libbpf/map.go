@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
-// Ported from libbpf src/bpf.c at 4f05fb0.
+// libbpf-source: src/bpf.c
+// libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
+// libbpf-symbols: bpf_map_create
 
 //go:build linux && (amd64 || arm64)
 
@@ -13,43 +15,67 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BpfMapCreateOpts mirrors struct bpf_map_create_opts.
+// BpfMapCreateOpts controls optional attributes of a new map.
 //
-// Sz must be zero or the size returned by NewBpfMapCreateOpts. The LogOpts
-// field is not ported yet.
+// Zero is the default for every field. Sz must be zero or the size returned by
+// NewBpfMapCreateOpts; a mismatched size makes BpfMapCreate return EINVAL.
+// The libbpf LogOpts field is not ported yet.
 type BpfMapCreateOpts struct {
+	// Sz is the layout size for forward compatibility. Set it with
+	// NewBpfMapCreateOpts; zero means the current layout.
 	Sz uintptr
 
-	BtfFD                 uint32
-	BtfKeyTypeID          uint32
-	BtfValueTypeID        uint32
+	// BtfFD is the BTF object that describes the key and value types.
+	BtfFD uint32
+	// BtfKeyTypeID is the BTF type ID of the key.
+	BtfKeyTypeID uint32
+	// BtfValueTypeID is the BTF type ID of the value.
+	BtfValueTypeID uint32
+	// BtfVmlinuxValueTypeID is the BTF type ID of a kernel struct stored as
+	// the map value.
 	BtfVmlinuxValueTypeID uint32
 
+	// InnerMapFD is the inner map template for map-in-map types.
 	InnerMapFD uint32
-	MapFlags   uint32
-	MapExtra   uint64
+	// MapFlags are the BPF_F_* flags from linux/bpf.h.
+	MapFlags uint32
+	// MapExtra is the per-map-type extra value.
+	MapExtra uint64
 
-	NumaNode          uint32
-	MapIfindex        uint32
+	// NumaNode is the NUMA node when BPF_F_NUMA_NODE is set.
+	NumaNode uint32
+	// MapIfindex is the netdev index for offloaded maps.
+	MapIfindex uint32
+	// ValueTypeBtfObjFD is the BTF object fd for a value type that lives in
+	// another BTF object.
 	ValueTypeBtfObjFD int32
 
+	// TokenFD is the BPF token fd, when the kernel and privileges allow it.
 	TokenFD uint32
 
+	// ExclProgHash is the program hash for exclusive map ownership. The
+	// slice supplies both the pointer and the length.
 	ExclProgHash []byte
 }
 
 var bpfMapCreateOptsSize = reflect.TypeOf(BpfMapCreateOpts{}).Size()
 
-// NewBpfMapCreateOpts returns options with Sz set to the current size.
+// NewBpfMapCreateOpts returns options with Sz set to the current layout.
+//
+// Use it whenever any field is set; BpfMapCreate rejects a non-zero Sz that
+// does not match the current layout.
 func NewBpfMapCreateOpts() *BpfMapCreateOpts {
 	return &BpfMapCreateOpts{Sz: bpfMapCreateOptsSize}
 }
 
-// BpfMapCreate creates a BPF map, mirroring bpf_map_create() in libbpf
-// src/bpf.c. It returns the new map file descriptor; the caller closes it.
+// BpfMapCreate creates a BPF map and returns its file descriptor.
 //
-// opts may be nil. When non-nil, Sz must be zero or the current
-// BpfMapCreateOpts size.
+// mapType, keySize, valueSize and maxEntries describe the map. name is the
+// optional object name; it is truncated to 15 bytes and NUL-terminated like
+// the kernel's object names. opts may be nil.
+//
+// The caller owns the descriptor and must close it with unix.Close. A failed
+// call returns a negative descriptor and an *Error with the kernel errno.
 func BpfMapCreate(mapType BpfMapType, name string, keySize, valueSize, maxEntries uint32, opts *BpfMapCreateOpts) (int, error) {
 	if opts != nil && opts.Sz != 0 && opts.Sz != bpfMapCreateOptsSize {
 		return -1, &Error{Op: "bpf_map_create", Errno: unix.EINVAL}
