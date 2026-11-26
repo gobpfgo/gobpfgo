@@ -13,7 +13,7 @@ The port tracks libbpf at commit [`4f05fb0`](https://github.com/libbpf/libbpf/co
 | Object lifecycle | `libbpf.c` | `object.go`, `sec.go`, `skeleton.go` | 1 | in progress (open, load) |
 | Maps | `libbpf.c` | `map.go`, `bpf_map.go` | 1 | in progress (create, open, load, lookup) |
 | Programs | `libbpf.c` | `program.go` | 1 | in progress (open, load) |
-| Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `attach.go`, `perf.go`, `elf_func.go`, `attach_btf.go` | 1 | parity tested for the section and link attach types (kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, fmod_ret, tp_btf, LSM, raw tracepoint, kprobe multi, perf event, auto attach); cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT not started |
+| Links and attach | `libbpf.c`, `netlink.c` | `link.go`, `attach.go`, `perf.go`, `elf_func.go`, `attach_btf.go` | 1 | parity tested (kprobe, kretprobe, tracepoint, uprobe, uretprobe, fentry, fexit, LSM, raw tracepoint, kprobe multi, perf event and auto attach); fmod_ret and tp_btf use the same tracing path and are ported but not fixture-tested; cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT not started |
 | Pinning and reuse | `libbpf.c` | `pin.go`, `reuse.go`, `link.go` | 1 | parity tested (map, program, object and link pin/unpin; map reuse) |
 | BTF | `btf.c` | `internal/btf` | 2 | in progress (parser and split module merge; BTF dump separate) |
 | CO-RE | `relo_core.c`, `btf_relocate.c` | `relo_core.go`, `btf_reloc.go` | 2 | parity tested (access specs, field/flexible array/type/enum relocations, vmlinux and split module BTFs, no-target poison; `TYPE_MATCHES` rejected like libbpf's normal path) |
