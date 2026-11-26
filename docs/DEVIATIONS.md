@@ -16,3 +16,4 @@ Every intentional difference from the C library. The list is part of the contrac
 10. **Skeleton structs.** The C skeleton is generated per object by bpftool. The Go skeleton is generated per object by `cmd/bpfgen` and uses slices where C uses pointer arrays.
 11. **Memory object name.** libbpf derives a pointer-based default name for `bpf_object__open_mem`; the Go port uses `mem` unless `ObjectName` is set.
 12. **Accessor names.** `bpf_map__type` and `bpf_program__type` become `BpfMapTypeOf` and `BpfProgramTypeOf`, because `BpfMapType` and `BpfProgType` are the Go type names.
+13. **Kernel floor.** libbpf supports 4.9 and newer; golbpfgo targets 5.10 and newer, so 4.9-era fallbacks are not ported.

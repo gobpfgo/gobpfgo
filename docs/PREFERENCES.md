@@ -12,6 +12,7 @@ Rules learned from the operator. Newest last. Every entry carries the date, the 
 - **Dependencies.** Prefer existing pure-Go packages when they fit. No cgo, at any point. Pin versions with `go.mod` and `go.sum`, and check the license before adding.
 - **Naming.** CamelCase for functions and types; UAPI constants exactly as in the kernel headers (`BPF_MAP_TYPE_RINGBUF`, `BTF_KIND_STRUCT`). [API-MAP.md](API-MAP.md) is the decoder ring.
 - **UAPI encoding.** Explicit fixed-offset `encoding/binary` writes for UAPI structs; one `reflect` call only for the syscall buffer address. No `unsafe`, no reflect struct marshaling, no `binary.Write` on structs.
+- **Kernel floor.** Target Linux 5.10 and newer. Do not spend time on 4.9-era fallbacks.
 - **Pull requests.** Every change starts with a pull request. Open it early, commit to its branch, and let CI run before the merge.
 - **Merge and continue.** The agent may merge its own PRs one at a time after CI is green, fix failing CI, and move to the next slice without asking, until a decision needs the operator. GitHub rejects self-approval; merge without it when branch protection allows, using rebase and merge. The operator authorized this on 2026-11-26.
 - **Learning.** This file is the log. A correction is not complete until it is written here and in the affected document.

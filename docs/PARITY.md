@@ -40,6 +40,6 @@ The oracle tiers, scenarios and update rules live in [TESTING.md](TESTING.md).
 | Syscall transcript after load | `LD_PRELOAD` interposer or strace parser | not started |
 | CO-RE fixups | libbpf internal harness | not started |
 | `btf_dump` text | exact text diff | not started |
-| Old kernels | VM matrix | not started |
+| 5.10 and newer | VM matrix | not started |
 
 The C oracle lives in `oracle/`, is built out of tree, and is never part of `go build`.
