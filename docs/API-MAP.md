@@ -59,6 +59,12 @@ The generated table has these columns:
 | `bpf_map__is_pinned` | `BpfMapIsPinned` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_program__pin` | `BpfProgramPin` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_program__unpin` | `BpfProgramUnpin` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__pin_maps` | `BpfObjectPinMaps` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__unpin_maps` | `BpfObjectUnpinMaps` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__pin_programs` | `BpfObjectPinPrograms` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__unpin_programs` | `BpfObjectUnpinPrograms` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__pin` | `BpfObjectPin` | `libbpf/pin.go` | parity tested (root pin test) |
+| `bpf_object__unpin` | `BpfObjectUnpin` | `libbpf/pin.go` | parity tested (root pin test) |
 | `bpf_obj_pin` | `ObjPin` (internal; public through the map and program pins) | `internal/sys/bpf.go` | parity tested (layout and root pin test) |
 | `bpf_program__attach_kprobe` | `BpfProgramAttachKprobe` | `libbpf/link.go` | in progress (kprobe through tracefs; retprobe untested; kprobe multi not ported) |
 | `bpf_object__attach_skeleton` | `BpfObjectAttachSkeleton` | `libbpf/skeleton.go` | not started |

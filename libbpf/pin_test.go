@@ -20,6 +20,85 @@ func TestCheckBpfFS(t *testing.T) {
 	}
 }
 
+func TestBpfObjectPin(t *testing.T) {
+	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("BpfObjectOpenFile: %v", err)
+	}
+	if err := BpfObjectLoad(obj); err != nil {
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
+			t.Skipf("bpf() not permitted: %v", err)
+		}
+		t.Fatalf("BpfObjectLoad: %v", err)
+	}
+	defer BpfObjectClose(obj)
+
+	dir, err := os.MkdirTemp("/sys/fs/bpf", "gobpfgo-object-")
+	if err != nil {
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrNotExist) {
+			t.Skipf("bpffs unavailable: %v", err)
+		}
+		t.Fatalf("create bpffs directory: %v", err)
+	}
+	defer func() {
+		_ = BpfObjectUnpin(obj, dir)
+		_ = os.Remove(dir)
+	}()
+
+	mapPin := filepath.Join(dir, "counts")
+	programPin := filepath.Join(dir, "handle_open")
+
+	if err := BpfObjectPinMaps(obj, &dir); err != nil {
+		t.Fatalf("BpfObjectPinMaps: %v", err)
+	}
+	if _, err := os.Stat(mapPin); err != nil {
+		t.Fatalf("stat pinned map: %v", err)
+	}
+	if _, err := os.Stat(programPin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("program pinned before BpfObjectPinPrograms: %v", err)
+	}
+
+	if err := BpfObjectPinPrograms(obj, dir); err != nil {
+		t.Fatalf("BpfObjectPinPrograms: %v", err)
+	}
+	if _, err := os.Stat(programPin); err != nil {
+		t.Fatalf("stat pinned program: %v", err)
+	}
+
+	// A nil path uses the map pin path stored by BpfObjectPinMaps.
+	if err := BpfObjectUnpinMaps(obj, nil); err != nil {
+		t.Fatalf("BpfObjectUnpinMaps: %v", err)
+	}
+	if _, err := os.Stat(mapPin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pinned map still exists: %v", err)
+	}
+	if _, err := os.Stat(programPin); err != nil {
+		t.Fatalf("program was unpinned with the map: %v", err)
+	}
+	if err := BpfObjectUnpinPrograms(obj, dir); err != nil {
+		t.Fatalf("BpfObjectUnpinPrograms: %v", err)
+	}
+
+	if err := BpfObjectPin(obj, dir); err != nil {
+		t.Fatalf("BpfObjectPin: %v", err)
+	}
+	if _, err := os.Stat(mapPin); err != nil {
+		t.Fatalf("stat object map: %v", err)
+	}
+	if _, err := os.Stat(programPin); err != nil {
+		t.Fatalf("stat object program: %v", err)
+	}
+	if err := BpfObjectUnpin(obj, dir); err != nil {
+		t.Fatalf("BpfObjectUnpin: %v", err)
+	}
+	if _, err := os.Stat(mapPin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("object map still exists: %v", err)
+	}
+	if _, err := os.Stat(programPin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("object program still exists: %v", err)
+	}
+}
+
 func TestBpfMapAndProgramPin(t *testing.T) {
 	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
 	if err != nil {
