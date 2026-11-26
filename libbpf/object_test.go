@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/sys"
@@ -52,6 +53,7 @@ func loadOpenFixture(t *testing.T) openFixture {
 }
 
 type loadFixture struct {
+	Kernel     string `json:"kernel"`
 	ObjectName string `json:"object_name"`
 	Maps       []struct {
 		Name           string `json:"name"`
@@ -73,6 +75,19 @@ type loadFixture struct {
 		XlatedInsnCnt int    `json:"xlated_insn_cnt"`
 		JitedProgLen  uint32 `json:"jited_prog_len"`
 	} `json:"programs"`
+}
+
+// kernelRelease returns the running kernel release. The loaded program
+// lengths depend on the verifier and the JIT, so the exact fixture values are
+// only compared on the kernel that produced the fixture.
+func kernelRelease(t *testing.T) string {
+	t.Helper()
+
+	data, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		t.Fatalf("read kernel release: %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func loadLoadFixture(t *testing.T) loadFixture {
@@ -177,6 +192,11 @@ func TestBpfObjectOpenKprobe(t *testing.T) {
 
 func TestBpfObjectLoad(t *testing.T) {
 	f := loadLoadFixture(t)
+	runningKernel := kernelRelease(t)
+	exactLengths := f.Kernel == runningKernel
+	if !exactLengths {
+		t.Logf("fixture kernel %s, running %s: comparing kernel-independent fields only", f.Kernel, runningKernel)
+	}
 
 	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
 	if err != nil {
@@ -239,11 +259,18 @@ func TestBpfObjectLoad(t *testing.T) {
 	if pi.Name != wantProg.Name || pi.Type != wantProg.Type {
 		t.Fatalf("program info = %+v, want name %q type %d", pi, wantProg.Name, wantProg.Type)
 	}
-	if got := int(pi.XlatedProgLen / 8); got != wantProg.XlatedInsnCnt {
-		t.Fatalf("xlated insn count = %d, want %d", got, wantProg.XlatedInsnCnt)
+	xlated := int(pi.XlatedProgLen / 8)
+	if exactLengths && xlated != wantProg.XlatedInsnCnt {
+		t.Fatalf("xlated insn count = %d, want %d", xlated, wantProg.XlatedInsnCnt)
 	}
-	if pi.JitedProgLen != wantProg.JitedProgLen {
+	if xlated == 0 {
+		t.Fatal("xlated insn count = 0")
+	}
+	if exactLengths && pi.JitedProgLen != wantProg.JitedProgLen {
 		t.Fatalf("jited length = %d, want %d", pi.JitedProgLen, wantProg.JitedProgLen)
+	}
+	if pi.JitedProgLen == 0 {
+		t.Fatal("jited length = 0")
 	}
 	if pi.ID == 0 || p.id != pi.ID || p.xlatedInsnCnt != int(pi.XlatedProgLen/8) || p.jitedLen != pi.JitedProgLen {
 		t.Fatalf("program id/lengths = %d/%d/%d, info = %d/%d/%d",

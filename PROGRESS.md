@@ -21,7 +21,7 @@ Done:
 - [`#11`](https://github.com/gobpfgo/gobpfgo/pull/11) merged: the BTF load path and DATASEC fixup.
 - [`#12`](https://github.com/gobpfgo/gobpfgo/pull/12) merged: the object load path (BTF, maps, programs).
 - The loaded map and program info matches `load.json`: map `counts`, program `handle_open`, 18 xlated instructions and 100 jited bytes.
-- The oracle is now one binary with `layout`, `attr`, `open` and `load` subcommands. A small JSON writer owns the formatting; the layout, attr and open fixtures are unchanged and the load ids were regenerated.
+- The oracle is now one binary with `layout`, `attr`, `open`, `load` and `attach` subcommands. A small JSON writer owns the formatting; the layout, attr and open fixtures are unchanged and the load ids were regenerated.
 - `internal/elf`: sections, symbols, relocations, program sections, `.maps`, `.BTF` and `.BTF.ext`.
 - `internal/btf`: header, type table, string table, all type kinds and `SizeOf`.
 - `oracle`: `layout`, `attr`, `open`, `load` and `attach`; the linked scenarios build the pinned libbpf under `oracle/build`.
@@ -37,8 +37,11 @@ Next: phase 1, in progress.
 - `BpfMapLookupElem` reads a map element; the `BPF_MAP_LOOKUP_ELEM` layout comes from the test object.
 - `BpfProgramAttachKprobe` creates a tracefs kprobe event, attaches the program with a perf event, and removes both on detach. The root attach test proves the program increments `counts` on a real `do_sys_openat2` call.
 - The test object now targets `kprobe/do_sys_openat2`, the function the `openat` path reaches.
-- Next: the 5.10 VM tier, then pinning and reuse.
+- The 5.10 tier passes on Debian 11 with kernel `5.10.0-46-cloud-amd64`: the full root and unprivileged suites, including object load, map lookup and kprobe attach.
+- The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding. The load test compares xlated and jited lengths exactly only on the fixture kernel and requires them nonzero elsewhere.
+- Next: pinning and reuse.
 
 Open:
 
+- The arm64 half of the 5.10 tier has not run.
 - kprobe multi links and the perf link path are not ported; kprobe attach uses the tracefs interface.
