@@ -31,6 +31,8 @@ The BTF load test, the object load test, the attach table, the perf event attach
 
 On 5.10 the kprobe multi and cookie cases skip because the kernel lacks the link types, and the LSM case skips because the BPF LSM is not in the active LSM list. The fentry, fexit and LSM attaches use the raw tracepoint open fallback on that kernel, which the table exercises.
 
+The 5.10 VM has `CONFIG_BPF_LSM=y`, but its boot `lsm=` list does not include `bpf`, so an LSM program attaches and its hook never runs. After rebooting it with `lsm=lockdown,capability,yama,apparmor,tomoyo,bpf`, check that `/sys/kernel/security/lsm` contains `bpf`, then run `sudo go test -v -run 'TestBpfProgramAttachTypes/lsm' ./libbpf`; the case should count a real `file_open` call instead of skipping.
+
 The loaded xlated instruction count and jited length are verifier and JIT outputs. The test compares them exactly on the kernel that produced `load.json` and requires them to be nonzero on any other kernel; the map geometry, BTF ids and program type are compared everywhere. The test object is compiled with `-mcpu=v1`, because the 5.10 verifier rejects the newer `BPF_ATOMIC` fetch-add encoding.
 
 The ELF reader has structural tests against the checked-in `kprobe.bpf.o`. The `open` scenario compares that same object with libbpf.

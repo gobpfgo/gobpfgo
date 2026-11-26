@@ -58,6 +58,7 @@ Open:
 
 - The arm64 half of the 5.10 tier has not run.
 - The specialized attach APIs are not ported: cgroup, netns, XDP, iter, freplace, sockmap, uprobe multi, kprobe session and USDT. USDT and uprobe multi belong to phase 3; the others need their own slice.
+- LSM attach is implemented (`BpfProgramAttachLsm`, `lsm/` and `lsm.s/`, `bpf_lsm_` target resolution) and fires on 6.18. The 5.10 VM has `CONFIG_BPF_LSM=y` but no `bpf` in its boot `lsm=` list, so the case skips. After rebooting it with `lsm=lockdown,capability,yama,apparmor,tomoyo,bpf`, confirm `/sys/kernel/security/lsm` contains `bpf` and run `sudo go test -v -run 'TestBpfProgramAttachTypes/lsm' ./libbpf`.
 - Attach targets in kernel modules (`fentry/module:function`) are not resolved.
 - `BpfLinkUpdateProgram` is implemented and layout checked, but no attach type in this surface supports update on the tested kernels, so its success path is unexercised.
 - BTF dump and the remaining CO-RE `TYPE_MATCHES` kind (rejected by libbpf's normal path) are not ported.
