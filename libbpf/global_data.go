@@ -25,8 +25,9 @@ const (
 	mapsSec      = ".maps"
 )
 
-// libbpfMapType tells an internal global data map from a map defined in the
-// .maps section, which is libbpfMapUnspec.
+// libbpfMapType tells an internal map, one of the global data maps or the
+// .kconfig map, from a map defined in the .maps section, which is
+// libbpfMapUnspec.
 type libbpfMapType int
 
 const (
@@ -34,6 +35,7 @@ const (
 	libbpfMapData
 	libbpfMapBss
 	libbpfMapRodata
+	libbpfMapKconfig
 )
 
 // internalMapKeySize is the key size of every global data map: one int index.
@@ -81,23 +83,35 @@ func initGlobalDataMaps(e *objelf.Object, spec *btf.Spec, objName string) []*Bpf
 	return maps
 }
 
-// newInternalMap builds the single-entry array map that holds section s. The
-// value is the whole section, so the value size is the section size and
-// variables keep their section offsets. The initial value is the section
-// bytes, or zeroes for a NOBITS section.
+// newInternalMap builds the internal map that holds section s. The value is
+// the whole section, so variables keep their section offsets. The initial
+// value is the section bytes, or zeroes for a NOBITS section.
 func newInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, s *objelf.Section) *BpfMap {
+	var data []byte
+	if typ != libbpfMapBss {
+		data = s.Data
+	}
+	return initInternalMap(spec, objName, typ, s.Name, s.Index, data, uint32(s.Size))
+}
+
+// initInternalMap builds a single-entry array map of size bytes for the
+// internal map realName at ELF section secIdx. Read-only data and .kconfig
+// maps are read-only for programs. The BTF value type is the DATASEC named
+// realName, when there is one, and a map with a variable visible outside the
+// object is mmapable. The initial value is data padded with zeroes to size.
+func initInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, realName string, secIdx int, data []byte, size uint32) *BpfMap {
 	m := &BpfMap{
-		name:       internalMapName(objName, s.Name),
-		realName:   s.Name,
+		name:       internalMapName(objName, realName),
+		realName:   realName,
 		libbpfType: typ,
-		secIdx:     s.Index,
+		secIdx:     secIdx,
 		mapType:    BPF_MAP_TYPE_ARRAY,
 		keySize:    internalMapKeySize,
-		valueSize:  uint32(s.Size),
+		valueSize:  size,
 		maxEntries: 1,
 		fd:         -1,
 	}
-	if typ == libbpfMapRodata {
+	if typ == libbpfMapRodata || typ == libbpfMapKconfig {
 		m.mapFlags = unix.BPF_F_RDONLY_PROG
 	}
 
@@ -108,10 +122,8 @@ func newInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, s *objelf
 		m.mapFlags |= unix.BPF_F_MMAPABLE
 	}
 
-	m.initialValue = make([]byte, s.Size)
-	if typ != libbpfMapBss {
-		copy(m.initialValue, s.Data)
-	}
+	m.initialValue = make([]byte, size)
+	copy(m.initialValue, data)
 	return m
 }
 

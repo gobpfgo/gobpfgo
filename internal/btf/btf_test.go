@@ -359,3 +359,57 @@ func TestParseErrors(t *testing.T) {
 		t.Fatal("Parse accepted a zero header")
 	}
 }
+
+// TestFixupSkipsExternDatasecs allocates the .kconfig variables of the kconfig
+// object the way the extern layout does, then runs the ELF-based fixups with
+// no symbols and no section sizes: the .kconfig DATASEC keeps its size,
+// offsets and linkage, because no ELF symbol or section backs it.
+func TestFixupSkipsExternDatasecs(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/kconfig.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	ds := spec.Find(KconfigSec, KindDatasec)
+	if ds == nil {
+		t.Fatal("no .kconfig DATASEC")
+	}
+	if err := spec.SetDatasecSize(ds.ID, 64); err != nil {
+		t.Fatalf("SetDatasecSize: %v", err)
+	}
+	for j, vsi := range ds.DataSec {
+		if err := spec.SetVarLinkage(vsi.Type, VarGlobalAllocated); err != nil {
+			t.Fatalf("SetVarLinkage: %v", err)
+		}
+		if err := spec.SetDatasecVarOffset(ds.ID, j, uint32(16*j)); err != nil {
+			t.Fatalf("SetDatasecVarOffset: %v", err)
+		}
+	}
+
+	if err := spec.FixupDatasecSizes(map[string]uint32{KconfigSec: 8}); err != nil {
+		t.Fatalf("FixupDatasecSizes: %v", err)
+	}
+	if err := spec.FixupDatasecOffsets(map[string]uint32{"values": 0, "LICENSE": 0}); err != nil {
+		t.Fatalf("FixupDatasecOffsets: %v", err)
+	}
+	if err := spec.FixupDatasecHiddenVars(map[string]bool{"CONFIG_TEST": true}); err != nil {
+		t.Fatalf("FixupDatasecHiddenVars: %v", err)
+	}
+
+	if ds.SizeOrType != 64 {
+		t.Errorf(".kconfig size = %d, want 64", ds.SizeOrType)
+	}
+	for j, vsi := range ds.DataSec {
+		v, err := spec.TypeByID(vsi.Type)
+		if err != nil {
+			t.Fatalf("type %d: %v", vsi.Type, err)
+		}
+		if vsi.Offset != uint32(16*j) || v.Var.Linkage != VarGlobalAllocated {
+			t.Errorf("%s offset %d linkage %d, want %d and allocated", v.Name, vsi.Offset, v.Var.Linkage, 16*j)
+		}
+	}
+}

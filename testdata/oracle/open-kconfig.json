@@ -1,0 +1,24 @@
+{
+  "case": "open",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "kconfig.bpf.o",
+  "object_name": "kconfig",
+  "maps": [
+    {"name": "values", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 4, "map_flags": 0, "btf_key_type_id": 8, "btf_value_type_id": 11, "pin_path": ""},
+    {"name": "kconfig.kconfig", "type": 2, "key_size": 4, "value_size": 17, "max_entries": 1, "map_flags": 1152, "btf_key_type_id": 0, "btf_value_type_id": 26, "pin_path": ""}
+  ],
+  "programs": [
+    {"name": "handle_kconfig", "type": 2, "expected_attach_type": 0, "section": "kprobe/do_sys_openat2", "insn_cnt": 52}
+  ],
+  "kconfig": {
+    "size": 17,
+    "vars": [
+      {"name": "LINUX_GOBPFGO_UNKNOWN", "offset": 0, "size": 8, "linkage": 1},
+      {"name": "CONFIG_TEST", "offset": 8, "size": 4, "linkage": 1},
+      {"name": "LINUX_KERNEL_VERSION", "offset": 12, "size": 4, "linkage": 1},
+      {"name": "LINUX_GOBPFGO_FLAG", "offset": 16, "size": 1, "linkage": 1}
+    ]
+  }
+}

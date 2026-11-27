@@ -554,7 +554,7 @@ func debianKernelVersion(version string) uint32 {
 	if err != nil || count != 2 {
 		return 0
 	}
-	return major<<16 | minor<<8
+	return kernelVersion(major, minor, 0)
 }
 
 // parseKernelVersion parses "major.minor.patch" and returns KERNEL_VERSION.
@@ -565,7 +565,13 @@ func parseKernelVersion(s string) uint32 {
 	if err != nil || count != 3 {
 		return 0
 	}
-	return major<<16 | minor<<8 | patch
+	return kernelVersion(major, minor, patch)
+}
+
+// kernelVersion is the KERNEL_VERSION code of a release. The patch level
+// saturates at 255, so it cannot carry into the minor version.
+func kernelVersion(major, minor, patch uint32) uint32 {
+	return major<<16 + minor<<8 + min(patch, 255)
 }
 
 // possibleCPUs caches libbpf_num_possible_cpus; zero means not read yet.

@@ -27,8 +27,17 @@ static void json_quote(FILE *out, const char *value) {
 		case '\n':
 			fputs("\\n", out);
 			break;
+		case '\r':
+			fputs("\\r", out);
+			break;
+		case '\t':
+			fputs("\\t", out);
+			break;
 		default:
-			fputc(*p, out);
+			if (*p < 0x20)
+				fprintf(out, "\\u%04x", *p);
+			else
+				fputc(*p, out);
 			break;
 		}
 	}
