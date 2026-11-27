@@ -62,6 +62,14 @@ type BpfObject struct {
 	// later attaches return as well.
 	usdtMan    *usdtManager
 	usdtManErr error
+
+	// funcPtrs are the pointers to .text functions in the read-only data
+	// sections, sorted by section and offset; each read-only data map
+	// holds the slice of its section. funcPtrMaps are the per-program
+	// copies of those maps that the load creates for programs with callx.
+	// They are not object maps and are closed with the object.
+	funcPtrs    []funcPtr
+	funcPtrMaps []funcPtrMap
 }
 
 // BpfObjectOpenOpts controls how an object is opened. Zero is the default.
@@ -216,6 +224,11 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 	if err != nil {
 		return nil, withPath(err, path)
 	}
+	funcPtrs, err := collectFuncPtrs(e, textShndx)
+	if err != nil {
+		return nil, openError(path, err)
+	}
+	assignFuncPtrs(maps, funcPtrs)
 
 	obj := &BpfObject{
 		name:       name,
@@ -229,6 +242,7 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 		btfFD:      -1,
 		externs:    externs,
 		kconfigMap: kconfigMap,
+		funcPtrs:   funcPtrs,
 	}
 	for _, p := range programs {
 		p.obj = obj
@@ -477,12 +491,15 @@ func BpfObjectClose(obj *BpfObject) {
 	obj.kconfigMap = nil
 	obj.usdtMan = nil
 	obj.usdtManErr = nil
+	obj.funcPtrs = nil
 }
 
 // closeLoadFDs closes the BTF, map and program descriptors created by
-// BpfObjectLoad. It is idempotent and ignores close errors.
+// BpfObjectLoad, including the programs' copies of the maps with function
+// pointers. It is idempotent and ignores close errors.
 func (obj *BpfObject) closeLoadFDs() {
 	obj.closeModuleBTFs()
+	obj.closeFuncPtrMaps()
 	if obj.btfFD >= 0 {
 		unix.Close(obj.btfFD)
 		obj.btfFD = -1

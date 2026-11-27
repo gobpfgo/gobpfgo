@@ -84,14 +84,17 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // It then relocates each program. A program gets a copy of every .text
 // subprogram it calls, directly or through another subprogram, appended to
 // its own code, with the calls and the function and line records
-// relocated. Two fixups then change the object BTF, which BpfObjectBTF
-// returns. On a kernel whose verifier does not read the arg:ctx decl tag,
-// a global subprogram argument tagged __arg_ctx gets a copy of its
-// function's BTF in which the argument points to the program type's
-// context struct, and the calling program's function record names that
-// copy. A .text subprogram whose symbol is global or weak with hidden or
-// internal visibility gets static linkage in its BTF FUNC, so the verifier
-// checks it in its caller's context.
+// relocated. A program whose code then has an indirect call, callx, also
+// gets every static .text function that the read-only data it loads points
+// to, such as the entries of a table of functions; a global function is not
+// appended, because callx cannot call it. Two fixups then change the object
+// BTF, which BpfObjectBTF returns. On a kernel whose verifier does not read
+// the arg:ctx decl tag, a global subprogram argument tagged __arg_ctx gets a
+// copy of its function's BTF in which the argument points to the program
+// type's context struct, and the calling program's function record names
+// that copy. A .text subprogram whose symbol is global or weak with hidden
+// or internal visibility gets static linkage in its BTF FUNC, so the
+// verifier checks it in its caller's context.
 //
 // It then loads the BTF. On a kernel without BTF_KIND_DECL_TAG the kernel
 // gets a copy in which every decl tag is a one-byte integer type, so the
@@ -105,6 +108,15 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // call it and has no descriptor. The .rodata and .kconfig maps are frozen
 // after their contents are written, so user space can read but not change
 // them. After the load, BpfProgramInsns returns each program's final code.
+//
+// The functions sit at a different offset in each program, so a program
+// with callx loads its own copy of each read-only data map with function
+// pointers that it references: a frozen single-element array, read-only for
+// programs and named like the map, with the map's initial value in which
+// each pointer is the byte offset of its function in that program, or 0 for
+// a function the program does not hold. The kernel turns the offsets into
+// addresses. The copies are not object maps: BpfObjectNextMap does not
+// return them, and they are closed with the object or when the load fails.
 //
 // On a kernel without global per-CPU data, which lets a program load a
 // per-CPU array value directly, the per-CPU data maps are not created and
@@ -175,7 +187,7 @@ func BpfObjectLoad(obj *BpfObject) error {
 		obj.closeLoadFDs()
 		return err
 	}
-	if err := relocateObjectData(codes); err != nil {
+	if err := relocateObjectData(codes, createFuncPtrMap); err != nil {
 		obj.closeLoadFDs()
 		return err
 	}
@@ -503,14 +515,17 @@ func progExtInsnOff(prog *BpfProgram, byteOff uint32, subInsnOff int) uint32 {
 // reference becomes a BPF_PSEUDO_MAP_FD load of the map descriptor. A global
 // variable or .kconfig extern reference becomes a BPF_PSEUDO_MAP_VALUE load:
 // the first immediate holds the map descriptor and the second the variable's
-// offset in the map value. A map or global variable reference to a map that
+// offset in the map value. When code has callx, a global variable reference
+// to a read-only data map with function pointers loads the program's own
+// copy of the map instead, which newMap creates on first use, as
+// funcPtrMapFD describes. A map or global variable reference to a map that
 // the load skipped is poisoned, as poisonMapLdimm64 describes; any other map
 // without a descriptor is an error. A .ksyms reference and a kernel function
 // call take what the extern resolved to, as patchKsymLD64 and
 // patchExternCall describe. The calls and the subprogram address loads were
 // patched when the subprograms were appended; an address load must still
 // carry BPF_PSEUDO_FUNC.
-func relocateData(code *progCode) error {
+func relocateData(code *progCode, newMap funcPtrMapCreator) error {
 	obj := code.prog.obj
 	externs := obj.externs
 	for i, r := range code.relocs {
@@ -524,6 +539,13 @@ func relocateData(code *progCode) error {
 			patchExternCall(code.insns[r.insnOff:], r.extIdx, &externs[r.extIdx])
 		case r.kind == relocExternLD64 && externs[r.extIdx].typ == extKsym:
 			patchKsymLD64(code.insns[r.insnOff:], &externs[r.extIdx])
+		case r.kind == relocData && r.m.autocreate && len(r.m.funcPtrs) > 0 && code.hasCallx:
+			fd, err := funcPtrMapFD(code, r.m, newMap)
+			if err != nil {
+				return fmt.Errorf("prog '%s': relo #%d: can't create a copy of map '%s' with pointers to functions: %w",
+					code.prog.name, i, BpfMapName(r.m), err)
+			}
+			patchDataReloc(code.insns[r.insnOff:], r.symOff, fd)
 		case r.kind != relocExternLD64 && !r.m.autocreate:
 			poisonMapLdimm64(code.insns[r.insnOff:], slices.Index(obj.maps, r.m))
 		default:
@@ -590,10 +612,7 @@ func patchReloc(insns []byte, r progReloc) {
 		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
 		binary.NativeEndian.PutUint32(insn[12:], 0)
 	case relocData:
-		imm := binary.NativeEndian.Uint32(insn[4:])
-		binary.NativeEndian.PutUint32(insn[12:], imm+r.symOff)
-		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
-		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
+		patchDataReloc(insn, r.symOff, r.m.fd)
 	case relocExternLD64:
 		// The extern offset replaces the instruction immediate; it is
 		// not added to it as for a global variable.
@@ -601,6 +620,16 @@ func patchReloc(insns []byte, r progReloc) {
 		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
 		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
 	}
+}
+
+// patchDataReloc turns the ld_imm64 pair insn of a global variable reference
+// into a BPF_PSEUDO_MAP_VALUE load from the map descriptor fd. The variable's
+// offset, symOff, is added to the instruction's own immediate.
+func patchDataReloc(insn []byte, symOff uint32, fd int) {
+	imm := binary.NativeEndian.Uint32(insn[4:])
+	binary.NativeEndian.PutUint32(insn[12:], imm+symOff)
+	insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
+	binary.NativeEndian.PutUint32(insn[4:], uint32(fd))
 }
 
 // relocKind is what a program relocation patches.

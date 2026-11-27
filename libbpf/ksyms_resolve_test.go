@@ -369,7 +369,7 @@ func relocatedProgram(t *testing.T, obj *BpfObject, name string) *progCode {
 	if err != nil {
 		t.Fatalf("relocateObject: %v", err)
 	}
-	if err := relocateObjectData(codes); err != nil {
+	if err := relocateObjectData(codes, noFuncPtrMap); err != nil {
 		t.Fatalf("relocateObjectData: %v", err)
 	}
 	for _, code := range codes {

@@ -29,6 +29,9 @@ const (
 // part at their byte offset in insns, and funcInfo and lineInfo the
 // .BTF.ext records with instruction indexes into insns. subInsnOff is the
 // instruction index where each part starts; the program itself starts at 0.
+// hasCallx is set when the code has an indirect call; it then also holds
+// every static function the read-only data it loads points to, and loads
+// its own copies of those maps.
 type progCode struct {
 	prog       *BpfProgram
 	insns      []byte
@@ -36,6 +39,7 @@ type progCode struct {
 	funcInfo   []byte
 	lineInfo   []byte
 	subInsnOff map[*BpfProgram]int
+	hasCallx   bool
 }
 
 // relocator holds every program's input to the call relocation: a copy of
@@ -101,11 +105,14 @@ func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCt
 }
 
 // relocateObjectData patches the map, global data and extern loads in the
-// code of every main program. The maps must have their descriptors.
-func relocateObjectData(codes []*progCode) error {
+// code of every main program. The maps must have their descriptors. newMap
+// creates the copies of the read-only data maps with function pointers that
+// the programs with callx load. The error keeps the errno of a failed copy
+// and is EINVAL otherwise.
+func relocateObjectData(codes []*progCode, newMap funcPtrMapCreator) error {
 	for _, code := range codes {
-		if err := relocateData(code); err != nil {
-			return &Error{Op: "bpf_prog_load", Errno: unix.EINVAL, Log: err.Error()}
+		if err := relocateData(code, newMap); err != nil {
+			return &Error{Op: "bpf_prog_load", Errno: errnoFromError(err), Log: err.Error()}
 		}
 	}
 	return nil
@@ -159,7 +166,9 @@ func recordRelocs(obj *BpfObject, p *BpfProgram, insns []byte) ([]progReloc, err
 // instructions with every subprogram it reaches appended, and every call and
 // subprogram address load rewritten to the appended copy. Each main program
 // appends its subprograms in the order it reaches them, so a subprogram can
-// sit at a different offset in each.
+// sit at a different offset in each. When the code has callx, the static
+// functions its read-only data points to are appended last, as
+// appendFuncPtrs describes.
 func (r *relocator) relocateCalls(prog *BpfProgram) (*progCode, error) {
 	code := &progCode{
 		prog:       prog,
@@ -168,6 +177,9 @@ func (r *relocator) relocateCalls(prog *BpfProgram) (*progCode, error) {
 		subInsnOff: map[*BpfProgram]int{prog: 0},
 	}
 	if err := r.relocCode(code, prog); err != nil {
+		return nil, err
+	}
+	if err := r.appendFuncPtrs(code); err != nil {
 		return nil, err
 	}
 	return code, nil

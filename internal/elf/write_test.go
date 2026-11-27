@@ -155,7 +155,7 @@ func TestMarshalRelocations(t *testing.T) {
 		t.Fatalf("OpenBytes: %v", err)
 	}
 
-	want := []Reloc{{Section: "kprobe/test", Offset: 0, Symbol: "counts", SymbolIndex: 4, Type: R_BPF_64_64}}
+	want := []Reloc{{Section: "kprobe/test", SectionIndex: testProgIndex, Offset: 0, Symbol: "counts", SymbolIndex: 4, Type: R_BPF_64_64}}
 	if !reflect.DeepEqual(o.Relocations, want) {
 		t.Fatalf("relocations = %+v, want %+v", o.Relocations, want)
 	}
