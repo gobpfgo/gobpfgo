@@ -226,8 +226,8 @@ func TestBpfProgramAttachUprobeArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findUprobeFuncOffset: %v", err)
 	}
-	root, err := tracefsRoot()
-	if err != nil {
+	root := tracefsRoot()
+	if _, err := os.Stat(filepath.Join(root, uprobeEventsFile)); err != nil {
 		t.Skipf("tracefs is not available: %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestBpfProgramAttachUprobeArchive(t *testing.T) {
 	}
 	defer BpfLinkDestroy(link)
 
-	events := string(readTestFile(t, filepath.Join(root, "uprobe_events")))
+	events := string(readTestFile(t, filepath.Join(root, uprobeEventsFile)))
 	line := fmt.Sprintf("p:%s/%s %s:0x%016x", link.legacy.group(), link.legacy.name, archivePath, want)
 	if !strings.Contains(events, line) {
 		t.Fatalf("uprobe_events has no %q:\n%s", line, events)

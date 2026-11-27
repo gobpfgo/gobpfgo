@@ -122,7 +122,8 @@ type kprobeRoute struct {
 // retprobe bit and leaves tracefs alone. Without the PMU type the default
 // mode takes tracefs and the perf and link modes are EOPNOTSUPP. An empty
 // function name, a raw address, is EOPNOTSUPP on the tracefs path and goes to
-// the PMU otherwise. A BPF cookie is not refused before the attach.
+// the PMU otherwise. A BPF cookie is not refused before the attach. The
+// tracefs event is named as libbpf names it, after the function and offset.
 func TestBpfProgramAttachKprobeRouting(t *testing.T) {
 	events := filepath.Join(fakeTracefs(t), kprobeEventsFile)
 	fakeUprobePMU(t, map[string]string{"type": "7\n", "format/retprobe": "config:0\n"})
@@ -155,6 +156,7 @@ func TestBpfProgramAttachKprobeRouting(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			seq := attachSeq.Load()
 			link, err := BpfProgramAttachKprobeOpts(fakeLoadedProgram(), tt.funcName, &tt.opts)
 			if link != nil {
 				BpfLinkDestroy(link)
@@ -163,8 +165,10 @@ func TestBpfProgramAttachKprobeRouting(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("attach error = %v, want %v", err, tt.want)
 			}
+			name := fmt.Sprintf("libbpf_%d_%d_%s_0x%x", os.Getpid(), seq, tt.funcName, tt.opts.Offset)
 			location := fmt.Sprintf("%s+0x%x", tt.funcName, tt.opts.Offset)
-			checkProbeEventCommands(t, string(readTestFile(t, events)), tt.events, location)
+			checkProbeEventCommands(t, string(readTestFile(t, events)), tt.events, name, location)
+			checkProbeEventSeq(t, seq, tt.events != "")
 		})
 	}
 }
@@ -190,8 +194,9 @@ func TestAttachProbePerfEventFailure(t *testing.T) {
 			if err := os.Truncate(events, 0); err != nil {
 				t.Fatal(err)
 			}
-			event := &legacyEvent{root: root, kind: probeKprobe, name: "gobpfgo_test"}
-			if err := event.add("p:kprobes/gobpfgo_test do_sys_openat2+0x0\n"); err != nil {
+			const name = "libbpf_1_0_do_sys_openat2_0x0"
+			event := &legacyEvent{root: root, kind: probeKprobe, name: name}
+			if err := event.add("p:kprobes/" + name + " do_sys_openat2+0x0"); err != nil {
 				t.Fatal(err)
 			}
 			pfd := pipeReadEnd(t)
@@ -204,7 +209,7 @@ func TestAttachProbePerfEventFailure(t *testing.T) {
 			if _, err := unix.FcntlInt(uintptr(pfd), unix.F_GETFD, 0); !errors.Is(err, unix.EBADF) {
 				t.Errorf("perf descriptor %d still open: %v", pfd, err)
 			}
-			checkProbeEventCommands(t, string(readTestFile(t, events)), "kprobes", "do_sys_openat2+0x0")
+			checkProbeEventCommands(t, string(readTestFile(t, events)), "kprobes", name, "do_sys_openat2+0x0")
 		})
 	}
 }
@@ -307,6 +312,7 @@ func runKprobeModeCase(t *testing.T, c kprobeModeCase) {
 	}
 	events, fds := probeEvents(t, kprobeEventsFile), openDescriptors(t)
 
+	seq := attachSeq.Load()
 	link, err := BpfProgramAttachKprobeOpts(prog, funcName, opts)
 	if c.want != 0 {
 		if link != nil || !errors.Is(err, c.want) {
@@ -321,6 +327,7 @@ func runKprobeModeCase(t *testing.T, c kprobeModeCase) {
 	}
 	_, pmuErr := determineKprobePerfType()
 	checkProbeModeLink(t, link, c.mode, pmuErr != nil)
+	checkLegacyEventName(t, link, fmt.Sprintf("libbpf_%d_%d_%s_0x0", os.Getpid(), seq, kprobeModeTarget))
 	checkKprobeModeEvent(t, link, c.retprobe, events)
 
 	triggerOpen(t)

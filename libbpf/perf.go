@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name, perf_event_open_probe, determine_kprobe_perf_type, determine_uprobe_perf_type, determine_kprobe_retprobe_bit, determine_uprobe_retprobe_bit, parse_uint_from_file
+// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name, remove_kprobe_event_legacy, remove_uprobe_event_legacy, append_to_file, use_debugfs, tracefs_path, perf_event_open_probe, determine_kprobe_perf_type, determine_uprobe_perf_type, determine_kprobe_retprobe_bit, determine_uprobe_retprobe_bit, parse_uint_from_file
 
 //go:build linux && (amd64 || arm64)
 
@@ -29,6 +29,10 @@ const perfEventAttrSize = 128
 // maxEventNameLen is the tracefs event name limit, including the terminator.
 const maxEventNameLen = 64
 
+// maxTracefsCommandLen is the size of libbpf's append_to_file buffer: a
+// tracefs command must be shorter, leaving room for the terminator.
+const maxTracefsCommandLen = 1024
+
 // The uprobe PMU takes the reference counter offset in the upper 32 bits of
 // config.
 const (
@@ -37,8 +41,15 @@ const (
 )
 
 var (
-	attachSeq    uint64
-	tracefsRoots = []string{"/sys/kernel/tracing", "/sys/kernel/debug/tracing"}
+	// attachSeq numbers the tracefs probe events of the process, as the
+	// static index of libbpf's gen_probe_legacy_event_name does: from 0,
+	// and wrapping to negative numbers like the C int.
+	attachSeq atomic.Int32
+
+	// debugfsTracingDir and tracefsDir are libbpf's DEBUGFS and TRACEFS,
+	// the two places tracefsRoot chooses from.
+	debugfsTracingDir = "/sys/kernel/debug/tracing"
+	tracefsDir        = "/sys/kernel/tracing"
 
 	// kprobePMUDir and uprobePMUDir are the sysfs directories of the
 	// kprobe and uprobe perf PMUs, which hold the PMU type and the config
@@ -135,40 +146,48 @@ func (e *legacyEvent) open(line string, pid int) (int, error) {
 	return pfd, nil
 }
 
+// remove deletes the event from the probe file.
 func (e *legacyEvent) remove() error {
-	return appendTracefs(e.root, e.probeFile(), fmt.Sprintf("-:%s/%s\n", e.group(), e.name))
+	return appendTracefs(e.root, e.probeFile(), fmt.Sprintf("-:%s/%s", e.group(), e.name))
 }
 
-// probeEventName returns a unique, sanitized event name. libbpf uses the same
-// shape, libbpf_<pid>_<seq>_<label>; the gobpfgo prefix keeps the events
-// apart.
-func probeEventName(label string) string {
-	seq := atomic.AddUint64(&attachSeq, 1)
-	name := fmt.Sprintf("gobpfgo_%d_%d_%s", os.Getpid(), seq, label)
-	if len(name) > maxEventNameLen-1 {
-		name = name[:maxEventNameLen-1]
+// probeEventName returns the name of a new tracefs probe event on name, a
+// kernel function or the end of a binary path, at offset, numbered by
+// attachSeq; see legacyEventName.
+func probeEventName(name string, offset uint64) string {
+	return legacyEventName(os.Getpid(), attachSeq.Add(1)-1, name, offset)
+}
+
+// legacyEventName builds a tracefs probe event name the way libbpf's
+// gen_probe_legacy_event_name does: libbpf_<pid>_<seq>_<name>_0x<offset>,
+// cut to maxEventNameLen-1 bytes, with every byte that is not an ASCII letter
+// or digit replaced by '_'.
+func legacyEventName(pid int, seq int32, name string, offset uint64) string {
+	b := fmt.Appendf(nil, "libbpf_%d_%d_%s_0x%x", pid, seq, name, offset)
+	if len(b) > maxEventNameLen-1 {
+		b = b[:maxEventNameLen-1]
 	}
-	return sanitizeEventName(name)
-}
-
-// sanitizeEventName replaces every byte tracefs does not accept in an event
-// name, matching libbpf's isalnum rule.
-func sanitizeEventName(name string) string {
-	b := []byte(name)
 	for i, c := range b {
-		if !isEventNameByte(c) {
+		if !isAlnum(c) {
 			b[i] = '_'
 		}
 	}
 	return string(b)
 }
 
-func isEventNameByte(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+// isAlnum is isalnum in the C locale.
+func isAlnum(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
-// appendTracefs appends one command to a tracefs control file.
+// appendTracefs appends one command to a tracefs control file in a single
+// write, as libbpf's append_to_file does: the command is written as given,
+// with no newline added, and a command of maxTracefsCommandLen bytes or more
+// is EINVAL before the file is opened.
 func appendTracefs(root, file, line string) error {
+	if len(line) >= maxTracefsCommandLen {
+		return unix.EINVAL
+	}
 	f, err := os.OpenFile(filepath.Join(root, file), os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		return err
@@ -179,36 +198,21 @@ func appendTracefs(root, file, line string) error {
 	return err
 }
 
-// tracefsRoot returns the tracefs mount that has the probe control files.
-func tracefsRoot() (string, error) {
-	var statErr error
-
-	for _, root := range tracefsRoots {
-		_, err := os.Stat(filepath.Join(root, "kprobe_events"))
-		if err == nil {
-			return root, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			statErr = err
-		}
+// tracefsRoot returns the tracefs directory, chosen as libbpf's tracefs_path
+// does: the tracing directory under debugfs when it exists for the effective
+// IDs, and the tracefs mount otherwise. Neither has to hold the probe control
+// files; a missing one fails when it is opened. libbpf decides once per
+// process, while tracefsRoot checks again on every call.
+func tracefsRoot() string {
+	if unix.Faccessat(unix.AT_FDCWD, debugfsTracingDir, unix.F_OK, unix.AT_EACCESS) == nil {
+		return debugfsTracingDir
 	}
-	if statErr != nil {
-		return "", statErr
-	}
-	return "", &Error{
-		Op:    "tracefs",
-		Errno: unix.ENOENT,
-		Log:   "tracefs kprobe_events not found",
-	}
+	return tracefsDir
 }
 
 // tracepointID reads the tracepoint id from the tracefs events directory.
 func tracepointID(category, name string) (int, error) {
-	root, err := tracefsRoot()
-	if err != nil {
-		return 0, err
-	}
-	path := filepath.Join(root, "events", category, name, "id")
+	path := filepath.Join(tracefsRoot(), "events", category, name, "id")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
