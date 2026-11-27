@@ -56,14 +56,16 @@ type relocator struct {
 // relocateObject relocates the programs of obj for loading and returns the
 // code of each main program, in program order. CO-RE runs first, on every
 // program and subprogram, then the calls build each main program's code
-// with its function and line records. Last, each main program's records of
-// global functions with arg:ctx arguments are fixed up, which adds types to
-// the object BTF, unless argCtxTag reports that the kernel reads the tag.
-// relocateObjectData patches the map, global data and extern loads once the
-// maps exist. The program instructions are not changed; each step works on
-// copies. ext may be nil, and kernels is empty when there is no CO-RE
-// relocation.
-func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag func() bool) ([]*progCode, error) {
+// with its function and line records, and its exception callback is
+// appended when declTag reports that the kernel reads decl tags. Last, each
+// main program's records of global functions with arg:ctx arguments are
+// fixed up, which adds types to the object BTF, unless argCtxTag reports
+// that the kernel reads the tag. relocateObjectData patches the map, global
+// data and extern loads once the maps exist. The program instructions are
+// not changed; each step works on copies. ext may be nil, and kernels is
+// empty when there is no CO-RE relocation. A bad exception callback tag
+// returns EINVAL or ENOENT, as assignExceptionCb describes.
+func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag, declTag func() bool) ([]*progCode, error) {
 	r := &relocator{
 		obj:    obj,
 		ext:    ext,
@@ -88,6 +90,9 @@ func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCt
 				Errno: unix.EINVAL,
 				Log:   fmt.Sprintf("prog '%s': failed to relocate calls: %v", p.name, err),
 			}
+		}
+		if err := r.appendExceptionCb(code, declTag); err != nil {
+			return nil, err
 		}
 		codes = append(codes, code)
 	}

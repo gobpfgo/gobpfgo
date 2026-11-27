@@ -158,6 +158,13 @@ func openSubprogObject(t *testing.T, names ...string) *BpfObject {
 func argCtxTagSupported() bool { return true }
 func argCtxTagMissing() bool   { return false }
 
+// declTagSupported and declTagMissing stand in for the kernel's
+// BTF_KIND_DECL_TAG feature probe. The first assigns exception callbacks, as
+// libbpf's generated loader does; the second skips them, as on a kernel
+// without decl tags.
+func declTagSupported() bool { return true }
+func declTagMissing() bool   { return false }
+
 // relocateWithoutKernel relocates obj with each map's index standing in for
 // its descriptor, as libbpf's generated loader does, no CO-RE target and no
 // arg:ctx fixup. The stand-in descriptors are cleared before it returns, so
@@ -178,23 +185,29 @@ func relocateWithoutKernelArgCtx(t *testing.T, obj *BpfObject, ext *btf.ExtSpec,
 
 // relocateWithStandIns relocates obj like relocateWithoutKernelArgCtx and
 // also returns the programs' copies of the maps with function pointers, which
-// funcPtrMapStandIn numbers as libbpf's generated loader does. The stand-in
-// descriptors and copies are cleared before it returns, so closing the object
-// closes none of them.
+// funcPtrMapStandIn numbers as libbpf's generated loader does. Like that
+// loader, it assigns exception callbacks and takes every typed .ksyms extern
+// as resolved to ID 0, which the loader fills in when it runs. The stand-in
+// descriptors, extern IDs and copies are cleared before it returns, so
+// closing the object closes none of them.
 func relocateWithStandIns(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtxTag func() bool) ([]*progCode, []standInCopy, error) {
 	t.Helper()
 
 	for i, m := range obj.maps {
 		m.fd = i
 	}
+	typedKsyms := standInTypedKsyms(obj)
 	defer func() {
 		for _, m := range obj.maps {
 			m.fd = -1
 		}
+		for _, ext := range typedKsyms {
+			ext.isSet = false
+		}
 		obj.funcPtrMaps = nil
 	}()
 
-	codes, err := relocateObject(obj, ext, nil, argCtxTag)
+	codes, err := relocateObject(obj, ext, nil, argCtxTag, declTagSupported)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -208,6 +221,21 @@ func relocateWithStandIns(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtx
 		copies = append(copies, standInCopy{prog: c.prog, m: c.m, fd: c.fd, value: standIn.values[c.fd]})
 	}
 	return codes, copies, nil
+}
+
+// standInTypedKsyms marks every typed .ksyms extern of obj resolved, with
+// kernel BTF ID 0 and fd array slot 0, and returns them.
+func standInTypedKsyms(obj *BpfObject) []*externDesc {
+	var typed []*externDesc
+	for i := range obj.externs {
+		ext := &obj.externs[i]
+		if ext.typ != extKsym || ext.ksym.typeID == 0 {
+			continue
+		}
+		ext.isSet, ext.ksym.kernelBtfID, ext.ksym.btfFdIdx = true, 0, 0
+		typed = append(typed, ext)
+	}
+	return typed
 }
 
 func objectExt(t *testing.T, obj *BpfObject) *btf.ExtSpec {
@@ -305,6 +333,7 @@ func TestSubprogOracle(t *testing.T) {
 		"subprog-link-extern.json", "subprog-link-extern-reverse.json",
 		"subprog-hidden.json", "subprog-arg-ctx.json",
 		"subprog-callx.json",
+		"subprog-exception-cb.json", "subprog-exception-cb-direct.json",
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {

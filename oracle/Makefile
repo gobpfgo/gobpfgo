@@ -113,6 +113,8 @@ subprog-fixture: $(ORACLE)
 	$(ORACLE) subprog ../testdata/progs/subprog_hidden.bpf.o > ../testdata/oracle/subprog-hidden.json
 	$(ORACLE) subprog ../testdata/progs/subprog_arg_ctx.bpf.o > ../testdata/oracle/subprog-arg-ctx.json
 	$(ORACLE) subprog ../testdata/progs/callx.bpf.o > ../testdata/oracle/subprog-callx.json
+	$(ORACLE) subprog ../testdata/progs/exception_cb.bpf.o > ../testdata/oracle/subprog-exception-cb.json
+	$(ORACLE) subprog ../testdata/progs/exception_cb_direct.bpf.o > ../testdata/oracle/subprog-exception-cb-direct.json
 	$(ORACLE) subprog ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/subprog-link-text.json
 	$(ORACLE) subprog ../testdata/progs/link_text_b.bpf.o ../testdata/progs/link_text_a.bpf.o > ../testdata/oracle/subprog-link-text-reverse.json
 	$(ORACLE) subprog ../testdata/progs/link_extern_a.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/subprog-link-extern.json

@@ -87,14 +87,23 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // relocated. A program whose code then has an indirect call, callx, also
 // gets every static .text function that the read-only data it loads points
 // to, such as the entries of a table of functions; a global function is not
-// appended, because callx cannot call it. Two fixups then change the object
-// BTF, which BpfObjectBTF returns. On a kernel whose verifier does not read
-// the arg:ctx decl tag, a global subprogram argument tagged __arg_ctx gets a
-// copy of its function's BTF in which the argument points to the program
-// type's context struct, and the calling program's function record names
-// that copy. A .text subprogram whose symbol is global or weak with hidden
-// or internal visibility gets static linkage in its BTF FUNC, so the
-// verifier checks it in its caller's context.
+// appended, because callx cannot call it.
+//
+// On a kernel with BTF_KIND_DECL_TAG, a program whose BTF function carries
+// an exception_callback:<name> decl tag then gets the global .text function
+// name appended, unless it already calls it, so the verifier finds the
+// callback that bpf_throw returns through. The load fails with EINVAL when
+// such a tag is not on a global function, is empty or names a static or
+// hidden function, and with ENOENT when it names no .text function.
+//
+// Two fixups then change the object BTF, which BpfObjectBTF returns. On a
+// kernel whose verifier does not read the arg:ctx decl tag, a global
+// subprogram argument tagged __arg_ctx gets a copy of its function's BTF in
+// which the argument points to the program type's context struct, and the
+// calling program's function record names that copy. A .text subprogram
+// whose symbol is global or weak with hidden or internal visibility gets
+// static linkage in its BTF FUNC, so the verifier checks it in its caller's
+// context.
 //
 // It then loads the BTF. On a kernel without BTF_KIND_DECL_TAG the kernel
 // gets a copy in which every decl tag is a one-byte integer type, so the
@@ -160,7 +169,7 @@ func BpfObjectLoad(obj *BpfObject) error {
 			Log:   err.Error(),
 		}
 	}
-	codes, err := relocateObject(obj, ext, kernelBTFs, featArgCtxTag.supported)
+	codes, err := relocateObject(obj, ext, kernelBTFs, featArgCtxTag.supported, featBtfDeclTag.supported)
 	if err != nil {
 		return err
 	}

@@ -46,6 +46,10 @@ type BpfProgram struct {
 	secInsnCnt    int
 	symGlobal     bool
 	markBtfStatic bool
+	// exceptionCbIdx is the index in the object's programs of a main
+	// program's exception callback, which the load appends to the
+	// program's code, or -1. The load sets it.
+	exceptionCbIdx int
 }
 
 // BpfProgramName returns the function name of the program.

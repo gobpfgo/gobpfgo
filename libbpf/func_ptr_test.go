@@ -475,7 +475,7 @@ func TestFuncPtrMapErrors(t *testing.T) {
 		obj := openSubprogObject(t, "callx.bpf.o")
 		BpfObjectFindMapByName(obj, ".rodata").funcPtrs[2].textOff = 8
 
-		_, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported)
+		_, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported, declTagSupported)
 		msg := "prog 'handle_callx_one': map 'callx.rodata': no function at .text+8 for the pointer at offset 24"
 		if !errors.Is(err, unix.EINVAL) || !strings.Contains(err.Error(), msg) {
 			t.Fatalf("relocateObject = %v, want %q", err, msg)
@@ -484,7 +484,7 @@ func TestFuncPtrMapErrors(t *testing.T) {
 
 	t.Run("failed copy", func(t *testing.T) {
 		obj := openSubprogObject(t, "callx.bpf.o")
-		codes, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported)
+		codes, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported, declTagSupported)
 		if err != nil {
 			t.Fatalf("relocateObject: %v", err)
 		}

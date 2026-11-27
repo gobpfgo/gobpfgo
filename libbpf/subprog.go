@@ -107,6 +107,7 @@ func newProgram(sec objelf.Program, sym objelf.Symbol, def secDef) *BpfProgram {
 		secInsnCnt:         int(sym.Size / bpfInsnSize),
 		symGlobal:          global,
 		markBtfStatic:      global && (vis == elf.STV_HIDDEN || vis == elf.STV_INTERNAL),
+		exceptionCbIdx:     -1,
 		insns:              sec.Insns[sym.Value:end:end],
 		fd:                 -1,
 	}

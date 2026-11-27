@@ -29,7 +29,8 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/subprog_hidden.bpf.c testdata/progs/subprog_arg_ctx.bpf.c \
 	testdata/progs/sanitize_type_tag.bpf.c testdata/progs/sanitize_enum64.bpf.c \
 	testdata/progs/sanitize_float.bpf.c testdata/progs/percpu.bpf.c \
-	testdata/progs/percpu_unused.bpf.c testdata/progs/callx.bpf.c
+	testdata/progs/percpu_unused.bpf.c testdata/progs/callx.bpf.c \
+	testdata/progs/exception_cb.bpf.c testdata/progs/exception_cb_direct.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h oracle/usdt_notes.h
 
 .PHONY: format format-check
