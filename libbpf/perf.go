@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name, perf_event_open_probe, determine_uprobe_perf_type, determine_uprobe_retprobe_bit, parse_uint_from_file
+// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name, perf_event_open_probe, determine_kprobe_perf_type, determine_uprobe_perf_type, determine_kprobe_retprobe_bit, determine_uprobe_retprobe_bit, parse_uint_from_file
 
 //go:build linux && (amd64 || arm64)
 
@@ -40,8 +40,10 @@ var (
 	attachSeq    uint64
 	tracefsRoots = []string{"/sys/kernel/tracing", "/sys/kernel/debug/tracing"}
 
-	// uprobePMUDir is the sysfs directory of the uprobe perf PMU, which
-	// holds its type and the config bit that selects a uretprobe.
+	// kprobePMUDir and uprobePMUDir are the sysfs directories of the
+	// kprobe and uprobe perf PMUs, which hold the PMU type and the config
+	// bit that selects a return probe.
+	kprobePMUDir = "/sys/bus/event_source/devices/kprobe"
 	uprobePMUDir = "/sys/bus/event_source/devices/uprobe"
 
 	perfLinkProbe struct {
@@ -110,6 +112,27 @@ func (e *legacyEvent) id() (int, error) {
 		return 0, fmt.Errorf("%s %s/%s: id %d", e.probeFile(), e.group(), e.name, id)
 	}
 	return id, nil
+}
+
+// open adds the event with its definition line and opens its perf event for
+// pid, as in probePidCPU. The caller owns the event and the perf descriptor;
+// on failure the event is removed again.
+func (e *legacyEvent) open(line string, pid int) (int, error) {
+	if err := e.add(line); err != nil {
+		return -1, err
+	}
+
+	pfd := -1
+	id, err := e.id()
+	if err == nil {
+		perfPid, cpu := probePidCPU(pid)
+		pfd, err = openTracepointPerf(id, perfPid, cpu)
+	}
+	if err != nil {
+		_ = e.remove()
+		return -1, err
+	}
+	return pfd, nil
 }
 
 func (e *legacyEvent) remove() error {
@@ -213,10 +236,10 @@ func openTracepointPerf(id, pid, cpu int) (int, error) {
 	return unix.PerfEventOpen(&attr, pid, cpu, -1, unix.PERF_FLAG_FD_CLOEXEC)
 }
 
-// probePidCPU returns the perf_event_open pid and cpu of a uprobe for pid: -1
+// probePidCPU returns the perf_event_open pid and cpu of a probe for pid: -1
 // probes every process on CPU 0, and a pid of 0 or more probes that process
 // on every CPU. Any other negative pid becomes pid -1 on every CPU, which
-// perf_event_open rejects.
+// perf_event_open rejects. A kprobe is always opened for pid -1.
 func probePidCPU(pid int) (int, int) {
 	switch {
 	case pid == -1:
@@ -228,42 +251,54 @@ func probePidCPU(pid int) (int, int) {
 	}
 }
 
-// perfEventOpenUprobe opens a uprobe or uretprobe at offset in the file at
-// path through the uprobe perf PMU. Unlike the tracefs path, the PMU takes a
+// perfEventOpenProbe opens a probe through the kprobe perf PMU, or the uprobe
+// perf PMU when uprobe is set, and returns the perf event descriptor, which
+// the caller owns. retprobe selects a kretprobe or uretprobe.
+//
+// For a kprobe, name is the kernel function and offset the offset into it;
+// an empty name probes the raw kernel address in offset. For a uprobe, name
+// is the file and offset the file offset. Only the uprobe PMU takes a
 // reference counter: a nonzero refCtrOffset is the file offset of a USDT
 // semaphore that the kernel increments in every process the uprobe is
 // installed in, and decrements when the event is closed.
 //
 // A refCtrOffset that does not fit in 32 bits is EINVAL, checked before
 // anything else. A missing PMU type file, or retprobe format file for a
-// uretprobe, is ENOENT. The pid selects the processes as in probePidCPU.
-func perfEventOpenUprobe(retprobe bool, path string, offset uint64, pid int, refCtrOffset uint64) (int, error) {
+// return probe, is ENOENT. The pid selects the processes as in probePidCPU.
+func perfEventOpenProbe(uprobe, retprobe bool, name string, offset uint64, pid int, refCtrOffset uint64) (int, error) {
 	if refCtrOffset >= 1<<perfUprobeRefCtrOffsetBits {
 		return -1, unix.EINVAL
 	}
 
-	perfType, err := determineUprobePerfType()
+	determineType, determineRetprobeBit := determineKprobePerfType, determineKprobeRetprobeBit
+	if uprobe {
+		determineType, determineRetprobeBit = determineUprobePerfType, determineUprobeRetprobeBit
+	}
+	perfType, err := determineType()
 	if err != nil {
 		return -1, err
 	}
 	var retprobeBit uint32
 	if retprobe {
-		if retprobeBit, err = determineUprobeRetprobeBit(); err != nil {
+		if retprobeBit, err = determineRetprobeBit(); err != nil {
 			return -1, err
 		}
 	}
 
-	attr := uprobePerfEventAttr(perfType, retprobe, retprobeBit, offset, refCtrOffset)
+	attr := probePerfEventAttr(perfType, retprobe, retprobeBit, offset, refCtrOffset)
 	perfPid, cpu := probePidCPU(pid)
-	return sys.PerfEventOpenUprobe(&attr, path, perfPid, cpu)
+	if uprobe {
+		return sys.PerfEventOpenUprobe(&attr, name, perfPid, cpu)
+	}
+	return sys.PerfEventOpenKprobe(&attr, name, perfPid, cpu)
 }
 
-// uprobePerfEventAttr builds the perf event attribute of a uprobe PMU event
-// with the given PMU type and retprobe bit. Config carries the retprobe bit
-// and the reference counter offset in its upper 32 bits, and Ext2, the
-// kernel's config2, the probe offset; sys.PerfEventOpenUprobe sets Ext1,
-// config1, to the path.
-func uprobePerfEventAttr(perfType uint32, retprobe bool, retprobeBit uint32, offset, refCtrOffset uint64) unix.PerfEventAttr {
+// probePerfEventAttr builds the perf event attribute of a kprobe or uprobe PMU
+// event with the given PMU type and retprobe bit. Config carries the retprobe
+// bit and the reference counter offset in its upper 32 bits, and Ext2, the
+// kernel's config2, the probe offset or a kprobe's raw address. The sys open
+// call sets Ext1, config1, to the function name or path.
+func probePerfEventAttr(perfType uint32, retprobe bool, retprobeBit uint32, offset, refCtrOffset uint64) unix.PerfEventAttr {
 	attr := unix.PerfEventAttr{
 		Type:   perfType,
 		Size:   perfEventAttrSize,
@@ -276,10 +311,23 @@ func uprobePerfEventAttr(perfType uint32, retprobe bool, retprobeBit uint32, off
 	return attr
 }
 
+// determineKprobePerfType reads the type of the kprobe perf PMU. A kernel
+// without the PMU has no type file, which is ENOENT.
+func determineKprobePerfType() (uint32, error) {
+	return parseUintFromFile(filepath.Join(kprobePMUDir, "type"), "")
+}
+
 // determineUprobePerfType reads the type of the uprobe perf PMU. A kernel
 // without the PMU has no type file, which is ENOENT.
 func determineUprobePerfType() (uint32, error) {
 	return parseUintFromFile(filepath.Join(uprobePMUDir, "type"), "")
+}
+
+// determineKprobeRetprobeBit reads the config bit that turns a kprobe PMU
+// event into a kretprobe. The sysfs format file says "config:<bit>"; a kernel
+// without it is ENOENT.
+func determineKprobeRetprobeBit() (uint32, error) {
+	return parseUintFromFile(filepath.Join(kprobePMUDir, "format", "retprobe"), "config:")
 }
 
 // determineUprobeRetprobeBit reads the config bit that turns a uprobe PMU

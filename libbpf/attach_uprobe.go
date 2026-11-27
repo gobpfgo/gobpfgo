@@ -18,29 +18,31 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ProbeAttachMode selects how BpfProgramAttachUprobeOpts creates a uprobe and
-// attaches the program to it. A mode the kernel cannot provide returns
-// EOPNOTSUPP.
+// ProbeAttachMode selects how BpfProgramAttachKprobeOpts and
+// BpfProgramAttachUprobeOpts create a probe and attach the program to it. A
+// mode the kernel cannot provide returns EOPNOTSUPP.
 type ProbeAttachMode int
 
-// Uprobe attach modes.
+// Kprobe and uprobe attach modes.
 const (
 	// ProbeAttachModeDefault uses the newest mechanism the kernel has: the
-	// uprobe perf PMU, or a tracefs uprobe event on a kernel without it,
-	// attached with a BPF perf link, or with PERF_EVENT_IOC_SET_BPF on a
-	// kernel without perf links. It is the zero value.
+	// kprobe or uprobe perf PMU, or a tracefs probe event on a kernel
+	// without it, attached with a BPF perf link, or with
+	// PERF_EVENT_IOC_SET_BPF on a kernel without perf links. It is the zero
+	// value.
 	ProbeAttachModeDefault ProbeAttachMode = 0
-	// ProbeAttachModeLegacy creates a tracefs uprobe event and attaches the
+	// ProbeAttachModeLegacy creates a tracefs probe event and attaches the
 	// program with PERF_EVENT_IOC_SET_BPF. tracefs must be writable, and the
-	// mode carries neither a reference counter nor a BPF cookie.
+	// mode carries neither a uprobe reference counter, a kprobe on a raw
+	// address nor a BPF cookie.
 	ProbeAttachModeLegacy ProbeAttachMode = 1
-	// ProbeAttachModePerf opens the uprobe through the uprobe perf PMU with
+	// ProbeAttachModePerf opens the probe through its perf PMU with
 	// perf_event_open and attaches the program with PERF_EVENT_IOC_SET_BPF.
-	// It carries a reference counter but no BPF cookie.
+	// It carries a uprobe reference counter but no BPF cookie.
 	ProbeAttachModePerf ProbeAttachMode = 2
-	// ProbeAttachModeLink opens the uprobe through the uprobe perf PMU and
-	// attaches the program with a BPF perf link, which carries a BPF cookie.
-	// The kernel must support perf links (Linux 5.15 or newer).
+	// ProbeAttachModeLink opens the probe through its perf PMU and attaches
+	// the program with a BPF perf link, which carries a BPF cookie. The
+	// kernel must support perf links (Linux 5.15 or newer).
 	ProbeAttachModeLink ProbeAttachMode = 3
 )
 
@@ -130,7 +132,7 @@ func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, of
 		return nil, attachErr(op, err)
 	}
 	_, pmuErr := determineUprobePerfType()
-	legacy, forceIoctl, err := uprobeAttachMode(opts.AttachMode, pmuErr != nil, perfLinkSupported)
+	legacy, forceIoctl, err := probeAttachMode(opts.AttachMode, pmuErr != nil, perfLinkSupported)
 	if err != nil {
 		return nil, attachErr(op, err)
 	}
@@ -140,31 +142,26 @@ func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, of
 	if legacy {
 		event, pfd, err = openLegacyUprobe(opts, path, offset, pid)
 	} else {
-		pfd, err = perfEventOpenUprobe(opts.Retprobe, path, offset, pid, opts.RefCtrOffset)
+		pfd, err = perfEventOpenProbe(true, opts.Retprobe, path, offset, pid, opts.RefCtrOffset)
 	}
 	if err != nil {
 		return nil, attachErr(op, err)
 	}
 
 	peOpts := &BpfPerfEventOpts{BpfCookie: opts.BpfCookie, ForceIoctlAttach: forceIoctl}
-	link, err := BpfProgramAttachPerfEventOpts(prog, pfd, peOpts)
+	link, err := attachProbePerfEvent(prog, pfd, event, peOpts)
 	if err != nil {
-		unix.Close(pfd)
-		if event != nil {
-			_ = event.remove()
-		}
 		return nil, attachErr(op, err)
 	}
-	link.legacy = event
 	return link, nil
 }
 
-// uprobeAttachMode applies mode to the kernel's capabilities: noPMU reports a
-// kernel without the uprobe perf PMU, and perfLink, which only the link mode
+// probeAttachMode applies mode to the kernel's capabilities: noPMU reports a
+// kernel without the probe's perf PMU, and perfLink, which only the link mode
 // calls, reports BPF perf link support. legacy selects a tracefs event over
 // the PMU, and forceIoctl selects PERF_EVENT_IOC_SET_BPF even when the kernel
 // has perf links.
-func uprobeAttachMode(mode ProbeAttachMode, noPMU bool, perfLink func() bool) (legacy, forceIoctl bool, err error) {
+func probeAttachMode(mode ProbeAttachMode, noPMU bool, perfLink func() bool) (legacy, forceIoctl bool, err error) {
 	switch mode {
 	case ProbeAttachModeDefault:
 		return noPMU, false, nil
@@ -234,18 +231,8 @@ func openLegacyUprobe(opts *BpfUprobeOpts, path string, offset uint64, pid int) 
 	label := fmt.Sprintf("%s_0x%x", filepath.Base(path), offset)
 	event := &legacyEvent{root: root, kind: kind, name: probeEventName(label)}
 	line := fmt.Sprintf("%c:%s/%s %s:0x%x\n", prefix, event.group(), event.name, path, offset)
-	if err := event.add(line); err != nil {
-		return nil, -1, err
-	}
-
-	pfd := -1
-	id, err := event.id()
-	if err == nil {
-		perfPid, cpu := probePidCPU(pid)
-		pfd, err = openTracepointPerf(id, perfPid, cpu)
-	}
+	pfd, err := event.open(line, pid)
 	if err != nil {
-		_ = event.remove()
 		return nil, -1, err
 	}
 	return event, pfd, nil
