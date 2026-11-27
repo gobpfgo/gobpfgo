@@ -38,6 +38,7 @@ int oracle_ringbuf(const char *path);
 int oracle_perfbuf(const char *path);
 int oracle_probe(void);
 int oracle_linker(const char *const *paths, int count);
+int oracle_linker_kconfig(const char *kconfig, const char *const *paths, int count);
 int oracle_dedup(const char *const *paths, int count);
 int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
@@ -51,5 +52,6 @@ void oracle_meta(struct json *j, const struct oracle_meta *meta);
 void oracle_field_block(struct json *j, const char *name, const struct oracle_field *fields, size_t count, size_t size);
 const char *oracle_basename(const char *path);
 int oracle_link_objects(const char *const *inputs, int count, const char *output);
+int oracle_kconfig_resolve(struct json *j, const char *path, const char *kconfig);
 
 #endif

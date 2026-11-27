@@ -22,7 +22,9 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/usdt_target.c testdata/progs/usdt_attach.bpf.c \
 	testdata/progs/usdt_loop_target.c testdata/progs/subprog.bpf.c \
 	testdata/progs/subprog_callback.bpf.c testdata/progs/link_extern_a.bpf.c \
-	testdata/progs/link_extern_b.bpf.c testdata/progs/link_extern_weak.bpf.c
+	testdata/progs/link_extern_b.bpf.c testdata/progs/link_extern_weak.bpf.c \
+	testdata/progs/link_kconfig.bpf.c testdata/progs/link_ksyms.bpf.c \
+	testdata/progs/link_map_extern.bpf.c testdata/progs/link_map_def.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h oracle/usdt_notes.h
 
 .PHONY: format format-check

@@ -42,15 +42,23 @@ type BpfLinkerFileOpts struct{}
 // must match the definition's. The output symbol becomes the definition and
 // every relocation against the extern follows it; a strong extern makes a
 // weak definition strong. The extern's BTF VAR becomes allocated and its FUNC
-// global with the definition's parameter names. An extern that no object
-// defines, strong or weak, stays an undefined symbol with extern BTF and is
-// left out of every DATASEC; finalizing does not fail, and opening such an
-// object fails later because the extern has no DATASEC.
+// global with the definition's parameter names. An extern in .extern or in
+// no DATASEC that no object defines, strong or weak, stays an undefined
+// symbol with extern BTF and is left out of every DATASEC; finalizing does
+// not fail, and opening such an object fails later because the extern has
+// no DATASEC.
 //
-// The .kconfig and .ksyms externs, whose DATASECs have no ELF section, are
-// not linked yet: an object with them is rejected with EOPNOTSUPP. DWARF, the
-// input string tables, .llvm_addrsig, an empty .text and the .BTF and
-// .BTF.ext relocations are dropped.
+// An extern in any other DATASEC without an ELF section, such as .kconfig or
+// .ksyms, is left for the loader. It stays an undefined symbol, strong if
+// any object declares it strong, with extern BTF, and the output keeps its
+// DATASEC, of size 0, listing each such extern once with the offset and size
+// of its first declaration. The DATASEC follows the sections the inputs had
+// before it. No ELF section is written for it unless an input has one of
+// that name: an object that defines a map provides .maps for another
+// object's extern map, which then resolves like any extern.
+//
+// DWARF, the input string tables, .llvm_addrsig, an empty .text and the .BTF
+// and .BTF.ext relocations are dropped.
 //
 // Create a linker with BpfLinkerNew or BpfLinkerNewFD, add the objects, write
 // the output with BpfLinkerFinalize and release the linker with
@@ -71,16 +79,19 @@ type linkerSource struct {
 	data []byte
 }
 
-// linkerOutput is the object being built from the inputs. secs[i] is the
-// section with ELF index i+1, starting with .strtab and .symtab, and syms[i]
-// is the symbol with index i+1. globSyms holds the global and weak symbols
-// by name; globIdx indexes it.
+// linkerOutput is the object being built from the inputs. secs holds the
+// sections in the order they were added, starting with .strtab and .symtab;
+// secs[i] is at position i+1, which is also its ELF index until an ephemeral
+// section, which has none, comes before it. elfSecCnt counts the sections
+// with an ELF index. syms[i] is the symbol with index i+1. globSyms holds the
+// global and weak symbols by name; globIdx indexes it.
 type linkerOutput struct {
-	secs     []*linkerSec
-	syms     []objelf.OutputSymbol
-	globSyms []linkerGlobSym
-	globIdx  map[string]int
-	btf      *linkerBTF
+	secs      []*linkerSec
+	elfSecCnt int
+	syms      []objelf.OutputSymbol
+	globSyms  []linkerGlobSym
+	globIdx   map[string]int
+	btf       *linkerBTF
 }
 
 // BpfLinkerNew creates or truncates filename with mode 0644 and returns a
@@ -122,8 +133,8 @@ func newLinker(filename string, fd int, owned bool) *BpfLinker {
 // one symbol, two sections of one name with different types or flags, or an
 // extern whose BTF does not match its definition, ENOTSUP for an extern in
 // an object without BTF, and EOPNOTSUPP for an object the linker cannot
-// handle yet, such as one with .kconfig or .ksyms externs. A failed add
-// leaves the linker unchanged.
+// handle, such as a big-endian one. A failed add leaves the linker
+// unchanged.
 func BpfLinkerAddFile(l *BpfLinker, filename string, opts *BpfLinkerFileOpts) error {
 	const op = "bpf_linker__add_file"
 	if err := l.canAdd(op); err != nil {
@@ -316,7 +327,7 @@ func (out *linkerOutput) finalize() ([]byte, error) {
 	}
 
 	final := objelf.Output{Symbols: out.syms}
-	for _, s := range out.secs {
+	for _, s := range out.elfSecs() {
 		final.Sections = append(final.Sections, s.output())
 	}
 	final.Sections = append(final.Sections, btfSecs...)

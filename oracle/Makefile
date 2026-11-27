@@ -16,6 +16,11 @@ LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 # The objects whose .BTF and .BTF.ext the dedup scenario deduplicates.
 DEDUP_OBJECTS := $(addprefix ../testdata/progs/,kprobe.bpf.o dump.bpf.o core.bpf.o core_kernel.bpf.o global_data.bpf.o kconfig_types.bpf.o link_a.bpf.o link_b.bpf.o link_text_a.bpf.o link_text_b.bpf.o ringbuf.bpf.o usdt_attach.bpf.o)
 
+# The extra config of the linked .kconfig fixtures: CONFIG_TEST for
+# kconfig.bpf.o and CONFIG_GOBPFGO_LINKED for link_kconfig.bpf.o. printf turns
+# the \n escapes into lines.
+LINKER_KCONFIG := CONFIG_TEST=42\nCONFIG_GOBPFGO_LINKED=1234567890123\n
+
 .PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture usdt-fixture subprog-fixture clean
 
 all: $(ORACLE)
@@ -84,6 +89,14 @@ linker-fixture: $(ORACLE)
 	$(ORACLE) linker ../testdata/progs/link_extern_b.bpf.o ../testdata/progs/link_extern_a.bpf.o > ../testdata/oracle/linker-extern-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_extern_weak.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/linker-extern-weak.json
 	$(ORACLE) linker ../testdata/progs/link_extern_a.bpf.o > ../testdata/oracle/linker-extern-unresolved.json
+	$(ORACLE) linker-kconfig "$$(printf '$(LINKER_KCONFIG)')" ../testdata/progs/kconfig.bpf.o > ../testdata/oracle/linker-kconfig.json
+	$(ORACLE) linker-kconfig "$$(printf '$(LINKER_KCONFIG)')" ../testdata/progs/kconfig.bpf.o ../testdata/progs/link_kconfig.bpf.o > ../testdata/oracle/linker-kconfig-merge.json
+	$(ORACLE) linker-kconfig "$$(printf '$(LINKER_KCONFIG)')" ../testdata/progs/link_kconfig.bpf.o ../testdata/progs/kconfig.bpf.o > ../testdata/oracle/linker-kconfig-merge-reverse.json
+	$(ORACLE) linker ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/linker-ksyms.json
+	$(ORACLE) linker ../testdata/progs/kconfig.bpf.o ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/linker-kconfig-ksyms.json
+	$(ORACLE) linker ../testdata/progs/link_map_extern.bpf.o ../testdata/progs/link_map_def.bpf.o > ../testdata/oracle/linker-map-extern.json
+	$(ORACLE) linker ../testdata/progs/link_map_def.bpf.o ../testdata/progs/link_map_extern.bpf.o > ../testdata/oracle/linker-map-extern-reverse.json
+	$(ORACLE) linker ../testdata/progs/link_map_extern.bpf.o > ../testdata/oracle/linker-map-extern-unresolved.json
 
 subprog-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle

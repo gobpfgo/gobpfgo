@@ -98,12 +98,12 @@ static const struct kconfig_case kconfig_cases[] = {
 };
 
 /*
- * kconfig_resolve opens the object with kconfig as the extra config and runs
- * libbpf's load with a generated loader, which resolves the externs without
- * creating anything in the kernel. It prints the load errno and the .kconfig
- * map value as libbpf left it, also after a failure.
+ * oracle_kconfig_resolve opens the object with kconfig as the extra config
+ * and runs libbpf's load with a generated loader, which resolves the externs
+ * without creating anything in the kernel. It prints the load errno and the
+ * .kconfig map value as libbpf left it, also after a failure.
  */
-static int kconfig_resolve(struct json *j, const char *path, const char *kconfig) {
+int oracle_kconfig_resolve(struct json *j, const char *path, const char *kconfig) {
 	LIBBPF_OPTS(bpf_object_open_opts, opts, .kconfig = kconfig);
 	LIBBPF_OPTS(gen_loader_opts, gen);
 	const struct bpf_map *map;
@@ -163,7 +163,7 @@ int oracle_kconfig(const char *path) {
 		json_obj_begin_compact(&j, NULL);
 		json_str(&j, "name", c->name);
 		json_str(&j, "kconfig", c->kconfig);
-		err = kconfig_resolve(&j, path, kconfig);
+		err = oracle_kconfig_resolve(&j, path, kconfig);
 		json_obj_end(&j);
 		free(kconfig);
 	}

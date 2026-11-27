@@ -23,8 +23,15 @@ const bpfJmpCall = 0x85
 // bytes of a code, data or relocation section; size is the section size for
 // every type, including SHT_NOBITS. info is the relocated section's ELF index
 // for a relocation section.
+//
+// An ephemeral section, such as .kconfig or .ksyms, only carries a DATASEC
+// of externs: it has no header, contents or ELF index, and is not written.
+// It becomes an ELF section when an input has an ELF section of that name.
+// elfIdx is the section's ELF index, or 0 while it is ephemeral.
 type linkerSec struct {
 	name      string
+	ephemeral bool
+	elfIdx    int
 	typ       elf.SectionType
 	flags     elf.SectionFlag
 	addralign uint64
@@ -66,18 +73,61 @@ func newLinkerSec(src *objelf.Section) *linkerSec {
 	}
 }
 
-// addSec appends s and returns its ELF index.
+// addSec appends s and returns its position. Unless s is ephemeral, it also
+// gets the next ELF index.
 func (out *linkerOutput) addSec(s *linkerSec) int {
 	out.secs = append(out.secs, s)
+	if !s.ephemeral {
+		out.assignELFIdx(s)
+	}
 	return len(out.secs)
 }
 
-// sec returns the output section with ELF index idx.
-func (out *linkerOutput) sec(idx int) *linkerSec {
-	return out.secs[idx-1]
+func (out *linkerOutput) assignELFIdx(s *linkerSec) {
+	out.elfSecCnt++
+	s.elfIdx = out.elfSecCnt
 }
 
-// findSec returns the ELF index of the output section named name, or 0.
+// materialize turns the ephemeral section s into an ELF section with the
+// header of src, the first input section of that name with contents. It
+// takes the next ELF index but keeps its position, so its DATASEC stays where
+// it was.
+func (out *linkerOutput) materialize(s *linkerSec, src *objelf.Section) {
+	s.ephemeral = false
+	s.typ = src.Type
+	s.flags = src.Flags
+	s.addralign = src.Addralign
+	s.entsize = src.Entsize
+	out.assignELFIdx(s)
+}
+
+// sec returns the output section at position id.
+func (out *linkerOutput) sec(id int) *linkerSec {
+	return out.secs[id-1]
+}
+
+// elfIndex returns the ELF index of the output section at position id, or 0,
+// SHN_UNDEF, when id is 0 or the section is ephemeral.
+func (out *linkerOutput) elfIndex(id int) elf.SectionIndex {
+	if id == 0 {
+		return elf.SHN_UNDEF
+	}
+	return elf.SectionIndex(out.sec(id).elfIdx)
+}
+
+// elfSecs returns the sections that are written, in ELF index order.
+func (out *linkerOutput) elfSecs() []*linkerSec {
+	secs := make([]*linkerSec, out.elfSecCnt)
+	for _, s := range out.secs {
+		if !s.ephemeral {
+			secs[s.elfIdx-1] = s
+		}
+	}
+	return secs
+}
+
+// findSec returns the position of the output section named name, ephemeral
+// or not, or 0.
 func (out *linkerOutput) findSec(name string) int {
 	for i, s := range out.secs {
 		if s.name == name {
@@ -142,21 +192,44 @@ func (s *linkerSec) output() objelf.OutputSection {
 	return o
 }
 
+// isDataSec reports whether input section i goes to an output data section:
+// a kept code or data section, or an ephemeral one.
+func (in *linkerInput) isDataSec(i int) bool {
+	src := &in.secs[i]
+	if src.skipped {
+		return false
+	}
+	if src.ephemeral {
+		return true
+	}
+	typ := in.elf.Sections[i].Type
+	return typ == elf.SHT_PROGBITS || typ == elf.SHT_NOBITS
+}
+
+// newOutputSec starts the output section for input section i.
+func (in *linkerInput) newOutputSec(i int) *linkerSec {
+	if in.secs[i].ephemeral {
+		return &linkerSec{name: in.secs[i].name, ephemeral: true}
+	}
+	return newLinkerSec(&in.elf.Sections[i])
+}
+
 // appendSecData merges the code and data sections of in into the output
-// sections of the same name. license and version are kept once, and their
-// contents must be identical in every object.
+// sections of the same name, then its ephemeral sections, which only get an
+// output section to carry their DATASEC. license and version are kept once,
+// and their contents must be identical in every object.
 func (out *linkerOutput) appendSecData(in *linkerInput) error {
-	for i := 1; i < len(in.elf.Sections); i++ {
-		s := &in.elf.Sections[i]
+	for i := 1; i < len(in.secs); i++ {
 		src := &in.secs[i]
-		if src.skipped || (s.Type != elf.SHT_PROGBITS && s.Type != elf.SHT_NOBITS) {
+		if !in.isDataSec(i) {
 			continue
 		}
 
-		idx := out.findSec(s.Name)
+		idx := out.findSec(src.name)
 		if idx == 0 {
-			idx = out.addSec(newLinkerSec(s))
-		} else {
+			idx = out.addSec(in.newOutputSec(i))
+		} else if !src.ephemeral {
+			s := &in.elf.Sections[i]
 			if err := out.checkMerge(idx, s); err != nil {
 				return err
 			}
@@ -171,14 +244,25 @@ func (out *linkerOutput) appendSecData(in *linkerInput) error {
 		}
 
 		src.dst = idx
-		src.dstOff = out.sec(idx).extend(s)
+		if src.ephemeral {
+			continue
+		}
+		dst := out.sec(idx)
+		if dst.ephemeral {
+			out.materialize(dst, &in.elf.Sections[i])
+		}
+		src.dstOff = dst.extend(&in.elf.Sections[i])
 	}
 	return nil
 }
 
 // checkMerge rejects merging s into the output section idx when their types,
-// flags or entry sizes differ.
+// flags or entry sizes differ. An ephemeral section has no header to compare
+// and takes s's.
 func (out *linkerOutput) checkMerge(idx int, s *objelf.Section) error {
+	if out.sec(idx).ephemeral {
+		return nil
+	}
 	if what := out.sec(idx).mismatch(s); what != "" {
 		return linkerErrorf(unix.EINVAL, "ELF sections %s are incompatible: %s mismatch", s.Name, what)
 	}
@@ -205,7 +289,7 @@ func (out *linkerOutput) appendRelos(in *linkerInput) error {
 		}
 
 		dst := out.sec(idx)
-		dst.info = uint32(in.secs[s.Info].dst)
+		dst.info = uint32(out.elfIndex(in.secs[s.Info].dst))
 		src.dst = idx
 		src.dstOff = dst.extend(s)
 		if err := out.rewriteRelos(in, s, dst.data[src.dstOff:][:s.Size]); err != nil {
@@ -250,7 +334,7 @@ func (out *linkerOutput) rewriteRelos(in *linkerInput, s *objelf.Section, entrie
 // for a call; in data, only an R_BPF_64_ABS64 pointer to code is allowed and
 // the stored pointer grows by the offset.
 func fixupSectionReloc(in *linkerInput, target *linkerSec, off uint64, targetExec bool, sym *objelf.Symbol, typ uint32) error {
-	if int(sym.SectionIndex) >= len(in.secs) {
+	if int(sym.SectionIndex) >= len(in.elf.Sections) {
 		return linkerErrorf(unix.EINVAL, "relocation against missing section #%d", sym.SectionIndex)
 	}
 	refOff := in.secs[sym.SectionIndex].dstOff
