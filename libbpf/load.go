@@ -49,11 +49,14 @@ func mapTakesBTF(mapType BpfMapType) bool {
 	return true
 }
 
-// BpfObjectLoad loads the object into the kernel. It validates and loads the
-// BTF, creates the maps with their BTF type ids, writes the initial contents
-// of the global data maps, relocates the map and global variable references
-// in each program and loads the programs. The .rodata maps are frozen after
-// their contents are written, so user space can read but not change them.
+// BpfObjectLoad loads the object into the kernel. It first resolves the
+// .kconfig externs into the .kconfig map's initial value, from the open
+// options' Kconfig text and the system kernel config. It then validates and
+// loads the BTF, creates the maps with their BTF type ids, writes the initial
+// contents of the internal maps, relocates the map, global variable and
+// extern references in each program and loads the programs. The .rodata and
+// .kconfig maps are frozen after their contents are written, so user space
+// can read but not change them.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
@@ -71,6 +74,9 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 	if obj.btf == nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: "object has no BTF"}
+	}
+	if err := resolveExterns(obj); err != nil {
+		return err
 	}
 
 	logBuf := make([]byte, 64*1024)
@@ -229,9 +235,9 @@ func createMap(m *BpfMap, btfFD int) error {
 	return nil
 }
 
-// populateInternalMap writes the section image into the only element of a
-// global data map with one BPF_MAP_UPDATE_ELEM, then freezes a read-only data
-// map so user space cannot change it.
+// populateInternalMap writes the initial value into the only element of an
+// internal map with one BPF_MAP_UPDATE_ELEM, then freezes a read-only data or
+// .kconfig map so user space cannot change it.
 func populateInternalMap(m *BpfMap) error {
 	key := make([]byte, internalMapKeySize)
 	if err := sys.MapUpdateElem(m.fd, key, m.initialValue, 0); err != nil {
@@ -242,7 +248,7 @@ func populateInternalMap(m *BpfMap) error {
 		}
 	}
 
-	if m.libbpfType == libbpfMapRodata {
+	if m.libbpfType == libbpfMapRodata || m.libbpfType == libbpfMapKconfig {
 		if err := sys.MapFreeze(m.fd); err != nil {
 			return &Error{
 				Op:    "bpf_map_freeze",
@@ -315,11 +321,12 @@ func programLineInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
 	return nil
 }
 
-// relocateProgram patches the map and global variable references in a private
-// copy of the program instructions. A map reference becomes a
-// BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable reference
-// becomes a BPF_PSEUDO_MAP_VALUE load: the first immediate holds the map
-// descriptor and the second the variable's offset in the map value.
+// relocateProgram patches the map, global variable and extern references in a
+// private copy of the program instructions. A map reference becomes a
+// BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable or .kconfig
+// extern reference becomes a BPF_PSEUDO_MAP_VALUE load: the first immediate
+// holds the map descriptor and the second the variable's offset in the map
+// value.
 func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
 	for _, rel := range p.relocs {
 		if rel.Type != elf.R_BPF_64_64 {
@@ -352,6 +359,12 @@ func patchReloc(insns []byte, r progReloc) {
 		binary.NativeEndian.PutUint32(insn[12:], imm+r.symOff)
 		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
 		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
+	case relocExternLD64:
+		// The extern offset replaces the instruction immediate; it is
+		// not added to it as for a global variable.
+		binary.NativeEndian.PutUint32(insn[12:], r.symOff)
+		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
+		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
 	}
 }
 
@@ -363,11 +376,15 @@ const (
 	relocLD64 relocKind = iota
 	// relocData loads the address of a global variable inside its map.
 	relocData
+	// relocExternLD64 loads the address of a .kconfig extern inside the
+	// .kconfig map.
+	relocExternLD64
 )
 
 // progReloc is one resolved program relocation. insnOff is the byte offset of
 // the ld_imm64 instruction; symOff is the symbol value added to the
-// instruction's own immediate for a global data relocation.
+// instruction's own immediate for a global data relocation, or the extern's
+// offset in the .kconfig map value.
 type progReloc struct {
 	kind    relocKind
 	insnOff int
@@ -377,9 +394,11 @@ type progReloc struct {
 
 // recordReloc resolves one ELF relocation of program p against obj's maps.
 //
-// A symbol in .maps names a map. A symbol in a data section refers to that
-// section's internal map; the symbol value, zero for a section symbol, is the
-// variable offset, and the instruction immediate carries any extra offset.
+// An extern symbol refers to an extern variable; a .kconfig extern lives in
+// the .kconfig map at its extern offset. A symbol in .maps names a map. A
+// symbol in a data section refers to that section's internal map; the symbol
+// value, zero for a section symbol, is the variable offset, and the
+// instruction immediate carries any extra offset.
 func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (progReloc, error) {
 	off := int(rel.Offset)
 	if off < 0 || off%bpfInsnLength != 0 || off+2*bpfInsnLength > len(insns) {
@@ -394,6 +413,9 @@ func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (pr
 	}
 
 	sym := obj.elf.Symbols[rel.SymbolIndex]
+	if symIsExtern(sym) {
+		return recordExternReloc(obj, p, rel, off)
+	}
 	symName := sym.Name
 	if sym.Type == elf.STT_SECTION && symName == "" {
 		symName = sym.Section
@@ -423,4 +445,21 @@ func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (pr
 		}
 	}
 	return progReloc{}, fmt.Errorf("prog '%s': data relo failed to find map for section '%s'", p.name, sec.Name)
+}
+
+// recordExternReloc resolves a relocation against the extern ELF symbol of
+// rel. Only .kconfig externs are supported; they load from the .kconfig map.
+func recordExternReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insnOff int) (progReloc, error) {
+	ext := findExternBySymIdx(obj.externs, int(rel.SymbolIndex))
+	if ext == nil {
+		return progReloc{}, fmt.Errorf("prog '%s': extern relo failed to find extern for '%s' (%d)",
+			p.name, rel.Symbol, rel.SymbolIndex)
+	}
+	if ext.typ != extKcfg {
+		return progReloc{}, fmt.Errorf("prog '%s': extern '%s' is not a .kconfig extern", p.name, ext.name)
+	}
+	if obj.kconfigMap == nil {
+		return progReloc{}, fmt.Errorf("prog '%s': extern '%s' has no .kconfig map", p.name, ext.name)
+	}
+	return progReloc{kind: relocExternLD64, insnOff: insnOff, m: obj.kconfigMap, symOff: uint32(ext.kcfg.dataOff)}, nil
 }

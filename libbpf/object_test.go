@@ -29,9 +29,22 @@ type openFixtureMap struct {
 	PinPath        string `json:"pin_path"`
 }
 
+// openFixtureKconfig is the .kconfig DATASEC of an open scenario fixture
+// after open: its size and its variables in BTF order.
+type openFixtureKconfig struct {
+	Size uint32 `json:"size"`
+	Vars []struct {
+		Name    string `json:"name"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+		Linkage uint32 `json:"linkage"`
+	} `json:"vars"`
+}
+
 type openFixture struct {
-	ObjectName string           `json:"object_name"`
-	Maps       []openFixtureMap `json:"maps"`
+	ObjectName string              `json:"object_name"`
+	Maps       []openFixtureMap    `json:"maps"`
+	Kconfig    *openFixtureKconfig `json:"kconfig"`
 	Programs   []struct {
 		Name               string `json:"name"`
 		Type               uint32 `json:"type"`

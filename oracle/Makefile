@@ -7,7 +7,7 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c linfo.c zip.c usdt.c usdt_notes.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c
 ORACLE_HDRS := json.h oracle.h usdt_notes.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
@@ -39,6 +39,9 @@ fixtures: $(ORACLE)
 	$(ORACLE) attr > ../testdata/oracle/attr.json
 	$(ORACLE) open ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
 	$(ORACLE) open ../testdata/progs/global_data.bpf.o > ../testdata/oracle/open-global-data.json
+	$(ORACLE) open ../testdata/progs/kconfig.bpf.o > ../testdata/oracle/open-kconfig.json
+	$(ORACLE) open ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/open-kconfig-types.json
+	$(ORACLE) kconfig ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/kconfig.json
 	$(ORACLE) dump ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump.txt
 	$(ORACLE) dump-decl ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl.txt
 	$(ORACLE) dump-decl-strip ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl-strip.txt

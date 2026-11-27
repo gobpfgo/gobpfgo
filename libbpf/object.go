@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object__init_maps, bpf_object_init_progs, bpf_object_fixup_btf
+// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object_open, bpf_object__init_maps, bpf_object_init_progs, bpf_object_fixup_btf
 
 package libbpf
 
@@ -33,6 +33,13 @@ type BpfObject struct {
 	btfFD    int
 	loaded   bool
 	closed   bool
+
+	// externs are the extern variables, sorted as the loader resolves them.
+	// kconfigMap holds the .kconfig externs' values, and kconfig is the
+	// caller's extra config text from BpfObjectOpenOpts.Kconfig.
+	externs    []externDesc
+	kconfigMap *BpfMap
+	kconfig    *string
 }
 
 // BpfObjectOpenOpts controls how an object is opened. Zero is the default.
@@ -54,7 +61,12 @@ type BpfObjectOpenOpts struct {
 	// PinRootPath is the base directory for maps that request pinning.
 	PinRootPath *string
 
-	// Kconfig augments the kernel config used for CONFIG_ externs.
+	// Kconfig is extra kernel config text for the CONFIG_ externs of the
+	// .kconfig section, in the /boot/config format: one CONFIG_NAME=value
+	// per line, where the value is y, n or m, a quoted string or an
+	// integer. The load step reads it before the system config, and an
+	// extern takes the first value it sees. When it sets every CONFIG_
+	// extern, the system config is not read. The text is copied at open.
 	Kconfig *string
 	// BtfCustomPath supplies a custom BTF for CO-RE relocations.
 	BtfCustomPath *string
@@ -112,7 +124,7 @@ func BpfObjectOpenFile(path string, opts *BpfObjectOpenOpts) (*BpfObject, error)
 	if opts != nil && opts.ObjectName != nil {
 		name = *opts.ObjectName
 	}
-	return openBytes(path, data, name)
+	return openBytes(path, data, name, opts)
 }
 
 // BpfObjectOpenMem parses a BPF ELF object from data. The object name is
@@ -132,7 +144,7 @@ func BpfObjectOpenMem(data []byte, opts *BpfObjectOpenOpts) (*BpfObject, error) 
 	if opts != nil && opts.ObjectName != nil {
 		name = *opts.ObjectName
 	}
-	return openBytes("", data, name)
+	return openBytes("", data, name, opts)
 }
 
 // validateOpenOpts rejects an options value whose Sz does not match the
@@ -145,8 +157,8 @@ func validateOpenOpts(opts *BpfObjectOpenOpts) error {
 }
 
 // openBytes parses data and builds the object for the file and memory paths.
-// It requires a BPF ELF object with a .BTF section.
-func openBytes(path string, data []byte, name string) (*BpfObject, error) {
+// It requires a BPF ELF object with a .BTF section. opts may be nil.
+func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (*BpfObject, error) {
 	e, err := elf.OpenBytes(data)
 	if err != nil {
 		return nil, openError(path, err)
@@ -162,6 +174,10 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	if err != nil {
 		return nil, openError(path, err)
 	}
+	externs, err := collectExterns(e, spec)
+	if err != nil {
+		return nil, withPath(err, path)
+	}
 	if err := fixupObjectBTF(e, spec); err != nil {
 		return nil, openError(path, err)
 	}
@@ -170,21 +186,42 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 		return nil, openError(path, err)
 	}
 	maps = append(maps, initGlobalDataMaps(e, spec, name)...)
+	kconfigMap := initKconfigMap(spec, name, externs, symtabIndex(e))
+	if kconfigMap != nil {
+		maps = append(maps, kconfigMap)
+	}
 	programs, err := parsePrograms(e)
 	if err != nil {
 		return nil, openError(path, err)
 	}
 
-	return &BpfObject{
-		name:     name,
-		path:     path,
-		maps:     maps,
-		programs: programs,
-		btf:      spec,
-		elf:      e,
-		license:  e.License,
-		btfFD:    -1,
-	}, nil
+	obj := &BpfObject{
+		name:       name,
+		path:       path,
+		maps:       maps,
+		programs:   programs,
+		btf:        spec,
+		elf:        e,
+		license:    e.License,
+		btfFD:      -1,
+		externs:    externs,
+		kconfigMap: kconfigMap,
+	}
+	if opts != nil && opts.Kconfig != nil {
+		kconfig := *opts.Kconfig
+		obj.kconfig = &kconfig
+	}
+	return obj, nil
+}
+
+// withPath sets the object path on an open error that is already an *Error.
+func withPath(err error, path string) error {
+	var e *Error
+	if errors.As(err, &e) {
+		e.Path = path
+		return e
+	}
+	return openError(path, err)
 }
 
 // openError wraps a parse failure in the public Error type. The current parser
@@ -451,6 +488,8 @@ func BpfObjectClose(obj *BpfObject) {
 	obj.programs = nil
 	obj.btf = nil
 	obj.elf = nil
+	obj.externs = nil
+	obj.kconfigMap = nil
 }
 
 // closeLoadFDs closes the BTF, map and program descriptors created by
@@ -484,8 +523,9 @@ func BpfObjectName(obj *BpfObject) string {
 
 // BpfObjectNextMap returns the next map. The maps defined in the .maps BTF
 // data section come first, in their declaration order, followed by the global
-// data maps in ELF section order. Pass nil to start; it returns nil after the
-// last map. The order is stable for the lifetime of the object.
+// data maps in ELF section order and then the .kconfig map. Pass nil to
+// start; it returns nil after the last map. The order is stable for the
+// lifetime of the object.
 func BpfObjectNextMap(obj *BpfObject, prev *BpfMap) *BpfMap {
 	if obj == nil {
 		return nil
@@ -532,10 +572,10 @@ func BpfObjectNextProgram(obj *BpfObject, prev *BpfProgram) *BpfProgram {
 
 // BpfObjectFindMapByName returns the map with the given name, or nil.
 //
-// A name that starts with a dot is a section name: it finds the global data
-// map of that section, such as ".data" or ".rodata". Any other name must match
-// the name BpfMapName returns, for example "counts" or the kernel name of a
-// global data map such as "my_objec.data".
+// A name that starts with a dot is a section name: it finds the internal map
+// of that section, such as ".data", ".rodata" or ".kconfig". Any other name
+// must match the name BpfMapName returns, for example "counts" or the kernel
+// name of an internal map such as "my_objec.data".
 func BpfObjectFindMapByName(obj *BpfObject, name string) *BpfMap {
 	if obj == nil {
 		return nil

@@ -3,6 +3,7 @@
 
 #include "oracle.h"
 
+#include "btf.h"
 #include "libbpf.h"
 
 #include <linux/bpf.h>
@@ -32,6 +33,42 @@ static void program_json(struct json *j, const struct bpf_program *prog) {
 	json_u32(j, "expected_attach_type", (uint32_t)bpf_program__expected_attach_type(prog));
 	json_str(j, "section", bpf_program__section_name(prog));
 	json_u64(j, "insn_cnt", bpf_program__insn_cnt(prog));
+	json_obj_end(j);
+}
+
+/*
+ * kconfig_json prints the .kconfig DATASEC after open: its size and, in BTF
+ * order, each variable's name, offset, size and linkage. Objects without
+ * .kconfig externs print nothing.
+ */
+static void kconfig_json(struct json *j, const struct bpf_object *obj) {
+	const struct btf_var_secinfo *vsi;
+	const struct btf_type *sec, *var;
+	struct btf *btf = bpf_object__btf(obj);
+	__u32 i;
+	int id;
+
+	if (!btf)
+		return;
+
+	id = btf__find_by_name_kind(btf, ".kconfig", BTF_KIND_DATASEC);
+	if (id < 0)
+		return;
+
+	sec = btf__type_by_id(btf, id);
+	json_obj_begin(j, "kconfig");
+	json_u32(j, "size", sec->size);
+	json_arr_begin(j, "vars");
+	for (i = 0, vsi = btf_var_secinfos(sec); i < btf_vlen(sec); i++, vsi++) {
+		var = btf__type_by_id(btf, vsi->type);
+		json_obj_begin_compact(j, NULL);
+		json_str(j, "name", btf__name_by_offset(btf, var->name_off));
+		json_u32(j, "offset", vsi->offset);
+		json_u32(j, "size", vsi->size);
+		json_u32(j, "linkage", btf_var(var)->linkage);
+		json_obj_end(j);
+	}
+	json_arr_end(j);
 	json_obj_end(j);
 }
 
@@ -66,6 +103,8 @@ int oracle_open(const char *path) {
 	for (prog = bpf_object__next_program(obj, NULL); prog; prog = bpf_object__next_program(obj, prog))
 		program_json(&j, prog);
 	json_arr_end(&j);
+
+	kconfig_json(&j, obj);
 
 	json_obj_end(&j);
 	fputc('\n', stdout);

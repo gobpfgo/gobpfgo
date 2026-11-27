@@ -2,7 +2,8 @@
 // gobpfgo-origin: original BTF parser
 // libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind
+// libbpf-source: src/libbpf.c
+// libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind, btf_fixup_datasec
 
 // Package btf parses the BTF wire format used by BPF ELF objects.
 //
@@ -25,6 +26,19 @@ import (
 	"fmt"
 	"sort"
 )
+
+// Names of the DATASECs that back extern variables. The loader computes their
+// sizes and variable offsets from the extern descriptors, and an extern VAR
+// may have no ELF symbol, so the ELF-based DATASEC fixups leave them alone.
+const (
+	KconfigSec = ".kconfig"
+	KsymsSec   = ".ksyms"
+)
+
+// isExternDatasec reports whether name is a DATASEC that backs externs.
+func isExternDatasec(name string) bool {
+	return name == KconfigSec || name == KsymsSec
+}
 
 // Header is the BTF header. The type and string offsets are relative to the
 // end of the header, not to the start of the blob.
@@ -320,11 +334,12 @@ func (s *Spec) Raw() []byte {
 //
 // The kernel rejects a DATASEC with size 0, while clang emits the section
 // variables with a zero size in the BTF. libbpf applies the same fixup before
-// loading BTF. Pass the result of Raw to BPF_BTF_LOAD.
+// loading BTF. The extern DATASECs .kconfig and .ksyms are skipped. Pass the
+// result of Raw to BPF_BTF_LOAD.
 func (s *Spec) FixupDatasecSizes(sectionSizes map[string]uint32) error {
 	for i := range s.Types {
 		t := &s.Types[i]
-		if t.Kind != KindDatasec || t.ID == 0 {
+		if t.Kind != KindDatasec || t.ID == 0 || isExternDatasec(t.Name) {
 			continue
 		}
 		size, ok := sectionSizes[t.Name]
@@ -344,11 +359,12 @@ func (s *Spec) FixupDatasecSizes(sectionSizes map[string]uint32) error {
 // carries the final offsets.
 //
 // offsets maps an ELF symbol name to its value. Static and extern variables
-// are skipped; a global variable without a symbol is an error.
+// and the extern DATASECs .kconfig and .ksyms are skipped; a global variable
+// without a symbol is an error.
 func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
 	for i := range s.Types {
 		t := &s.Types[i]
-		if t.Kind != KindDatasec || t.ID == 0 {
+		if t.Kind != KindDatasec || t.ID == 0 || isExternDatasec(t.Name) {
 			continue
 		}
 		for j := range t.DataSec {
@@ -384,11 +400,11 @@ func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
 // static, in both the raw blob and the parsed types. The caller passes the
 // variables whose ELF symbol has hidden or internal visibility; such a variable
 // is not visible outside the object, so the loader treats it like a static
-// one. Static and extern variables are left alone.
+// one. Static and extern variables and the extern DATASECs are left alone.
 func (s *Spec) FixupDatasecHiddenVars(hidden map[string]bool) error {
 	for i := range s.Types {
 		t := &s.Types[i]
-		if t.Kind != KindDatasec || t.ID == 0 {
+		if t.Kind != KindDatasec || t.ID == 0 || isExternDatasec(t.Name) {
 			continue
 		}
 		for j := range t.DataSec {

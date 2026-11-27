@@ -425,8 +425,15 @@ func triggerOpen(t *testing.T) {
 
 func loadTestObject(t *testing.T, path string) *BpfObject {
 	t.Helper()
+	return loadTestObjectOpts(t, path, nil)
+}
 
-	obj, err := BpfObjectOpenFile(path, nil)
+// loadTestObjectOpts opens path with opts and loads it, skipping the test when
+// the kernel refuses bpf() with EPERM or EACCES. opts may be nil.
+func loadTestObjectOpts(t *testing.T, path string, opts *BpfObjectOpenOpts) *BpfObject {
+	t.Helper()
+
+	obj, err := BpfObjectOpenFile(path, opts)
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}

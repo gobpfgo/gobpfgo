@@ -16,8 +16,9 @@ type BpfMap struct {
 	name       string
 	symbolName string
 
-	// A global data map records its ELF section name and index, and the
-	// section image written into the map after creation.
+	// An internal map records its section name and ELF index, and the
+	// initial value written into the map after creation: the section image,
+	// or the extern values for .kconfig.
 	realName     string
 	libbpfType   libbpfMapType
 	secIdx       int
@@ -54,9 +55,9 @@ func BpfMapName(m *BpfMap) string {
 	return m.name
 }
 
-// BpfMapIsInternal reports whether m is a global data map that the object
-// created for a .data, .rodata or .bss section, rather than a map defined in
-// the .maps section.
+// BpfMapIsInternal reports whether m is an internal map that the object
+// created for a .data, .rodata or .bss section or for the .kconfig externs,
+// rather than a map defined in the .maps section.
 func BpfMapIsInternal(m *BpfMap) bool {
 	if m == nil {
 		return false
