@@ -466,8 +466,9 @@ func TestBpfProgLineInfoOracle(t *testing.T) {
 }
 
 // TestProgramLineInfo checks the line records the loader passes to
-// BPF_PROG_LOAD: every .BTF.ext record of the program section, with the byte
-// offset turned into an instruction index.
+// BPF_PROG_LOAD for a program without subprograms: every .BTF.ext record of
+// the program section, with the byte offset turned into an instruction
+// index.
 func TestProgramLineInfo(t *testing.T) {
 	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
 	if err != nil {
@@ -490,7 +491,7 @@ func TestProgramLineInfo(t *testing.T) {
 			want = section.Records
 		}
 	}
-	got := programLineInfo(ext, prog)
+	got := programLineInfo(ext, prog, 0)
 	if len(want) == 0 || len(got) != len(want)*btf.LineInfoMinSize {
 		t.Fatalf("encoded %d bytes for %d .BTF.ext records", len(got), len(want))
 	}

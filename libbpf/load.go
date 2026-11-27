@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data
 
 //go:build linux && (amd64 || arm64)
 
@@ -23,6 +23,13 @@ import (
 const (
 	bpfPseudoMapFD    = 1
 	bpfPseudoMapValue = 2
+)
+
+// Field offsets of struct bpf_func_info, the function record of
+// BPF_PROG_LOAD.
+const (
+	bpfFuncInfoOffInsnOff = 0
+	bpfFuncInfoOffTypeID  = 4
 )
 
 // mapTakesBTF reports whether BPF_MAP_CREATE accepts the object BTF and the
@@ -53,10 +60,14 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // .kconfig externs into the .kconfig map's initial value, from the open
 // options' Kconfig text and the system kernel config. It then validates and
 // loads the BTF, creates the maps with their BTF type ids, writes the initial
-// contents of the internal maps, relocates the map, global variable and
-// extern references in each program and loads the programs. The .rodata and
-// .kconfig maps are frozen after their contents are written, so user space
-// can read but not change them.
+// contents of the internal maps and relocates each program. A program gets
+// a copy of every .text subprogram it calls, directly or through another
+// subprogram, appended to its own code, with the calls, the function and line
+// records and the map, global variable and extern references relocated. Only
+// the programs are loaded; a subprogram is loaded only as part of the
+// programs that call it and has no descriptor. The .rodata and .kconfig maps
+// are frozen after their contents are written, so user space can read but
+// not change them.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
@@ -107,92 +118,86 @@ func BpfObjectLoad(obj *BpfObject) error {
 		}
 	}
 
+	codes, err := relocateObject(obj, ext, kernelBTFs)
+	if err != nil {
+		obj.closeLoadFDs()
+		return err
+	}
+
 	license := append([]byte(obj.license), 0)
-	for _, p := range obj.programs {
-		insns := append([]byte(nil), p.insns...)
-		if len(kernelBTFs) > 0 {
-			if err := relocateCore(p, insns, ext, obj.btf, kernelBTFs); err != nil {
-				obj.closeLoadFDs()
-				return &Error{
-					Op:    "bpf_object__relocate_core",
-					Errno: unix.EINVAL,
-					Log:   err.Error(),
-				}
-			}
-		}
-		if err := relocateProgram(obj, p, insns); err != nil {
+	for _, code := range codes {
+		if err := loadProgram(obj, code, license, logBuf); err != nil {
 			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_prog_load",
-				Errno: unix.EINVAL,
-				Log:   err.Error(),
-			}
+			return err
 		}
-		if err := resolveAttachBTFID(p); err != nil {
-			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_object__load",
-				Errno: errnoFromError(err),
-				Log:   err.Error(),
-			}
-		}
-
-		// A USDT program is loaded for the uprobe multi link when the
-		// kernel has one, so its attach can use the link.
-		if p.usdt && featUprobeMultiLink.supported() {
-			p.expectedAttachType = BPF_TRACE_UPROBE_MULTI
-		}
-
-		funcInfo := programFuncInfo(ext, p)
-		lineInfo := programLineInfo(ext, p)
-		attr := &sys.ProgLoadAttr{
-			ProgType:           uint32(p.progType),
-			InsnCnt:            uint32(len(insns) / 8),
-			LogLevel:           1,
-			ProgFlags:          p.progFlags,
-			ExpectedAttachType: uint32(p.expectedAttachType),
-			ProgBtfFD:          uint32(btfFD),
-			AttachBtfID:        p.attachBTFID,
-			AttachBtfObjFD:     int32(p.attachBTFObjFD),
-			FuncInfoRecSize:    8,
-			FuncInfoCnt:        uint32(len(funcInfo) / 8),
-			LineInfoRecSize:    btf.LineInfoMinSize,
-			LineInfoCnt:        uint32(len(lineInfo) / btf.LineInfoMinSize),
-		}
-		if len(funcInfo) == 0 {
-			attr.FuncInfoRecSize = 0
-		}
-		if len(lineInfo) == 0 {
-			attr.LineInfoRecSize = 0
-		}
-		attr.SetProgName(p.name)
-
-		fd, err := sys.ProgLoad(attr, insns, license, logBuf, funcInfo, lineInfo)
-		if err != nil {
-			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_prog_load",
-				Errno: errnoFromError(err),
-				Log:   p.name + ": " + strings.TrimRight(string(logBuf), "\x00"),
-			}
-		}
-		p.fd = fd
-
-		info, err := sys.ProgInfoByFD(fd)
-		if err != nil {
-			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_obj_get_info_by_fd",
-				Errno: errnoFromError(err),
-				Log:   p.name,
-			}
-		}
-		p.id = info.ID
-		p.xlatedInsnCnt = int(info.XlatedProgLen / 8)
-		p.jitedLen = info.JitedProgLen
 	}
 
 	obj.loaded = true
+	return nil
+}
+
+// loadProgram loads the relocated code of one main program and records its
+// descriptor, id and loaded lengths in the program. The code carries the
+// subprograms the program calls and their function and line records.
+func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
+	p := code.prog
+	if err := resolveAttachBTFID(p); err != nil {
+		return &Error{
+			Op:    "bpf_object__load",
+			Errno: errnoFromError(err),
+			Log:   err.Error(),
+		}
+	}
+
+	// A USDT program is loaded for the uprobe multi link when the kernel
+	// has one, so its attach can use the link.
+	if p.usdt && featUprobeMultiLink.supported() {
+		p.expectedAttachType = BPF_TRACE_UPROBE_MULTI
+	}
+
+	attr := &sys.ProgLoadAttr{
+		ProgType:           uint32(p.progType),
+		InsnCnt:            uint32(len(code.insns) / bpfInsnLength),
+		LogLevel:           1,
+		ProgFlags:          p.progFlags,
+		ExpectedAttachType: uint32(p.expectedAttachType),
+		ProgBtfFD:          uint32(obj.btfFD),
+		AttachBtfID:        p.attachBTFID,
+		AttachBtfObjFD:     int32(p.attachBTFObjFD),
+		FuncInfoRecSize:    btf.FuncInfoMinSize,
+		FuncInfoCnt:        uint32(len(code.funcInfo) / btf.FuncInfoMinSize),
+		LineInfoRecSize:    btf.LineInfoMinSize,
+		LineInfoCnt:        uint32(len(code.lineInfo) / btf.LineInfoMinSize),
+	}
+	if len(code.funcInfo) == 0 {
+		attr.FuncInfoRecSize = 0
+	}
+	if len(code.lineInfo) == 0 {
+		attr.LineInfoRecSize = 0
+	}
+	attr.SetProgName(p.name)
+
+	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo)
+	if err != nil {
+		return &Error{
+			Op:    "bpf_prog_load",
+			Errno: errnoFromError(err),
+			Log:   p.name + ": " + strings.TrimRight(string(logBuf), "\x00"),
+		}
+	}
+	p.fd = fd
+
+	info, err := sys.ProgInfoByFD(fd)
+	if err != nil {
+		return &Error{
+			Op:    "bpf_obj_get_info_by_fd",
+			Errno: errnoFromError(err),
+			Log:   p.name,
+		}
+	}
+	p.id = info.ID
+	p.xlatedInsnCnt = int(info.XlatedProgLen / bpfInsnLength)
+	p.jitedLen = info.JitedProgLen
 	return nil
 }
 
@@ -266,27 +271,28 @@ func populateInternalMap(m *BpfMap) error {
 	return nil
 }
 
-// programFuncInfo encodes the .BTF.ext function records of p's section in the
-// struct bpf_func_info layout BPF_PROG_LOAD expects. Records past the program's
-// instructions are ignored.
-func programFuncInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
-	if ext == nil {
-		return nil
-	}
-
-	insnCnt := len(p.insns) / 8
+// programFuncInfo encodes the .BTF.ext function records of prog's own
+// instructions in the struct bpf_func_info layout BPF_PROG_LOAD expects.
+// Clang records byte offsets from the section start and the kernel takes
+// instruction indexes from the start of the loaded code, so each offset is
+// divided by the instruction size and moved from prog's start in its section
+// to subInsnOff, where prog's copy starts in the loaded code. The records are
+// sorted; only the first section with prog's name is read, and the copy stops
+// at the first record past prog. It returns nil when no record is inside
+// prog.
+func programFuncInfo(ext *btf.ExtSpec, prog *BpfProgram, subInsnOff int) []byte {
 	for _, section := range ext.FuncInfos {
-		if section.Section != p.sectionName {
+		if section.Section != prog.sectionName {
 			continue
 		}
+		first, last := progExtRecords(prog, len(section.Records), func(i int) uint32 {
+			return section.Records[i].InsnOff
+		})
 		var buf []byte
-		for _, info := range section.Records {
-			if int(info.InsnOff) >= insnCnt {
-				continue
-			}
-			rec := make([]byte, 8)
-			binary.NativeEndian.PutUint32(rec, info.InsnOff)
-			binary.NativeEndian.PutUint32(rec[4:], info.TypeID)
+		for _, info := range section.Records[first:last] {
+			rec := make([]byte, btf.FuncInfoMinSize)
+			binary.NativeEndian.PutUint32(rec[bpfFuncInfoOffInsnOff:], progExtInsnOff(prog, info.InsnOff, subInsnOff))
+			binary.NativeEndian.PutUint32(rec[bpfFuncInfoOffTypeID:], info.TypeID)
 			buf = append(buf, rec...)
 		}
 		return buf
@@ -294,29 +300,22 @@ func programFuncInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
 	return nil
 }
 
-// programLineInfo encodes the .BTF.ext line records of p's section in the
-// struct bpf_line_info layout BPF_PROG_LOAD expects. Clang records byte
-// offsets from the section start and the kernel takes instruction indexes,
-// so each offset is divided by the instruction size. The records are sorted,
-// and the copy stops at the first one past the program's instructions.
-func programLineInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
-	if ext == nil {
-		return nil
-	}
-
-	insnCnt := uint32(len(p.insns) / bpfInsnSize)
+// programLineInfo encodes the .BTF.ext line records of prog's own
+// instructions in the struct bpf_line_info layout BPF_PROG_LOAD expects, with
+// the instruction offsets moved like programFuncInfo moves them. It returns
+// nil when no record is inside prog.
+func programLineInfo(ext *btf.ExtSpec, prog *BpfProgram, subInsnOff int) []byte {
 	for _, section := range ext.LineInfos {
-		if section.Section != p.sectionName {
+		if section.Section != prog.sectionName {
 			continue
 		}
+		first, last := progExtRecords(prog, len(section.Records), func(i int) uint32 {
+			return section.Records[i].InsnOff
+		})
 		var buf []byte
-		for _, info := range section.Records {
-			insnOff := info.InsnOff / bpfInsnSize
-			if insnOff >= insnCnt {
-				break
-			}
+		for _, info := range section.Records[first:last] {
 			rec := make([]byte, btf.LineInfoMinSize)
-			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffInsnOff:], insnOff)
+			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffInsnOff:], progExtInsnOff(prog, info.InsnOff, subInsnOff))
 			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffFileNameOff:], info.FileNameOff)
 			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffLineOff:], info.LineOff)
 			binary.NativeEndian.PutUint32(rec[bpfLineInfoOffLineCol:], info.LineCol)
@@ -327,26 +326,59 @@ func programLineInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
 	return nil
 }
 
-// relocateProgram patches the map, global variable and extern references in a
-// private copy of the program instructions. A map reference becomes a
-// BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable or .kconfig
-// extern reference becomes a BPF_PSEUDO_MAP_VALUE load: the first immediate
-// holds the map descriptor and the second the variable's offset in the map
-// value.
-func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
-	for _, rel := range p.relocs {
-		if rel.Type != elf.R_BPF_64_64 {
-			return fmt.Errorf("unsupported relocation type %d for %s", rel.Type, rel.Symbol)
+// progExtRecords returns the range [first, last) of the sorted .BTF.ext
+// records whose instruction is inside prog. byteOff returns record i's byte
+// offset from the section start. The range is empty when no record is inside.
+func progExtRecords(prog *BpfProgram, count int, byteOff func(int) uint32) (first, last int) {
+	first = -1
+	for i := 0; i < count; i++ {
+		insnOff := int(byteOff(i) / bpfInsnLength)
+		if insnOff < prog.secInsnOff {
+			continue
 		}
+		if insnOff >= prog.secInsnOff+prog.secInsnCnt {
+			break
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i + 1
+	}
+	if first < 0 {
+		return 0, 0
+	}
+	return first, last
+}
 
-		r, err := recordReloc(obj, p, rel, insns)
-		if err != nil {
-			return err
+// progExtInsnOff turns a .BTF.ext record's byte offset in prog's section into
+// the instruction index of the same instruction in the loaded code, where
+// prog's copy starts at subInsnOff.
+func progExtInsnOff(prog *BpfProgram, byteOff uint32, subInsnOff int) uint32 {
+	return uint32(int(byteOff/bpfInsnLength) + subInsnOff - prog.secInsnOff)
+}
+
+// relocateData patches the map, global variable and extern loads of code,
+// whose relocations are at their offset in the loaded code. A map reference
+// becomes a BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable or
+// .kconfig extern reference becomes a BPF_PSEUDO_MAP_VALUE load: the first
+// immediate holds the map descriptor and the second the variable's offset in
+// the map value. The calls and the subprogram address loads were patched
+// when the subprograms were appended; an address load must still carry
+// BPF_PSEUDO_FUNC.
+func relocateData(code *progCode) error {
+	for i, r := range code.relocs {
+		switch r.kind {
+		case relocCall:
+		case relocSubprogAddr:
+			if decodeBpfInsn(code.insns[r.insnOff:]).Src != bpfPseudoFunc {
+				return fmt.Errorf("prog '%s': relo #%d: bad insn", code.prog.name, i)
+			}
+		default:
+			if r.m.fd < 0 {
+				return fmt.Errorf("map %s has no descriptor", BpfMapName(r.m))
+			}
+			patchReloc(code.insns, r)
 		}
-		if r.m.fd < 0 {
-			return fmt.Errorf("map %s has no descriptor", BpfMapName(r.m))
-		}
-		patchReloc(insns, r)
 	}
 	return nil
 }
@@ -385,12 +417,18 @@ const (
 	// relocExternLD64 loads the address of a .kconfig extern inside the
 	// .kconfig map.
 	relocExternLD64
+	// relocCall calls a .text subprogram.
+	relocCall
+	// relocSubprogAddr loads the address of a .text subprogram, such as a
+	// callback passed to a helper.
+	relocSubprogAddr
 )
 
 // progReloc is one resolved program relocation. insnOff is the byte offset of
-// the ld_imm64 instruction; symOff is the symbol value added to the
-// instruction's own immediate for a global data relocation, or the extern's
-// offset in the .kconfig map value.
+// the call or ld_imm64 instruction; symOff is the symbol value added to the
+// instruction's own immediate for a global data relocation, the extern's
+// offset in the .kconfig map value, or the symbol value of a subprogram call
+// or address load.
 type progReloc struct {
 	kind    relocKind
 	insnOff int
@@ -398,21 +436,29 @@ type progReloc struct {
 	symOff  uint32
 }
 
-// recordReloc resolves one ELF relocation of program p against obj's maps.
+// recordReloc resolves one ELF relocation of program p against obj's maps and
+// subprograms. The relocated instruction must be a call or an ld_imm64.
 //
 // An extern symbol refers to an extern variable; a .kconfig extern lives in
-// the .kconfig map at its extern offset. A symbol in .maps names a map. A
-// symbol in a data section refers to that section's internal map; the symbol
-// value, zero for a section symbol, is the variable offset, and the
-// instruction immediate carries any extra offset.
+// the .kconfig map at its extern offset. A call refers to a .text
+// subprogram, and so does an ld_imm64 against a .text function or the .text
+// section symbol. A symbol in .maps names a map. A symbol in a data section
+// refers to that section's internal map; the symbol value, zero for a section
+// symbol, is the variable offset, and the instruction immediate carries any
+// extra offset.
 func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (progReloc, error) {
 	off := int(rel.Offset)
-	if off < 0 || off%bpfInsnLength != 0 || off+2*bpfInsnLength > len(insns) {
+	if off < 0 || off%bpfInsnLength != 0 || off+bpfInsnLength > len(insns) {
 		return progReloc{}, fmt.Errorf("prog '%s': relocation at %d is out of range", p.name, off)
 	}
-	if insns[off] != bpfLD|bpfImm|bpfSizeDW {
+	insn := decodeBpfInsn(insns[off:])
+	isCall := isCallInsn(insn)
+	if !isCall && insn.Code != bpfLD|bpfImm|bpfSizeDW {
 		return progReloc{}, fmt.Errorf("prog '%s': invalid relo against '%s' for insns[%d].code 0x%x",
-			p.name, rel.Symbol, off/bpfInsnLength, insns[off])
+			p.name, rel.Symbol, off/bpfInsnLength, insn.Code)
+	}
+	if !isCall && off+2*bpfInsnLength > len(insns) {
+		return progReloc{}, fmt.Errorf("prog '%s': relocation at %d is out of range", p.name, off)
 	}
 	if obj.elf == nil || int(rel.SymbolIndex) >= len(obj.elf.Symbols) {
 		return progReloc{}, fmt.Errorf("prog '%s': symbol #%d not found", p.name, rel.SymbolIndex)
@@ -426,10 +472,16 @@ func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (pr
 	if sym.Type == elf.STT_SECTION && symName == "" {
 		symName = sym.Section
 	}
+	if isCall {
+		return recordCallReloc(obj, p, insn, sym, symName, off)
+	}
 	shndx := int(sym.SectionIndex)
 	if shndx == 0 || sym.SectionIndex >= elf.SHN_LORESERVE || shndx >= len(obj.elf.Sections) {
 		return progReloc{}, fmt.Errorf("prog '%s': invalid relo against '%s' in special section 0x%x; forgot to initialize global var?..",
 			p.name, symName, shndx)
+	}
+	if symIsSubprog(sym, obj.textShndx) {
+		return recordSubprogAddrReloc(p, insn, sym, symName, off)
 	}
 
 	sec := &obj.elf.Sections[shndx]
@@ -451,6 +503,40 @@ func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (pr
 		}
 	}
 	return progReloc{}, fmt.Errorf("prog '%s': data relo failed to find map for section '%s'", p.name, sec.Name)
+}
+
+// recordCallReloc resolves the relocation of a BPF_PSEUDO_CALL instruction.
+// The target must be a function in .text at an instruction boundary: a
+// global function through its own symbol, or a static one through the
+// section symbol with the function offset in the instruction immediate.
+func recordCallReloc(obj *BpfObject, p *BpfProgram, insn bpfInsn, sym elf.Symbol, symName string, insnOff int) (progReloc, error) {
+	if insn.Src != bpfPseudoCall {
+		return progReloc{}, fmt.Errorf("prog '%s': incorrect bpf_call opcode", p.name)
+	}
+	shndx := int(sym.SectionIndex)
+	if shndx == 0 || shndx != obj.textShndx {
+		secName := ""
+		if shndx < len(obj.elf.Sections) {
+			secName = obj.elf.Sections[shndx].Name
+		}
+		return progReloc{}, fmt.Errorf("prog '%s': bad call relo against '%s' in section '%s'", p.name, symName, secName)
+	}
+	if sym.Value%bpfInsnLength != 0 {
+		return progReloc{}, fmt.Errorf("prog '%s': bad call relo against '%s' at offset %d", p.name, symName, sym.Value)
+	}
+	return progReloc{kind: relocCall, insnOff: insnOff, symOff: uint32(sym.Value)}, nil
+}
+
+// recordSubprogAddrReloc resolves an ld_imm64 that loads the address of a
+// .text function. A global function's symbol value is its offset and the
+// immediate is 0; a static function's relocation is against the section
+// symbol and the immediate is its offset.
+func recordSubprogAddrReloc(p *BpfProgram, insn bpfInsn, sym elf.Symbol, symName string, insnOff int) (progReloc, error) {
+	if sym.Value%bpfInsnLength != 0 || insn.Imm%bpfInsnLength != 0 {
+		return progReloc{}, fmt.Errorf("prog '%s': bad subprog addr relo against '%s' at offset %d+%d",
+			p.name, symName, sym.Value, insn.Imm)
+	}
+	return progReloc{kind: relocSubprogAddr, insnOff: insnOff, symOff: uint32(sym.Value)}, nil
 }
 
 // recordExternReloc resolves a relocation against the extern ELF symbol of

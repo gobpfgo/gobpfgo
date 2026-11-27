@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -33,6 +34,12 @@ type BpfObject struct {
 	btfFD    int
 	loaded   bool
 	closed   bool
+
+	// textShndx is the .text section index, or 0 without one. The programs
+	// in it are subprograms, which the public iteration skips and the load
+	// appends to the programs that call them. programs is sorted by section
+	// and offset.
+	textShndx int
 
 	// externs are the extern variables, sorted as the loader resolves them.
 	// kconfigMap holds the .kconfig externs' values, and kconfig is the
@@ -196,9 +203,9 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 	if kconfigMap != nil {
 		maps = append(maps, kconfigMap)
 	}
-	programs, err := parsePrograms(e)
+	programs, textShndx, err := parsePrograms(e)
 	if err != nil {
-		return nil, openError(path, err)
+		return nil, withPath(err, path)
 	}
 
 	obj := &BpfObject{
@@ -206,6 +213,7 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 		path:       path,
 		maps:       maps,
 		programs:   programs,
+		textShndx:  textShndx,
 		btf:        spec,
 		elf:        e,
 		license:    e.License,
@@ -424,48 +432,6 @@ func mapTypeID(spec *btf.Spec, id uint32) (uint32, error) {
 	return t.SizeOrType, nil
 }
 
-// parsePrograms turns executable ELF sections into program specs using the SEC
-// table and the function symbol that names each program.
-func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
-	var programs []*BpfProgram
-	for _, p := range e.Programs {
-		def, ok := secDefFor(p.Name)
-		if !ok {
-			continue
-		}
-		name := programSymbol(e, p.Name)
-		if name == "" {
-			return nil, fmt.Errorf("section %s has no function symbol", p.Name)
-		}
-		prog := &BpfProgram{
-			name:               name,
-			progType:           def.progType,
-			expectedAttachType: def.attachType,
-			progFlags:          def.progFlags,
-			usdt:               def.flags&secUSDT != 0,
-			sectionName:        p.Name,
-			insns:              p.Insns,
-			relocs:             p.Relocs,
-			fd:                 -1,
-		}
-		if def.flags&secAttachBTF != 0 {
-			prog.attachBTF = true
-			prog.attachTarget = strings.TrimPrefix(p.Name, def.prefix)
-		}
-		programs = append(programs, prog)
-	}
-	return programs, nil
-}
-
-func programSymbol(e *elf.Object, section string) string {
-	for _, s := range e.Symbols {
-		if s.Type == elf.STT_FUNC && s.Section == section && s.Name != "" {
-			return s.Name
-		}
-	}
-	return ""
-}
-
 // objectNameFromPath derives the object name from the base name up to the
 // first dot, matching libbpf's file-name rule.
 func objectNameFromPath(path string) string {
@@ -559,24 +525,25 @@ func BpfObjectNextMap(obj *BpfObject, prev *BpfMap) *BpfMap {
 	return nil
 }
 
-// BpfObjectNextProgram returns the next program in ELF section order. Pass nil
-// to start; it returns nil after the last program.
+// BpfObjectNextProgram returns the next program, in ELF section order and,
+// within a section, in function order. Subprograms are skipped, because they
+// are loaded only as part of the programs that call them. Pass nil to start;
+// it returns nil after the last program.
 func BpfObjectNextProgram(obj *BpfObject, prev *BpfProgram) *BpfProgram {
 	if obj == nil {
 		return nil
 	}
-	if prev == nil {
-		if len(obj.programs) == 0 {
+	start := 0
+	if prev != nil {
+		i := slices.Index(obj.programs, prev)
+		if i < 0 {
 			return nil
 		}
-		return obj.programs[0]
+		start = i + 1
 	}
-	for i, p := range obj.programs {
-		if p == prev {
-			if i+1 < len(obj.programs) {
-				return obj.programs[i+1]
-			}
-			return nil
+	for _, p := range obj.programs[start:] {
+		if !progIsSubprog(obj, p) {
+			return p
 		}
 	}
 	return nil
@@ -621,12 +588,13 @@ func findMapBySymbol(obj *BpfObject, symbol string) *BpfMap {
 }
 
 // BpfObjectFindProgramByName returns the program with the exact name, or nil.
+// Subprograms are not found.
 func BpfObjectFindProgramByName(obj *BpfObject, name string) *BpfProgram {
 	if obj == nil {
 		return nil
 	}
 	for _, p := range obj.programs {
-		if p.name == name {
+		if !progIsSubprog(obj, p) && p.name == name {
 			return p
 		}
 	}

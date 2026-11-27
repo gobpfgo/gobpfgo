@@ -7,7 +7,7 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c dedup.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c dedup.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c subprog.c
 ORACLE_HDRS := json.h oracle.h usdt_notes.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
@@ -16,7 +16,7 @@ LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 # The objects whose .BTF and .BTF.ext the dedup scenario deduplicates.
 DEDUP_OBJECTS := $(addprefix ../testdata/progs/,kprobe.bpf.o dump.bpf.o core.bpf.o core_kernel.bpf.o global_data.bpf.o kconfig_types.bpf.o link_a.bpf.o link_b.bpf.o link_text_a.bpf.o link_text_b.bpf.o ringbuf.bpf.o usdt_attach.bpf.o)
 
-.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture usdt-fixture clean
+.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture usdt-fixture subprog-fixture clean
 
 all: $(ORACLE)
 
@@ -80,6 +80,13 @@ linker-fixture: $(ORACLE)
 	$(ORACLE) linker ../testdata/progs/link_a.bpf.o ../testdata/progs/link_b.bpf.o > ../testdata/oracle/linker-merge.json
 	$(ORACLE) linker ../testdata/progs/link_b.bpf.o ../testdata/progs/link_a.bpf.o > ../testdata/oracle/linker-merge-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/linker-text.json
+
+subprog-fixture: $(ORACLE)
+	mkdir -p ../testdata/oracle
+	$(ORACLE) subprog ../testdata/progs/subprog.bpf.o > ../testdata/oracle/subprog.json
+	$(ORACLE) subprog ../testdata/progs/subprog_callback.bpf.o > ../testdata/oracle/subprog-callback.json
+	$(ORACLE) subprog ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/subprog-link-text.json
+	$(ORACLE) subprog ../testdata/progs/link_text_b.bpf.o ../testdata/progs/link_text_a.bpf.o > ../testdata/oracle/subprog-link-text-reverse.json
 
 # The USDT target is a host program, built by testdata/progs; this target
 # does not rebuild it. The scenario needs an x86-64 host and no privileges.

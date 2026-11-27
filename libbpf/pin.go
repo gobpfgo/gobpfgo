@@ -224,7 +224,8 @@ func BpfObjectUnpinMaps(obj *BpfObject, path *string) error {
 
 // BpfObjectPinPrograms pins every loaded program of obj at path/<program-name>.
 // Dots in the resulting path become underscores, matching libbpf. If a pin
-// fails, the programs pinned by this call are unpinned.
+// fails, the programs pinned by this call are unpinned. Subprograms have no
+// descriptor of their own and are skipped.
 func BpfObjectPinPrograms(obj *BpfObject, path string) error {
 	const op = "bpf_object__pin_programs"
 
@@ -237,6 +238,9 @@ func BpfObjectPinPrograms(obj *BpfObject, path string) error {
 
 	pinned := make([]*BpfProgram, 0, len(obj.programs))
 	for _, p := range obj.programs {
+		if progIsSubprog(obj, p) {
+			continue
+		}
 		pinPath := sanitizePinPath(filepath.Join(path, p.name))
 		if err := BpfProgramPin(p, pinPath); err != nil {
 			for _, done := range pinned {
@@ -261,6 +265,9 @@ func BpfObjectUnpinPrograms(obj *BpfObject, path string) error {
 	}
 
 	for _, p := range obj.programs {
+		if progIsSubprog(obj, p) {
+			continue
+		}
 		pinPath := sanitizePinPath(filepath.Join(path, p.name))
 		if err := BpfProgramUnpin(p, pinPath); err != nil {
 			return pinError(op, err)
@@ -322,13 +329,13 @@ func objectMapsLoaded(obj *BpfObject) bool {
 }
 
 // objectProgramsLoaded reports whether obj has programs and all of them are
-// loaded.
+// loaded. Subprograms have no descriptor of their own and are not checked.
 func objectProgramsLoaded(obj *BpfObject) bool {
 	if obj == nil || obj.closed {
 		return false
 	}
 	for _, p := range obj.programs {
-		if p.fd < 0 {
+		if !progIsSubprog(obj, p) && p.fd < 0 {
 			return false
 		}
 	}

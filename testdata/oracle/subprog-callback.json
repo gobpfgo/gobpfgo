@@ -1,0 +1,42 @@
+{
+  "case": "subprog",
+  "libbpf_commit": "4f05fb027a08a8a66d03916cf6a68a91e2c720ea",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "subprog_callback.bpf.o"
+  ],
+  "errno": 0,
+  "maps": [
+    "callback_counts"
+  ],
+  "programs": [
+    {
+      "name": "handle_callback",
+      "section": "kprobe/do_sys_openat2",
+      "insn_cnt": 33,
+      "insns": "b70100000400000018420000080000000000000000000000b703000000000000b70400000000000085000000b5000000b701000001000000851000000e000000b7000000000000009500000000000000b701000000000000631afcff00000000bfa200000000000007020000fcffffff1851000000000000000000000000000085000000010000001500020000000000b701000001000000db10000000000000b7000000000000009500000000000000631afcff00000000bfa200000000000007020000fcffffff1851000000000000000000000000000085000000010000001500020000000000b701000001000000db10000000000000b7000000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 17},
+        {"insn_off": 10, "type_id": 19},
+        {"insn_off": 22, "type_id": 14}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 138, "line_off": 0, "line_col": 44034},
+        {"insn_off": 6, "file_name_off": 138, "line_off": 0, "line_col": 45065},
+        {"insn_off": 8, "file_name_off": 138, "line_off": 0, "line_col": 45058},
+        {"insn_off": 10, "file_name_off": 138, "line_off": 0, "line_col": 30720},
+        {"insn_off": 11, "file_name_off": 138, "line_off": 0, "line_col": 31752},
+        {"insn_off": 14, "file_name_off": 138, "line_off": 0, "line_col": 32785},
+        {"insn_off": 17, "file_name_off": 138, "line_off": 0, "line_col": 34822},
+        {"insn_off": 18, "file_name_off": 138, "line_off": 0, "line_col": 35843},
+        {"insn_off": 20, "file_name_off": 138, "line_off": 0, "line_col": 37890},
+        {"insn_off": 22, "file_name_off": 138, "line_off": 0, "line_col": 18432},
+        {"insn_off": 25, "file_name_off": 138, "line_off": 0, "line_col": 19473},
+        {"insn_off": 28, "file_name_off": 138, "line_off": 0, "line_col": 21510},
+        {"insn_off": 29, "file_name_off": 138, "line_off": 0, "line_col": 22531},
+        {"insn_off": 31, "file_name_off": 138, "line_off": 0, "line_col": 24578}
+      ]
+    }
+  ]
+}

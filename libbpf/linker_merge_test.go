@@ -428,3 +428,35 @@ func TestBpfLinkerMergeLoad(t *testing.T) {
 		})
 	}
 }
+
+// TestBpfLinkerTextLoad loads the object linked from link_text_a.bpf.o and
+// link_text_b.bpf.o, in both orders, and runs it. Each program calls its own
+// static bump, and the second object's bump follows the first in the merged
+// .text, so one call is relocated past the first bump. Only the two programs
+// get descriptors. Both attach to do_sys_openat2, and opening a file must
+// count in each program's own map. It needs root or CAP_BPF and skips
+// otherwise.
+func TestBpfLinkerTextLoad(t *testing.T) {
+	for _, names := range [][]string{
+		{"link_text_a.bpf.o", "link_text_b.bpf.o"},
+		{"link_text_b.bpf.o", "link_text_a.bpf.o"},
+	} {
+		t.Run(strings.Join(names, "_"), func(t *testing.T) {
+			obj := loadTestObject(t, linkObjects(t, names...))
+			defer BpfObjectClose(obj)
+
+			checkSubprogDescriptors(t, obj)
+			attachKprobes(t, obj, map[string]string{
+				"handle_text_a": "do_sys_openat2",
+				"handle_text_b": "do_sys_openat2",
+			})
+			triggerOpen(t)
+
+			for _, name := range []string{"text_counts_a", "text_counts_b"} {
+				if got := mapValue(t, obj, name); got == 0 {
+					t.Errorf("%s = 0, want the open counted", name)
+				}
+			}
+		})
+	}
+}
