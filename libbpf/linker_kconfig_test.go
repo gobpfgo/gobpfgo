@@ -59,6 +59,8 @@ func TestBpfLinkerKconfigOracle(t *testing.T) {
 		"linker-kconfig-merge-reverse.json",
 		"linker-ksyms.json",
 		"linker-kconfig-ksyms.json",
+		"linker-ksyms-addr.json",
+		"linker-ksyms-weak.json",
 		"linker-map-extern.json",
 		"linker-map-extern-reverse.json",
 		"linker-map-extern-unresolved.json",
@@ -221,9 +223,9 @@ func checkExternVar(spec *btf.Spec, vt *btf.Type, vsi btf.VarSecInfo) error {
 
 // TestBpfLinkerKsyms links link_ksyms.bpf.o alone and after kconfig.bpf.o.
 // The .ksyms externs stay undefined with extern BTF in the .ksyms DATASEC,
-// next to .kconfig when both are linked. The linked object opens, and loading
-// it fails with EOPNOTSUPP before anything reaches the kernel, because this
-// port does not resolve .ksyms externs.
+// next to .kconfig when both are linked. The linked object opens, and open
+// turns the .ksyms DATASEC into the integer slots the kernel loads, as it
+// does for the unlinked object.
 func TestBpfLinkerKsyms(t *testing.T) {
 	for _, names := range [][]string{{ksymsProg}, {kconfigProg, ksymsProg}} {
 		t.Run(strings.Join(names, "_"), func(t *testing.T) {
@@ -245,10 +247,7 @@ func TestBpfLinkerKsyms(t *testing.T) {
 				t.Fatalf("BpfObjectOpenFile: %v", err)
 			}
 			defer BpfObjectClose(obj)
-			err = BpfObjectLoad(obj)
-			if !errors.Is(err, unix.EOPNOTSUPP) || !strings.Contains(err.Error(), "extern (ksym)") {
-				t.Fatalf("BpfObjectLoad = %v, want EOPNOTSUPP for the .ksyms extern", err)
-			}
+			checkKsymsDatasec(t, obj.btf, len(ksymsExterns), true)
 		})
 	}
 }

@@ -51,16 +51,25 @@ func resolveError(errno syscall.Errno, format string, args ...any) error {
 }
 
 // resolveExterns gives every extern of obj its value before the maps are
-// created, writing the .kconfig values into the .kconfig map's initial value.
+// created, writing the .kconfig values into the .kconfig map's initial value
+// and the .ksyms values into the extern descriptors.
 //
 // The LINUX_ externs are virtual. LINUX_KERNEL_VERSION is the running
 // kernel's KERNEL_VERSION code; LINUX_HAS_BPF_COOKIE is 1 when the kernel
 // lets a program read a BPF cookie and 0 otherwise; LINUX_HAS_SYSCALL_WRAPPER
 // is zero because its feature probe is not ported; any other weak LINUX_
-// extern is zero, and a strong one is EINVAL. The CONFIG_ externs come from obj.kconfig first and then, while any
-// .kconfig extern is unset, from the system config; a parse error, or a
-// missing system config when it is needed, is EINVAL. A strong extern left
-// unset is ESRCH; a weak one stays zero. A .ksyms extern returns EOPNOTSUPP.
+// extern is zero, and a strong one is EINVAL. The CONFIG_ externs come from
+// obj.kconfig first and then, while any .kconfig extern is unset, from the
+// system config; a parse error, or a missing system config when it is
+// needed, is EINVAL.
+//
+// A typeless .ksyms variable takes its address from /proc/kallsyms; two
+// different addresses for one name, or a file that cannot be read, is
+// EINVAL. A typed .ksyms variable or function resolves against the kernel
+// BTF loaded into obj.btfVmlinux and the module BTFs; a type the kernel does
+// not have, or has with an incompatible type, is EINVAL, except a missing
+// weak extern and an incompatible weak function, which stay unset. A strong
+// extern left unset is ESRCH; a weak one stays zero.
 func resolveExterns(obj *BpfObject) error {
 	if len(obj.externs) == 0 {
 		return nil
@@ -70,12 +79,16 @@ func resolveExterns(obj *BpfObject) error {
 		data = obj.kconfigMap.initialValue
 	}
 
-	needConfig := false
+	needConfig, needKallsyms, needVmlinuxBTF := false, false, false
 	for i := range obj.externs {
 		ext := &obj.externs[i]
 		switch ext.typ {
 		case extKsym:
-			return resolveError(unix.EOPNOTSUPP, "extern (ksym) '%s': not supported", ext.name)
+			if ext.ksym.typeID != 0 {
+				needVmlinuxBTF = true
+			} else {
+				needKallsyms = true
+			}
 		case extKcfg:
 			if strings.HasPrefix(ext.name, kconfigPrefix) {
 				needConfig = true
@@ -101,6 +114,16 @@ func resolveExterns(obj *BpfObject) error {
 	}
 	if needConfig {
 		if err := readKconfigFile(obj.externs, data); err != nil {
+			return resolveError(unix.EINVAL, "%v", err)
+		}
+	}
+	if needKallsyms {
+		if err := readKallsymsFile(obj.externs, obj.btf); err != nil {
+			return resolveError(unix.EINVAL, "%v", err)
+		}
+	}
+	if needVmlinuxBTF {
+		if err := resolveKsymsBtfID(obj); err != nil {
 			return resolveError(unix.EINVAL, "%v", err)
 		}
 	}

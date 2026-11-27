@@ -72,6 +72,25 @@ static void kconfig_json(struct json *j, const struct bpf_object *obj) {
 	json_obj_end(j);
 }
 
+/*
+ * ksyms_btf_json prints the object BTF after open, as hex, for an object with
+ * a .ksyms DATASEC. Open turns that DATASEC into integer slots, gives the
+ * functions global linkage and adds a dummy_ksym variable for them, so the
+ * bytes show the whole rewrite. Other objects print nothing.
+ */
+static void ksyms_btf_json(struct json *j, const struct bpf_object *obj) {
+	struct btf *btf = bpf_object__btf(obj);
+	const void *raw;
+	__u32 size;
+
+	if (!btf || btf__find_by_name_kind(btf, ".ksyms", BTF_KIND_DATASEC) < 0)
+		return;
+
+	raw = btf__raw_data(btf, &size);
+	if (raw)
+		json_hex(j, "ksyms_btf", raw, size);
+}
+
 int oracle_open(const char *path) {
 	struct oracle_meta meta = {.case_name = "open", .version = true};
 	struct bpf_program *prog;
@@ -105,6 +124,7 @@ int oracle_open(const char *path) {
 	json_arr_end(&j);
 
 	kconfig_json(&j, obj);
+	ksyms_btf_json(&j, obj);
 
 	json_obj_end(&j);
 	fputc('\n', stdout);

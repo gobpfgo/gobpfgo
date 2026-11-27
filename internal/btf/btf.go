@@ -72,9 +72,18 @@ type Spec struct {
 	// Dedup keeps the string table.
 	stringsDeduped bool
 
-	// mergedSplit is set by MergeSplit: the base and module type names come
-	// from two string tables, so the spec cannot be deduplicated.
+	// mergedSplit is set by MergeSplit and ParseSplit: the base and module
+	// type names come from two string tables, so the spec cannot be
+	// deduplicated.
 	mergedSplit bool
+
+	// base is the base spec of a split spec from ParseSplit, and nil
+	// otherwise. A split spec's Types hold the void placeholder and its own
+	// types; type IDs below startID and string offsets below startStrOff
+	// belong to base.
+	base        *Spec
+	startID     uint32
+	startStrOff uint32
 }
 
 // Header lengths: the fields up to the string section, and the full header
@@ -170,11 +179,45 @@ func (s *Spec) encode() error {
 // Parse returns an error for a bad magic, an unsupported version, sections
 // outside the blob, truncated type records or an unknown type kind.
 func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
-	if len(data) < 24 {
-		return nil, fmt.Errorf("btf: header too short: %d bytes", len(data))
-	}
 	data = append([]byte(nil), data...)
+	hdr, sec, err := parseHeader(data, order)
+	if err != nil {
+		return nil, err
+	}
 
+	s := &Spec{
+		Header:         hdr,
+		ByteOrder:      order,
+		Strings:        data[sec.strStart:sec.strEnd],
+		Types:          []Type{{Kind: KindVoid}},
+		raw:            data,
+		typeStart:      sec.typeStart,
+		stringsDeduped: hdr.StrLen <= 1,
+	}
+	if err := s.parseTypes(data[sec.typeStart:sec.typeEnd], 1); err != nil {
+		return nil, err
+	}
+	for i := range s.Types {
+		if err := s.resolveNames(&s.Types[i]); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// btfSections are the byte ranges of the type and string sections in a BTF
+// blob.
+type btfSections struct {
+	typeStart, typeEnd int
+	strStart, strEnd   int
+}
+
+// parseHeader decodes and checks the BTF header of data and returns it with
+// the bounds of the type and string sections.
+func parseHeader(data []byte, order binary.ByteOrder) (Header, btfSections, error) {
+	if len(data) < 24 {
+		return Header{}, btfSections{}, fmt.Errorf("btf: header too short: %d bytes", len(data))
+	}
 	hdr := Header{
 		Magic:   order.Uint16(data[0:]),
 		Version: data[2],
@@ -186,13 +229,13 @@ func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 		StrLen:  order.Uint32(data[20:]),
 	}
 	if hdr.Magic != 0xeb9f {
-		return nil, fmt.Errorf("btf: bad magic 0x%x", hdr.Magic)
+		return Header{}, btfSections{}, fmt.Errorf("btf: bad magic 0x%x", hdr.Magic)
 	}
 	if hdr.Version != 1 {
-		return nil, fmt.Errorf("btf: unsupported version %d", hdr.Version)
+		return Header{}, btfSections{}, fmt.Errorf("btf: unsupported version %d", hdr.Version)
 	}
 	if hdr.HdrLen < 24 || uint64(hdr.HdrLen) > uint64(len(data)) {
-		return nil, fmt.Errorf("btf: bad header length %d", hdr.HdrLen)
+		return Header{}, btfSections{}, fmt.Errorf("btf: bad header length %d", hdr.HdrLen)
 	}
 
 	typeStart := uint64(hdr.HdrLen) + uint64(hdr.TypeOff)
@@ -200,40 +243,28 @@ func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 	strStart := uint64(hdr.HdrLen) + uint64(hdr.StrOff)
 	strEnd := strStart + uint64(hdr.StrLen)
 	if typeEnd > uint64(len(data)) {
-		return nil, fmt.Errorf("btf: type section out of bounds")
+		return Header{}, btfSections{}, fmt.Errorf("btf: type section out of bounds")
 	}
 	if strEnd > uint64(len(data)) {
-		return nil, fmt.Errorf("btf: string section out of bounds")
+		return Header{}, btfSections{}, fmt.Errorf("btf: string section out of bounds")
 	}
+	return hdr, btfSections{int(typeStart), int(typeEnd), int(strStart), int(strEnd)}, nil
+}
 
-	s := &Spec{
-		Header:         hdr,
-		ByteOrder:      order,
-		Strings:        data[int(strStart):int(strEnd)],
-		Types:          []Type{{Kind: KindVoid}},
-		raw:            data,
-		typeStart:      int(typeStart),
-		stringsDeduped: hdr.StrLen <= 1,
-	}
-
-	typeData := data[int(typeStart):int(typeEnd)]
-	for pos := 0; pos < len(typeData); {
-		t, n, err := parseType(typeData[pos:], uint32(len(s.Types)), order)
+// parseTypes decodes the type records of typeData and appends them to
+// s.Types; the first one gets type ID firstID.
+func (s *Spec) parseTypes(typeData []byte, firstID uint32) error {
+	id := firstID
+	for pos := 0; pos < len(typeData); id++ {
+		t, n, err := parseType(typeData[pos:], id, s.ByteOrder)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		t.rawOff = uint32(pos)
 		s.Types = append(s.Types, t)
 		pos += n
 	}
-
-	for i := range s.Types {
-		if err := s.resolveNames(&s.Types[i]); err != nil {
-			return nil, err
-		}
-	}
-
-	return s, nil
+	return nil
 }
 
 func parseType(b []byte, id uint32, order binary.ByteOrder) (Type, int, error) {
@@ -396,15 +427,28 @@ func (s *Spec) resolveNames(t *Type) error {
 }
 
 // String returns the NUL-terminated string at off. Offset 0 is the empty
-// string; an out-of-range or unterminated string is an error.
+// string; an out-of-range or unterminated string is an error. In a split
+// spec an offset below the base string table's length is a base string.
 func (s *Spec) String(off uint32) (string, error) {
+	if s.base != nil {
+		if off < s.startStrOff {
+			return s.base.String(off)
+		}
+		return stringAt(s.Strings, off-s.startStrOff)
+	}
 	if off == 0 {
 		return "", nil
 	}
-	if int(off) >= len(s.Strings) {
+	return stringAt(s.Strings, off)
+}
+
+// stringAt returns the NUL-terminated string at off in the string table
+// strs.
+func stringAt(strs []byte, off uint32) (string, error) {
+	if int(off) >= len(strs) {
 		return "", fmt.Errorf("btf: string offset %d out of range", off)
 	}
-	b := s.Strings[off:]
+	b := strs[off:]
 	i := bytes.IndexByte(b, 0)
 	if i < 0 {
 		return "", fmt.Errorf("btf: unterminated string at %d", off)
@@ -413,8 +457,15 @@ func (s *Spec) String(off uint32) (string, error) {
 }
 
 // TypeByID returns the type with id. ID 0 is the void placeholder; an
-// out-of-range ID is an error.
+// out-of-range ID is an error. In a split spec an ID below StartID is a base
+// type.
 func (s *Spec) TypeByID(id uint32) (*Type, error) {
+	if s.base != nil {
+		if id < s.startID {
+			return s.base.TypeByID(id)
+		}
+		id = id - s.startID + 1
+	}
 	if id >= uint32(len(s.Types)) {
 		return nil, fmt.Errorf("btf: type id %d out of range", id)
 	}
@@ -623,7 +674,8 @@ func (s *Spec) datasec(id uint32) (*Type, error) {
 }
 
 // Find returns the first type with the given name and kind, or nil. Names are
-// compared exactly; an empty name matches only empty names.
+// compared exactly; an empty name matches only empty names. A split spec
+// searches only its own types, not its base.
 func (s *Spec) Find(name string, kind Kind) *Type {
 	for i := 1; i < len(s.Types); i++ {
 		if s.Types[i].Name == name && s.Types[i].Kind == kind {

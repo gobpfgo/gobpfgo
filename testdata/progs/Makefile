@@ -19,6 +19,7 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	kconfig.bpf.o kconfig_types.bpf.o usdt_attach.bpf.o subprog.bpf.o \
 	subprog_callback.bpf.o link_extern_a.bpf.o link_extern_b.bpf.o \
 	link_extern_weak.bpf.o link_kconfig.bpf.o link_ksyms.bpf.o \
+	link_ksyms_addr.bpf.o link_ksyms_weak.bpf.o \
 	link_map_extern.bpf.o link_map_def.bpf.o
 
 # A host program with SystemTap SDT probes for the USDT parser. It is built
