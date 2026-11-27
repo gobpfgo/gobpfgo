@@ -447,8 +447,8 @@ func kconfigExterns(externs ...externDesc) ([]externDesc, []byte) {
 
 // TestResolveVirtualExterns resolves the LINUX_ externs: the kernel version,
 // the BPF cookie probe result, the unported syscall wrapper extern as zero,
-// weak unknown ones as zero, and errors for strong unknown ones, other names
-// and .ksyms externs.
+// weak unknown ones as zero, and errors for strong unknown ones and other
+// names.
 func TestResolveVirtualExterns(t *testing.T) {
 	u32 := func(name string, weak bool) externDesc {
 		return externDesc{name: name, isWeak: weak, kcfg: kcfgExtern{typ: kcfgInt, sz: 4, align: 4}}
@@ -488,10 +488,6 @@ func TestResolveVirtualExterns(t *testing.T) {
 		}
 	}
 
-	ksym := &BpfObject{externs: []externDesc{{typ: extKsym, name: "bpf_ksym"}}}
-	if err := resolveExterns(ksym); !errors.Is(err, unix.EOPNOTSUPP) {
-		t.Errorf("ksym: %v, want EOPNOTSUPP", err)
-	}
 	if err := resolveExterns(&BpfObject{}); err != nil {
 		t.Errorf("no externs: %v", err)
 	}

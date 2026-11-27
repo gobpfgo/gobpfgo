@@ -93,7 +93,7 @@ func probeProgLoad(progType BpfProgType, insns []byte, logBuf []byte) (int, erro
 		attr.LogLevel = 1
 	}
 
-	fd, err := sys.ProgLoad(attr, insns, []byte("GPL\x00"), logBuf, nil, nil)
+	fd, err := sys.ProgLoad(attr, insns, []byte("GPL\x00"), logBuf, nil, nil, nil)
 	if err == nil {
 		unix.Close(fd)
 		if opts.expErr != 0 {

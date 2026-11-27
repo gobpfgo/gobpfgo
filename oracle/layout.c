@@ -15,6 +15,7 @@
 #define FR(name) {#name, offsetof(union bpf_attr, raw_tracepoint.name), sizeof(((union bpf_attr *)0)->raw_tracepoint.name)}
 #define FMAP(name) {#name, offsetof(struct bpf_map_info, name), sizeof(((struct bpf_map_info *)0)->name)}
 #define FPROG(name) {#name, offsetof(struct bpf_prog_info, name), sizeof(((struct bpf_prog_info *)0)->name)}
+#define FBTF(name) {#name, offsetof(struct bpf_btf_info, name), sizeof(((struct bpf_btf_info *)0)->name)}
 #define FPAGE(name) {#name, offsetof(struct perf_event_mmap_page, name), sizeof(((struct perf_event_mmap_page *)0)->name)}
 #define FHDR(name) {#name, offsetof(struct perf_event_header, name), sizeof(((struct perf_event_header *)0)->name)}
 
@@ -86,6 +87,7 @@ int oracle_layout(void) {
 		F(line_info_cnt),
 		F(attach_btf_id),
 		F(attach_btf_obj_fd),
+		F(fd_array),
 	};
 	static const struct oracle_field link_create_fields[] = {
 		FC(prog_fd),
@@ -132,6 +134,16 @@ int oracle_layout(void) {
 		F(file_flags),
 		F(path_fd),
 	};
+	static const struct oracle_field get_next_id_fields[] = {
+		F(start_id),
+		F(next_id),
+		F(open_flags),
+	};
+	static const struct oracle_field btf_get_fd_by_id_fields[] = {
+		F(btf_id),
+		F(open_flags),
+		F(fd_by_id_token_fd),
+	};
 	static const struct oracle_field obj_info_fields[] = {
 		{"bpf_fd", offsetof(union bpf_attr, info), 4},
 		{"info_len", offsetof(union bpf_attr, info) + 4, 4},
@@ -165,6 +177,14 @@ int oracle_layout(void) {
 		FPROG(line_info_rec_size),
 		FPROG(jited_line_info_rec_size),
 	};
+	static const struct oracle_field btf_info_fields[] = {
+		FBTF(btf),
+		FBTF(btf_size),
+		FBTF(id),
+		FBTF(name),
+		FBTF(name_len),
+		FBTF(kernel_btf),
+	};
 	static const struct oracle_field perf_event_fields[] = {
 		FPAGE(data_head),
 		FPAGE(data_tail),
@@ -197,9 +217,12 @@ int oracle_layout(void) {
 	oracle_field_block(&j, "raw_tracepoint", raw_tracepoint_fields, ORACLE_ARRAY_SIZE(raw_tracepoint_fields), ORACLE_OFFSETOFEND(union bpf_attr, raw_tracepoint));
 	oracle_field_block(&j, "map_elem", map_elem_fields, ORACLE_ARRAY_SIZE(map_elem_fields), ORACLE_OFFSETOFEND(union bpf_attr, flags));
 	oracle_field_block(&j, "obj_pin", obj_pin_fields, ORACLE_ARRAY_SIZE(obj_pin_fields), ORACLE_OFFSETOFEND(union bpf_attr, path_fd));
+	oracle_field_block(&j, "get_next_id", get_next_id_fields, ORACLE_ARRAY_SIZE(get_next_id_fields), ORACLE_OFFSETOFEND(union bpf_attr, open_flags));
+	oracle_field_block(&j, "btf_get_fd_by_id", btf_get_fd_by_id_fields, ORACLE_ARRAY_SIZE(btf_get_fd_by_id_fields), ORACLE_OFFSETOFEND(union bpf_attr, fd_by_id_token_fd));
 	oracle_field_block(&j, "obj_info", obj_info_fields, ORACLE_ARRAY_SIZE(obj_info_fields), ORACLE_OFFSETOFEND(union bpf_attr, info));
 	oracle_field_block(&j, "map_info", map_info_fields, ORACLE_ARRAY_SIZE(map_info_fields), sizeof(struct bpf_map_info));
 	oracle_field_block(&j, "prog_info", prog_info_fields, ORACLE_ARRAY_SIZE(prog_info_fields), sizeof(struct bpf_prog_info));
+	oracle_field_block(&j, "btf_info", btf_info_fields, ORACLE_ARRAY_SIZE(btf_info_fields), sizeof(struct bpf_btf_info));
 	oracle_field_block(&j, "perf_event", perf_event_fields, ORACLE_ARRAY_SIZE(perf_event_fields), ORACLE_OFFSETOFEND(struct perf_event_mmap_page, data_tail));
 	oracle_field_block(&j, "perf_event_header", perf_event_header_fields, ORACLE_ARRAY_SIZE(perf_event_header_fields), sizeof(struct perf_event_header));
 	oracle_field_block(&j, "perf_sample", perf_sample_fields, ORACLE_ARRAY_SIZE(perf_sample_fields), sizeof(struct perf_sample_raw_layout));

@@ -51,7 +51,7 @@ func probeBpfCookie() bool {
 		ProgType: uint32(BPF_PROG_TYPE_TRACEPOINT),
 		InsnCnt:  2,
 	}
-	fd, err := sys.ProgLoad(attr, probeHelperInsns(BPF_FUNC_get_attach_cookie), []byte("GPL\x00"), nil, nil, nil)
+	fd, err := sys.ProgLoad(attr, probeHelperInsns(BPF_FUNC_get_attach_cookie), []byte("GPL\x00"), nil, nil, nil, nil)
 	if err != nil {
 		return false
 	}
@@ -72,7 +72,7 @@ func probeUprobeMultiLink() bool {
 		InsnCnt:            2,
 		ExpectedAttachType: uint32(BPF_TRACE_UPROBE_MULTI),
 	}
-	progFD, err := sys.ProgLoad(attr, probeProgInsns(), []byte("GPL\x00"), nil, nil, nil)
+	progFD, err := sys.ProgLoad(attr, probeProgInsns(), []byte("GPL\x00"), nil, nil, nil, nil)
 	if err != nil {
 		return false
 	}

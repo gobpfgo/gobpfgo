@@ -152,7 +152,8 @@ func (r *relocator) relocateCalls(prog *BpfProgram) (*progCode, error) {
 }
 
 // relocCode adds prog's function and line records to code and rewrites the
-// calls and subprogram address loads in prog's copy. A subprogram that code
+// calls and subprogram address loads in prog's copy; a kernel function call
+// is left to relocateData. A subprogram that code
 // does not hold yet is appended and relocated first, recursively, so every
 // subprogram is appended once and every call gets the offset of that copy.
 func (r *relocator) relocCode(code *progCode, prog *BpfProgram) error {
@@ -168,7 +169,13 @@ func (r *relocator) relocCode(code *progCode, prog *BpfProgram) error {
 			continue
 		}
 
-		target, err := subprogTarget(prog, insnIdx, insn, findProgInsnReloc(r.relocs[prog], insnIdx))
+		reloc := findProgInsnReloc(r.relocs[prog], insnIdx)
+		if reloc != nil && reloc.kind == relocExternCall {
+			// A kernel function call is patched with the data
+			// relocations.
+			continue
+		}
+		target, err := subprogTarget(prog, insnIdx, insn, reloc)
 		if err != nil {
 			return err
 		}

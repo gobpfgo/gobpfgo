@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data, poison_kfunc_call
 
 //go:build linux && (amd64 || arm64)
 
@@ -23,7 +23,16 @@ import (
 const (
 	bpfPseudoMapFD    = 1
 	bpfPseudoMapValue = 2
+	bpfPseudoBtfID    = 3
 )
+
+// bpfPseudoKfuncCall is the source register of a call to a kernel function.
+const bpfPseudoKfuncCall = 2
+
+// poisonCallKfuncBase is the helper ID a call to an unresolved weak kernel
+// function gets, plus the extern's index. The verifier rejects the call with
+// that ID only if it is reachable.
+const poisonCallKfuncBase = 2002000000
 
 // Field offsets of struct bpf_func_info, the function record of
 // BPF_PROG_LOAD.
@@ -58,16 +67,22 @@ func mapTakesBTF(mapType BpfMapType) bool {
 
 // BpfObjectLoad loads the object into the kernel. It first resolves the
 // .kconfig externs into the .kconfig map's initial value, from the open
-// options' Kconfig text and the system kernel config. It then validates and
-// loads the BTF, creates the maps with their BTF type ids, writes the initial
-// contents of the internal maps and relocates each program. A program gets
-// a copy of every .text subprogram it calls, directly or through another
-// subprogram, appended to its own code, with the calls, the function and line
-// records and the map, global variable and extern references relocated. Only
-// the programs are loaded; a subprogram is loaded only as part of the
-// programs that call it and has no descriptor. The .rodata and .kconfig maps
-// are frozen after their contents are written, so user space can read but
-// not change them.
+// options' Kconfig text and the system kernel config, and the .ksyms
+// externs: a typeless variable to its /proc/kallsyms address, a typed
+// variable or kernel function to its ID in the running kernel's BTF or in a
+// module BTF. Program references to them become constants, BPF_PSEUDO_BTF_ID
+// loads and kfunc calls; a call to a missing weak kernel function is
+// replaced with one the verifier rejects only when it is reachable. The
+// kernel and module BTFs are released when the load returns. It then
+// validates and loads the BTF, creates the maps with their BTF type ids,
+// writes the initial contents of the internal maps and relocates each
+// program. A program gets a copy of every .text subprogram it calls,
+// directly or through another subprogram, appended to its own code, with
+// the calls, the function and line records and the map, global variable and
+// extern references relocated. Only the programs are loaded; a subprogram is
+// loaded only as part of the programs that call it and has no descriptor.
+// The .rodata and .kconfig maps are frozen after their contents are
+// written, so user space can read but not change them.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
@@ -85,6 +100,10 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 	if obj.btf == nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: "object has no BTF"}
+	}
+	defer obj.closeModuleBTFs()
+	if err := loadVmlinuxBTF(obj); err != nil {
+		return err
 	}
 	if err := resolveExterns(obj); err != nil {
 		return err
@@ -177,7 +196,7 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 	}
 	attr.SetProgName(p.name)
 
-	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo)
+	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
 	if err != nil {
 		return &Error{
 			Op:    "bpf_prog_load",
@@ -357,22 +376,29 @@ func progExtInsnOff(prog *BpfProgram, byteOff uint32, subInsnOff int) uint32 {
 	return uint32(int(byteOff/bpfInsnLength) + subInsnOff - prog.secInsnOff)
 }
 
-// relocateData patches the map, global variable and extern loads of code,
-// whose relocations are at their offset in the loaded code. A map reference
-// becomes a BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable or
-// .kconfig extern reference becomes a BPF_PSEUDO_MAP_VALUE load: the first
-// immediate holds the map descriptor and the second the variable's offset in
-// the map value. The calls and the subprogram address loads were patched
-// when the subprograms were appended; an address load must still carry
+// relocateData patches the map, global variable and extern references of
+// code, whose relocations are at their offset in the loaded code. A map
+// reference becomes a BPF_PSEUDO_MAP_FD load of the map descriptor. A global
+// variable or .kconfig extern reference becomes a BPF_PSEUDO_MAP_VALUE load:
+// the first immediate holds the map descriptor and the second the variable's
+// offset in the map value. A .ksyms reference and a kernel function call
+// take what the extern resolved to, as patchKsymLD64 and patchExternCall
+// describe. The calls and the subprogram address loads were patched when the
+// subprograms were appended; an address load must still carry
 // BPF_PSEUDO_FUNC.
 func relocateData(code *progCode) error {
+	externs := code.prog.obj.externs
 	for i, r := range code.relocs {
-		switch r.kind {
-		case relocCall:
-		case relocSubprogAddr:
+		switch {
+		case r.kind == relocCall:
+		case r.kind == relocSubprogAddr:
 			if decodeBpfInsn(code.insns[r.insnOff:]).Src != bpfPseudoFunc {
 				return fmt.Errorf("prog '%s': relo #%d: bad insn", code.prog.name, i)
 			}
+		case r.kind == relocExternCall:
+			patchExternCall(code.insns[r.insnOff:], r.extIdx, &externs[r.extIdx])
+		case r.kind == relocExternLD64 && externs[r.extIdx].typ == extKsym:
+			patchKsymLD64(code.insns[r.insnOff:], &externs[r.extIdx])
 		default:
 			if r.m.fd < 0 {
 				return fmt.Errorf("map %s has no descriptor", BpfMapName(r.m))
@@ -381,6 +407,40 @@ func relocateData(code *progCode) error {
 		}
 	}
 	return nil
+}
+
+// patchKsymLD64 rewrites the ld_imm64 pair insn that loads the .ksyms
+// extern ext. A resolved typed extern becomes a BPF_PSEUDO_BTF_ID load of
+// the kernel BTF ID, with the module BTF descriptor, or 0 for vmlinux, in
+// the second immediate. A typeless extern, or an unresolved weak typed one,
+// loads its kallsyms address as a 64-bit constant, 0 when it has none.
+func patchKsymLD64(insn []byte, ext *externDesc) {
+	if ext.ksym.typeID != 0 && ext.isSet {
+		insn[1] = (insn[1] & 0x0f) | (bpfPseudoBtfID << 4)
+		binary.NativeEndian.PutUint32(insn[4:], ext.ksym.kernelBtfID)
+		binary.NativeEndian.PutUint32(insn[12:], uint32(ext.ksym.kernelBtfObjFD))
+		return
+	}
+	binary.NativeEndian.PutUint32(insn[4:], uint32(ext.ksym.addr))
+	binary.NativeEndian.PutUint32(insn[12:], uint32(ext.ksym.addr>>32))
+}
+
+// patchExternCall rewrites the call insn to the kernel function ext, the
+// extern at index extIdx. A resolved call becomes a BPF_PSEUDO_KFUNC_CALL
+// with the kernel BTF ID as the immediate and the module's fd array slot, 0
+// for vmlinux, as the offset. An unresolved weak function is poisoned
+// instead: the call becomes a helper call with ID poisonCallKfuncBase plus
+// extIdx, which the verifier rejects only if the call is reachable.
+func patchExternCall(insn []byte, extIdx int, ext *externDesc) {
+	call := decodeBpfInsn(insn)
+	call.Src = bpfPseudoKfuncCall
+	if ext.isSet {
+		call.Imm = int32(ext.ksym.kernelBtfID)
+		call.Off = ext.ksym.btfFdIdx
+	} else {
+		call = bpfInsn{Code: bpfJMP | bpfCall, Imm: int32(poisonCallKfuncBase + extIdx)}
+	}
+	encodeBpfInsn(insn, call)
 }
 
 // patchReloc rewrites the ld_imm64 pair at r.insnOff. The source register is
@@ -415,8 +475,10 @@ const (
 	// relocData loads the address of a global variable inside its map.
 	relocData
 	// relocExternLD64 loads the address of a .kconfig extern inside the
-	// .kconfig map.
+	// .kconfig map, or what a .ksyms extern resolved to.
 	relocExternLD64
+	// relocExternCall calls a kernel function, a .ksyms extern.
+	relocExternCall
 	// relocCall calls a .text subprogram.
 	relocCall
 	// relocSubprogAddr loads the address of a .text subprogram, such as a
@@ -428,19 +490,22 @@ const (
 // the call or ld_imm64 instruction; symOff is the symbol value added to the
 // instruction's own immediate for a global data relocation, the extern's
 // offset in the .kconfig map value, or the symbol value of a subprogram call
-// or address load.
+// or address load. extIdx is the index of an extern relocation's extern in
+// the object's sorted externs.
 type progReloc struct {
 	kind    relocKind
 	insnOff int
 	m       *BpfMap
 	symOff  uint32
+	extIdx  int
 }
 
 // recordReloc resolves one ELF relocation of program p against obj's maps and
 // subprograms. The relocated instruction must be a call or an ld_imm64.
 //
-// An extern symbol refers to an extern variable; a .kconfig extern lives in
-// the .kconfig map at its extern offset. A call refers to a .text
+// An extern symbol refers to an extern: a call to a kernel function, or a
+// load of an extern variable or function address; a .kconfig extern lives
+// in the .kconfig map at its extern offset. A call refers to a .text
 // subprogram, and so does an ld_imm64 against a .text function or the .text
 // section symbol. A symbol in .maps names a map. A symbol in a data section
 // refers to that section's internal map; the symbol value, zero for a section
@@ -466,7 +531,7 @@ func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (pr
 
 	sym := obj.elf.Symbols[rel.SymbolIndex]
 	if symIsExtern(sym) {
-		return recordExternReloc(obj, p, rel, off)
+		return recordExternReloc(obj, p, rel, isCall, off)
 	}
 	symName := sym.Name
 	if sym.Type == elf.STT_SECTION && symName == "" {
@@ -540,18 +605,27 @@ func recordSubprogAddrReloc(p *BpfProgram, insn bpfInsn, sym elf.Symbol, symName
 }
 
 // recordExternReloc resolves a relocation against the extern ELF symbol of
-// rel. Only .kconfig externs are supported; they load from the .kconfig map.
-func recordExternReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insnOff int) (progReloc, error) {
-	ext := findExternBySymIdx(obj.externs, int(rel.SymbolIndex))
-	if ext == nil {
+// rel. A call is a kernel function call; any other reference is an ld_imm64
+// of the extern, which for a .kconfig extern loads from the .kconfig map.
+func recordExternReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, isCall bool, insnOff int) (progReloc, error) {
+	extIdx := findExternIdxBySymIdx(obj.externs, int(rel.SymbolIndex))
+	if extIdx < 0 {
 		return progReloc{}, fmt.Errorf("prog '%s': extern relo failed to find extern for '%s' (%d)",
 			p.name, rel.Symbol, rel.SymbolIndex)
 	}
-	if ext.typ != extKcfg {
-		return progReloc{}, fmt.Errorf("prog '%s': extern '%s' is not a .kconfig extern", p.name, ext.name)
+	r := progReloc{kind: relocExternLD64, insnOff: insnOff, extIdx: extIdx}
+	if isCall {
+		r.kind = relocExternCall
+		return r, nil
 	}
-	if obj.kconfigMap == nil {
-		return progReloc{}, fmt.Errorf("prog '%s': extern '%s' has no .kconfig map", p.name, ext.name)
+
+	ext := &obj.externs[extIdx]
+	if ext.typ == extKcfg {
+		if obj.kconfigMap == nil {
+			return progReloc{}, fmt.Errorf("prog '%s': extern '%s' has no .kconfig map", p.name, ext.name)
+		}
+		r.m = obj.kconfigMap
+		r.symOff = uint32(ext.kcfg.dataOff)
 	}
-	return progReloc{kind: relocExternLD64, insnOff: insnOff, m: obj.kconfigMap, symOff: uint32(ext.kcfg.dataOff)}, nil
+	return r, nil
 }

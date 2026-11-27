@@ -49,6 +49,9 @@ fixtures: $(ORACLE)
 	$(ORACLE) open ../testdata/progs/global_data.bpf.o > ../testdata/oracle/open-global-data.json
 	$(ORACLE) open ../testdata/progs/kconfig.bpf.o > ../testdata/oracle/open-kconfig.json
 	$(ORACLE) open ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/open-kconfig-types.json
+	$(ORACLE) open ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/open-ksyms.json
+	$(ORACLE) open ../testdata/progs/link_ksyms_addr.bpf.o > ../testdata/oracle/open-ksyms-addr.json
+	$(ORACLE) open ../testdata/progs/link_ksyms_weak.bpf.o > ../testdata/oracle/open-ksyms-weak.json
 	$(ORACLE) kconfig ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/kconfig.json
 	$(ORACLE) dump ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump.txt
 	$(ORACLE) dump-decl ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl.txt
@@ -94,6 +97,8 @@ linker-fixture: $(ORACLE)
 	$(ORACLE) linker-kconfig "$$(printf '$(LINKER_KCONFIG)')" ../testdata/progs/link_kconfig.bpf.o ../testdata/progs/kconfig.bpf.o > ../testdata/oracle/linker-kconfig-merge-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/linker-ksyms.json
 	$(ORACLE) linker ../testdata/progs/kconfig.bpf.o ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/linker-kconfig-ksyms.json
+	$(ORACLE) linker ../testdata/progs/link_ksyms_addr.bpf.o > ../testdata/oracle/linker-ksyms-addr.json
+	$(ORACLE) linker ../testdata/progs/link_ksyms_weak.bpf.o > ../testdata/oracle/linker-ksyms-weak.json
 	$(ORACLE) linker ../testdata/progs/link_map_extern.bpf.o ../testdata/progs/link_map_def.bpf.o > ../testdata/oracle/linker-map-extern.json
 	$(ORACLE) linker ../testdata/progs/link_map_def.bpf.o ../testdata/progs/link_map_extern.bpf.o > ../testdata/oracle/linker-map-extern-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_map_extern.bpf.o > ../testdata/oracle/linker-map-extern-unresolved.json

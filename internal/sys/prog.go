@@ -41,11 +41,12 @@ const (
 	progLoadOffLineInfoCnt        = 104
 	progLoadOffAttachBtfID        = 108
 	progLoadOffAttachBtfObjFD     = 112
+	progLoadOffFdArray            = 120
 )
 
-// ProgLoadAttr is the BPF_PROG_LOAD view of union bpf_attr. Insns, License
-// and LogBuf are addresses written by ProgLoad; the remaining fields are
-// scalar and default to zero.
+// ProgLoadAttr is the BPF_PROG_LOAD view of union bpf_attr. Insns, License,
+// LogBuf, FuncInfo, LineInfo and FdArray are addresses written by ProgLoad;
+// the remaining fields are scalar and default to zero.
 type ProgLoadAttr struct {
 	ProgType           uint32
 	InsnCnt            uint32
@@ -68,6 +69,7 @@ type ProgLoadAttr struct {
 	LineInfoCnt        uint32
 	AttachBtfID        uint32
 	AttachBtfObjFD     int32
+	FdArray            uint64
 }
 
 // SetProgName copies name into the 16-byte prog_name field, truncating to 15
@@ -105,6 +107,7 @@ func (a *ProgLoadAttr) Marshal() []byte {
 	binary.NativeEndian.PutUint32(buf[progLoadOffLineInfoCnt:], a.LineInfoCnt)
 	binary.NativeEndian.PutUint32(buf[progLoadOffAttachBtfID:], a.AttachBtfID)
 	binary.NativeEndian.PutUint32(buf[progLoadOffAttachBtfObjFD:], uint32(a.AttachBtfObjFD))
+	binary.NativeEndian.PutUint64(buf[progLoadOffFdArray:], a.FdArray)
 
 	return buf
 }
@@ -132,6 +135,7 @@ func progLoadFieldLayout() []fieldLayout {
 		{"line_info_cnt", progLoadOffLineInfoCnt, 4},
 		{"attach_btf_id", progLoadOffAttachBtfID, 4},
 		{"attach_btf_obj_fd", progLoadOffAttachBtfObjFD, 4},
+		{"fd_array", progLoadOffFdArray, 8},
 	}
 }
 
@@ -139,12 +143,15 @@ func progLoadFieldLayout() []fieldLayout {
 // descriptor. insns and license are copied by the kernel during the call;
 // logBuf may be nil or a buffer for the verifier log. funcInfo and lineInfo
 // may be nil or the struct bpf_func_info and struct bpf_line_info records.
+// fdArray may be nil or the native-endian 32-bit descriptors a kfunc call
+// names by index in its offset field; its count is not passed, as libbpf
+// does not pass it.
 //
 // The caller sets ProgType, InsnCnt, ProgFlags, ExpectedAttachType and
 // ProgBtfFD before calling, plus the record size and count of each record
 // array it passes. The caller owns the descriptor and must close it with
 // unix.Close.
-func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo []byte) (int, error) {
+func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo, fdArray []byte) (int, error) {
 	if len(insns) == 0 || len(license) == 0 {
 		return -1, unix.EINVAL
 	}
@@ -161,6 +168,9 @@ func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo []b
 	if len(lineInfo) > 0 {
 		attr.LineInfo = uint64(addr(lineInfo))
 	}
+	if len(fdArray) > 0 {
+		attr.FdArray = uint64(addr(fdArray))
+	}
 
 	fd, err := bpf(BPF_PROG_LOAD, attr.Marshal())
 	runtime.KeepAlive(insns)
@@ -168,6 +178,7 @@ func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo []b
 	runtime.KeepAlive(logBuf)
 	runtime.KeepAlive(funcInfo)
 	runtime.KeepAlive(lineInfo)
+	runtime.KeepAlive(fdArray)
 	if err != nil {
 		return -1, err
 	}

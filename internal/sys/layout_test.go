@@ -37,9 +37,12 @@ type layoutFixture struct {
 	LinkCreate      fixtureBlock `json:"link_create"`
 	LinkUpdate      fixtureBlock `json:"link_update"`
 	RawTracepoint   fixtureBlock `json:"raw_tracepoint"`
+	GetNextID       fixtureBlock `json:"get_next_id"`
+	BtfGetFDByID    fixtureBlock `json:"btf_get_fd_by_id"`
 	ObjInfo         fixtureBlock `json:"obj_info"`
 	MapInfo         fixtureBlock `json:"map_info"`
 	ProgInfo        fixtureBlock `json:"prog_info"`
+	BtfInfo         fixtureBlock `json:"btf_info"`
 	PerfEvent       fixtureBlock `json:"perf_event"`
 	PerfEventHeader fixtureBlock `json:"perf_event_header"`
 	PerfSample      fixtureBlock `json:"perf_sample"`
@@ -134,6 +137,16 @@ func TestRawTracepointLayout(t *testing.T) {
 	checkLayout(t, "raw_tracepoint", f.RawTracepoint, RawTracepointAttrSize, rawTracepointFieldLayout())
 }
 
+func TestGetNextIDLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "get_next_id", f.GetNextID, GetNextIDAttrSize, getNextIDFieldLayout())
+}
+
+func TestBtfGetFDByIDLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "btf_get_fd_by_id", f.BtfGetFDByID, BtfGetFDByIDAttrSize, btfGetFDByIDFieldLayout())
+}
+
 func TestPerfEventLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "perf_event", f.PerfEvent, PerfEventDataTailEnd, perfEventFieldLayout())
@@ -167,6 +180,11 @@ func TestMapInfoLayout(t *testing.T) {
 func TestProgInfoLayout(t *testing.T) {
 	f := loadLayoutFixture(t)
 	checkLayout(t, "prog_info", f.ProgInfo, ProgInfoSize, progInfoFieldLayout())
+}
+
+func TestBtfInfoLayout(t *testing.T) {
+	f := loadLayoutFixture(t)
+	checkLayout(t, "btf_info", f.BtfInfo, BtfInfoSize, btfInfoFieldLayout())
 }
 
 // TestLinkCreateUprobeMultiAttrBytes places known values at the offsets and
@@ -230,4 +248,44 @@ func fixtureBytes(t *testing.T, block fixtureBlock, values map[string]uint64) []
 		t.Fatalf("fixture has %d of the %d fields the test writes", written, len(values))
 	}
 	return buf
+}
+
+// TestBtfIDAttrBytes writes known values into the BTF ID iteration and open
+// attributes and the program load fd_array, and requires Marshal to put
+// them at the offsets libbpf's headers report, with every other byte zero.
+func TestBtfIDAttrBytes(t *testing.T) {
+	f := loadLayoutFixture(t)
+
+	tests := []struct {
+		name   string
+		block  fixtureBlock
+		got    []byte
+		values map[string]uint64
+	}{
+		{
+			name:   "get_next_id",
+			block:  f.GetNextID,
+			got:    (&GetNextIDAttr{StartID: 11, NextID: 12, OpenFlags: 13}).Marshal(),
+			values: map[string]uint64{"start_id": 11, "next_id": 12, "open_flags": 13},
+		},
+		{
+			name:   "btf_get_fd_by_id",
+			block:  f.BtfGetFDByID,
+			got:    (&BtfGetFDByIDAttr{BtfID: 21, OpenFlags: 22, FdByIDTokenFD: 23}).Marshal(),
+			values: map[string]uint64{"btf_id": 21, "open_flags": 22, "fd_by_id_token_fd": 23},
+		},
+		{
+			name:   "prog_load",
+			block:  f.ProgLoad,
+			got:    (&ProgLoadAttr{ProgType: 2, FdArray: 0x5555555555555555}).Marshal(),
+			values: map[string]uint64{"prog_type": 2, "fd_array": 0x5555555555555555},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if want := fixtureBytes(t, tt.block, tt.values); !bytes.Equal(tt.got, want) {
+				t.Fatalf("%s bytes:\n got %x\nwant %x", tt.name, tt.got, want)
+			}
+		})
+	}
 }

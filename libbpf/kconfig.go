@@ -61,17 +61,21 @@ type kcfgExtern struct {
 }
 
 // externDesc is one extern of the object: an undefined global or weak ELF
-// symbol whose BTF VAR sits in an extern DATASEC. symIdx is the ELF symbol
-// index the relocations use; isSet records that the loader gave it a value.
+// symbol whose BTF VAR or FUNC sits in an extern DATASEC. symIdx is the ELF
+// symbol index the relocations use; isSet records that the loader gave it a
+// value. essentName is the name without a ___flavor suffix, or "" when the
+// name has none; a kernel function is looked up by it.
 type externDesc struct {
-	typ      externType
-	symIdx   int
-	btfID    uint32
-	secBtfID uint32
-	name     string
-	isSet    bool
-	isWeak   bool
-	kcfg     kcfgExtern
+	typ        externType
+	symIdx     int
+	btfID      uint32
+	secBtfID   uint32
+	name       string
+	essentName string
+	isSet      bool
+	isWeak     bool
+	kcfg       kcfgExtern
+	ksym       ksymExtern
 }
 
 // externError reports an extern that cannot be collected at open time.
@@ -88,21 +92,30 @@ func symIsExtern(sym objelf.Symbol) bool {
 }
 
 // collectExterns returns the externs of the object, sorted, and lays out the
-// .kconfig ones.
+// .kconfig and .ksyms DATASECs for the kernel.
 //
 // Every named extern ELF symbol needs a BTF VAR or FUNC with extern linkage
 // and a DATASEC that holds it. A .kconfig extern must be a variable of a
-// supported kconfig type; a .ksyms extern is recorded but not resolved by this
-// port; any other section returns ENOTSUP.
+// supported kconfig type; a .ksyms extern is a kernel variable or function
+// the loader resolves; any other section returns ENOTSUP.
 //
 // The externs sort by kind and then, for .kconfig, by descending alignment,
-// ascending size and name. Each .kconfig extern takes the next offset rounded
-// up to its alignment. The .kconfig DATASEC gets that layout: its size, the
-// variable offsets, and allocated linkage, which the kernel requires.
+// ascending size and name. The .ksyms DATASEC becomes 4-byte allocated
+// integer slots, with the functions replaced by a dummy_ksym VAR, because
+// the kernel accepts neither extern variables nor functions there. Each
+// .kconfig extern takes the next offset rounded up to its alignment. The
+// .kconfig DATASEC gets that layout: its size, the variable offsets, and
+// allocated linkage, which the kernel requires.
 func collectExterns(e *objelf.Object, spec *btf.Spec) ([]externDesc, error) {
+	dummyID, err := addDummyKsymVar(spec)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		externs   []externDesc
 		kcfgSecID uint32
+		ksymSecID uint32
 	)
 	for i, sym := range e.Symbols {
 		if !symIsExtern(sym) || sym.Name == "" {
@@ -112,8 +125,11 @@ func collectExterns(e *objelf.Object, spec *btf.Spec) ([]externDesc, error) {
 		if err != nil {
 			return nil, err
 		}
-		if ext.typ == extKcfg {
+		switch ext.typ {
+		case extKcfg:
 			kcfgSecID = ext.secBtfID
+		case extKsym:
+			ksymSecID = ext.secBtfID
 		}
 		externs = append(externs, ext)
 	}
@@ -125,6 +141,11 @@ func collectExterns(e *objelf.Object, spec *btf.Spec) ([]externDesc, error) {
 		return externLess(&externs[a], &externs[b])
 	})
 
+	if ksymSecID != 0 {
+		if err := layoutKsyms(spec, ksymSecID, dummyID, externs); err != nil {
+			return nil, err
+		}
+	}
 	if kcfgSecID != 0 {
 		if err := layoutKconfig(spec, kcfgSecID, externs); err != nil {
 			return nil, err
@@ -142,10 +163,11 @@ func newExtern(spec *btf.Spec, sym objelf.Symbol, symIdx int) (externDesc, error
 	}
 	t := &spec.Types[btfID]
 	ext := externDesc{
-		symIdx: symIdx,
-		btfID:  btfID,
-		name:   t.Name,
-		isWeak: sym.Bind == elf.STB_WEAK,
+		symIdx:     symIdx,
+		btfID:      btfID,
+		name:       t.Name,
+		essentName: essentialName(t.Name),
+		isWeak:     sym.Bind == elf.STB_WEAK,
 	}
 
 	ext.secBtfID, errno = findExternSecBtfID(spec, btfID)
@@ -167,6 +189,7 @@ func newExtern(spec *btf.Spec, sym objelf.Symbol, symIdx int) (externDesc, error
 		ext.kcfg = kcfg
 	case btf.KsymsSec:
 		ext.typ = extKsym
+		ext.ksym = newKsymExtern(spec, t)
 	default:
 		return externDesc{}, externError(unix.ENOTSUP, "unrecognized extern section '%s'", sec.Name)
 	}
@@ -357,14 +380,15 @@ func findExternByName(externs []externDesc, name string) *externDesc {
 	return nil
 }
 
-// findExternBySymIdx returns the extern of ELF symbol symIdx, or nil.
-func findExternBySymIdx(externs []externDesc, symIdx int) *externDesc {
+// findExternIdxBySymIdx returns the index of the extern of ELF symbol
+// symIdx, or -1.
+func findExternIdxBySymIdx(externs []externDesc, symIdx int) int {
 	for i := range externs {
 		if externs[i].symIdx == symIdx {
-			return &externs[i]
+			return i
 		}
 	}
-	return nil
+	return -1
 }
 
 // initKconfigMap returns the internal .kconfig map, or nil when the object

@@ -45,7 +45,10 @@ type openFixture struct {
 	ObjectName string              `json:"object_name"`
 	Maps       []openFixtureMap    `json:"maps"`
 	Kconfig    *openFixtureKconfig `json:"kconfig"`
-	Programs   []struct {
+	// KsymsBTF is the hex object BTF after open, for an object with a
+	// .ksyms DATASEC.
+	KsymsBTF string `json:"ksyms_btf"`
+	Programs []struct {
 		Name               string `json:"name"`
 		Type               uint32 `json:"type"`
 		ExpectedAttachType uint32 `json:"expected_attach_type"`

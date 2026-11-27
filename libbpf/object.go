@@ -48,6 +48,15 @@ type BpfObject struct {
 	kconfigMap *BpfMap
 	kconfig    *string
 
+	// btfVmlinux and btfModules are the kernel BTFs the typed .ksyms
+	// externs resolve against, and fdArray the module BTF descriptors that
+	// kfunc calls name by index, slot 0 standing for vmlinux. They live
+	// only during BpfObjectLoad.
+	btfVmlinux       *btf.Spec
+	btfModules       []moduleBTF
+	btfModulesLoaded bool
+	fdArray          []int32
+
 	// usdtMan is the USDT spec ID state, created by the first
 	// BpfProgramAttachUsdt; usdtManErr is the error of that creation, which
 	// later attaches return as well.
@@ -473,6 +482,7 @@ func BpfObjectClose(obj *BpfObject) {
 // closeLoadFDs closes the BTF, map and program descriptors created by
 // BpfObjectLoad. It is idempotent and ignores close errors.
 func (obj *BpfObject) closeLoadFDs() {
+	obj.closeModuleBTFs()
 	if obj.btfFD >= 0 {
 		unix.Close(obj.btfFD)
 		obj.btfFD = -1

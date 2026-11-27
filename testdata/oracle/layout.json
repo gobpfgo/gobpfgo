@@ -61,7 +61,8 @@
       {"name": "line_info", "offset": 96, "size": 8},
       {"name": "line_info_cnt", "offset": 104, "size": 4},
       {"name": "attach_btf_id", "offset": 108, "size": 4},
-      {"name": "attach_btf_obj_fd", "offset": 112, "size": 4}
+      {"name": "attach_btf_obj_fd", "offset": 112, "size": 4},
+      {"name": "fd_array", "offset": 120, "size": 8}
     ]
   },
   "link_create": {
@@ -124,6 +125,22 @@
       {"name": "path_fd", "offset": 16, "size": 4}
     ]
   },
+  "get_next_id": {
+    "attr_size": 12,
+    "fields": [
+      {"name": "start_id", "offset": 0, "size": 4},
+      {"name": "next_id", "offset": 4, "size": 4},
+      {"name": "open_flags", "offset": 8, "size": 4}
+    ]
+  },
+  "btf_get_fd_by_id": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "btf_id", "offset": 0, "size": 4},
+      {"name": "open_flags", "offset": 8, "size": 4},
+      {"name": "fd_by_id_token_fd", "offset": 12, "size": 4}
+    ]
+  },
   "obj_info": {
     "attr_size": 16,
     "fields": [
@@ -164,6 +181,17 @@
       {"name": "nr_jited_line_info", "offset": 168, "size": 4},
       {"name": "line_info_rec_size", "offset": 172, "size": 4},
       {"name": "jited_line_info_rec_size", "offset": 176, "size": 4}
+    ]
+  },
+  "btf_info": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "btf", "offset": 0, "size": 8},
+      {"name": "btf_size", "offset": 8, "size": 4},
+      {"name": "id", "offset": 12, "size": 4},
+      {"name": "name", "offset": 16, "size": 8},
+      {"name": "name_len", "offset": 24, "size": 4},
+      {"name": "kernel_btf", "offset": 28, "size": 4}
     ]
   },
   "perf_event": {
