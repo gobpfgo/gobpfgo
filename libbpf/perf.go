@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name
+// libbpf-symbols: perf_event_open_tracepoint, perf_event_kprobe_open_legacy, perf_event_uprobe_open_legacy, determine_tracepoint_id, gen_probe_legacy_event_name, perf_event_open_probe, determine_uprobe_perf_type, determine_uprobe_retprobe_bit, parse_uint_from_file
 
 //go:build linux && (amd64 || arm64)
 
@@ -29,9 +29,20 @@ const perfEventAttrSize = 128
 // maxEventNameLen is the tracefs event name limit, including the terminator.
 const maxEventNameLen = 64
 
+// The uprobe PMU takes the reference counter offset in the upper 32 bits of
+// config.
+const (
+	perfUprobeRefCtrOffsetBits  = 32
+	perfUprobeRefCtrOffsetShift = 32
+)
+
 var (
 	attachSeq    uint64
 	tracefsRoots = []string{"/sys/kernel/tracing", "/sys/kernel/debug/tracing"}
+
+	// uprobePMUDir is the sysfs directory of the uprobe perf PMU, which
+	// holds its type and the config bit that selects a uretprobe.
+	uprobePMUDir = "/sys/bus/event_source/devices/uprobe"
 
 	perfLinkProbe struct {
 		once sync.Once
@@ -200,6 +211,105 @@ func openTracepointPerf(id, pid, cpu int) (int, error) {
 		Config: uint64(id),
 	}
 	return unix.PerfEventOpen(&attr, pid, cpu, -1, unix.PERF_FLAG_FD_CLOEXEC)
+}
+
+// perfEventOpenUprobe opens a uprobe or uretprobe at offset in the file at
+// path through the uprobe perf PMU. Unlike the tracefs path, the PMU takes a
+// reference counter: a nonzero refCtrOffset is the file offset of a USDT
+// semaphore that the kernel increments in every process the uprobe is
+// installed in, and decrements when the event is closed.
+//
+// A refCtrOffset that does not fit in 32 bits is EINVAL, checked before
+// anything else. A kernel without the uprobe PMU, or without its retprobe bit
+// for a uretprobe, is EOPNOTSUPP. pid -1 opens the event for every process on
+// CPU 0, and a pid of 0 or more for that process on every CPU. Any other
+// negative pid is passed as -1 for every CPU, which perf_event_open rejects.
+func perfEventOpenUprobe(retprobe bool, path string, offset uint64, pid int, refCtrOffset uint64) (int, error) {
+	if refCtrOffset >= 1<<perfUprobeRefCtrOffsetBits {
+		return -1, unix.EINVAL
+	}
+
+	perfType, err := determineUprobePerfType()
+	if err != nil {
+		return -1, err
+	}
+	var retprobeBit uint32
+	if retprobe {
+		if retprobeBit, err = determineUprobeRetprobeBit(); err != nil {
+			return -1, err
+		}
+	}
+
+	attr := uprobePerfEventAttr(perfType, retprobe, retprobeBit, offset, refCtrOffset)
+	cpu := -1
+	if pid == -1 {
+		cpu = 0
+	}
+	if pid < 0 {
+		pid = -1
+	}
+	return sys.PerfEventOpenUprobe(&attr, path, pid, cpu)
+}
+
+// uprobePerfEventAttr builds the perf event attribute of a uprobe PMU event
+// with the given PMU type and retprobe bit. Config carries the retprobe bit
+// and the reference counter offset in its upper 32 bits, and Ext2, the
+// kernel's config2, the probe offset; sys.PerfEventOpenUprobe sets Ext1,
+// config1, to the path.
+func uprobePerfEventAttr(perfType uint32, retprobe bool, retprobeBit uint32, offset, refCtrOffset uint64) unix.PerfEventAttr {
+	attr := unix.PerfEventAttr{
+		Type:   perfType,
+		Size:   perfEventAttrSize,
+		Config: refCtrOffset << perfUprobeRefCtrOffsetShift,
+		Ext2:   offset,
+	}
+	if retprobe {
+		attr.Config |= 1 << retprobeBit
+	}
+	return attr
+}
+
+// determineUprobePerfType reads the type of the uprobe perf PMU. A kernel
+// without the PMU is EOPNOTSUPP.
+func determineUprobePerfType() (uint32, error) {
+	return parseUprobePMUFile("type", "")
+}
+
+// determineUprobeRetprobeBit reads the config bit that turns a uprobe PMU
+// event into a uretprobe. The sysfs format file says "config:<bit>". A kernel
+// without the file is EOPNOTSUPP.
+func determineUprobeRetprobeBit() (uint32, error) {
+	return parseUprobePMUFile(filepath.Join("format", "retprobe"), "config:")
+}
+
+// parseUprobePMUFile reads the number in a file of the uprobe PMU's sysfs
+// directory; a missing file means the kernel lacks the feature.
+func parseUprobePMUFile(name, prefix string) (uint32, error) {
+	file := filepath.Join(uprobePMUDir, name)
+	v, err := parseUintFromFile(file, prefix)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, fmt.Errorf("%s does not exist: %w", file, unix.EOPNOTSUPP)
+	}
+	return v, err
+}
+
+// parseUintFromFile reads the decimal number in [0, 2^31-1] that follows
+// prefix at the start of file. As with scanf's %d, white space before the
+// number is skipped and the number ends at the first byte that is not a
+// digit. A file without such a number is EIO.
+func parseUintFromFile(file, prefix string) (uint32, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return 0, err
+	}
+	text, ok := strings.CutPrefix(string(data), prefix)
+	text = strings.TrimLeft(text, " \t\n")
+	digits := text[:len(text)-len(strings.TrimLeft(text, "0123456789"))]
+	v, parseErr := strconv.ParseUint(digits, 10, 31)
+	if !ok || parseErr != nil {
+		return 0, fmt.Errorf("%s: no number in %q: %w", file, data, unix.EIO)
+	}
+	return uint32(v), nil
 }
 
 // perfLinkSupported reports whether BPF_LINK_CREATE accepts BPF_PERF_EVENT.

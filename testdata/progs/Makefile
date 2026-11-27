@@ -35,6 +35,11 @@ USDT_TARGET := usdt_target
 # C library version and still loads at a random base. It is not part of all.
 USDT_LOOP_TARGET := usdt_loop_target
 
+# The USDT semaphore target is built the same way. Its gobpfgo:sema probe has
+# a call site with a semaphore and one without, and it prints the semaphore
+# value, so the tests can watch the kernel's reference counter.
+USDT_SEMA_TARGET := usdt_sema_target
+
 .PHONY: all clean
 
 all: $(BPF_OBJS)
@@ -54,9 +59,9 @@ core_target.bpf.o: core_target.c
 $(USDT_TARGET): usdt_target.c
 	$(CC) -O2 -Wall -Wextra -Werror -o $@ $<
 
-$(USDT_LOOP_TARGET): usdt_loop_target.c
+$(USDT_LOOP_TARGET) $(USDT_SEMA_TARGET): %: %.c
 	$(CC) -O2 -Wall -Wextra -Werror -fno-stack-protector -nostdlib \
 		-static-pie -o $@ $<
 
 clean:
-	rm -f $(BPF_OBJS) $(USDT_TARGET) $(USDT_LOOP_TARGET)
+	rm -f $(BPF_OBJS) $(USDT_TARGET) $(USDT_LOOP_TARGET) $(USDT_SEMA_TARGET)

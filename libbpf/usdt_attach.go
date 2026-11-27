@@ -99,12 +99,17 @@ type usdtLink struct {
 // library that address comes from the load base in /proc/<pid>/maps, so pid
 // -1 returns EOPNOTSUPP on such kernels.
 //
-// The single-uprobe path uses the tracefs uprobe events, which take neither a
-// BPF cookie nor a semaphore reference counter. A kernel with cookies but
-// without uprobe multi links, Linux 5.15 to 6.5, therefore returns
-// EOPNOTSUPP, as does a probe with a semaphore on a kernel without cookies,
-// such as 5.10. binaryPath is used as given; a bare name is not searched in
-// PATH.
+// A call site with a semaphore passes its file offset to the kernel as the
+// uprobe's reference counter, so the semaphore stays raised in the traced
+// processes while the link exists. The uprobe multi link takes one counter
+// per call site, zero for a call site without a semaphore. On the
+// single-uprobe path such a call site is opened through the uprobe perf PMU,
+// and one without a semaphore uses the tracefs uprobe events. A kernel that
+// does not count USDT semaphores returns EOPNOTSUPP for a probe that has one.
+//
+// Neither single-uprobe path carries a BPF cookie, so a kernel with cookies
+// but without uprobe multi links, Linux 5.15 to 6.5, returns EOPNOTSUPP.
+// binaryPath is used as given; a bare name is not searched in PATH.
 //
 // The returned link has no descriptor: BpfLinkFD returns -1, and pinning
 // returns EOPNOTSUPP. Errors carry the errno of the failing step: EINVAL for
@@ -185,7 +190,7 @@ func newUsdtManager(obj *BpfObject) (*usdtManager, error) {
 // to them. On failure it releases everything it set up.
 func (man *usdtManager) attach(prog *BpfProgram, pid int, path, provider, name string, cookie uint64) (*BpfLink, error) {
 	// The program reads its spec ID from the BPF cookie, and only the
-	// uprobe multi link can set one: a tracefs uprobe would leave every
+	// uprobe multi link can set one: a single uprobe would leave every
 	// call site with cookie 0, which is spec ID 0.
 	if man.hasBpfCookie && !man.hasUprobeMulti {
 		return nil, fmt.Errorf("BPF cookies on single uprobes are not supported: %w", unix.EOPNOTSUPP)

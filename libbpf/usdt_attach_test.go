@@ -7,8 +7,10 @@ package libbpf
 
 import (
 	"bufio"
+	"debug/elf"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -24,11 +26,16 @@ import (
 )
 
 const (
-	usdtObjectPath = "../testdata/progs/usdt_attach.bpf.o"
-	usdtTargetPath = "../testdata/progs/usdt_loop_target"
+	usdtObjectPath     = "../testdata/progs/usdt_attach.bpf.o"
+	usdtTargetPath     = "../testdata/progs/usdt_loop_target"
+	usdtSemaTargetPath = "../testdata/progs/usdt_sema_target"
 
 	usdtProvider = "gobpfgo"
 	usdtName     = "loop"
+	usdtSemaName = "sema"
+
+	// usdtSemaSymbol is the semaphore of gobpfgo:sema in usdt_sema_target.
+	usdtSemaSymbol = "gobpfgo_sema_semaphore"
 
 	// usdtTestCookie is the USDT cookie the program must read back.
 	usdtTestCookie = 0xc0ff_ee00_1234_5678
@@ -322,8 +329,8 @@ func TestBpfProgramAttachUsdtCookieWithoutMulti(t *testing.T) {
 	}
 }
 
-// usdtLoopTarget is a running usdt_loop_target. trigger fires both call
-// sites once and waits until the target has done so.
+// usdtLoopTarget is a running usdt_loop_target or usdt_sema_target. trigger
+// fires both call sites once and waits until the target has done so.
 type usdtLoopTarget struct {
 	path   string
 	pid    int
@@ -331,29 +338,29 @@ type usdtLoopTarget struct {
 	stdout *bufio.Reader
 }
 
-// checkedInUsdtTarget returns the absolute path of the checked-in loop target.
-func checkedInUsdtTarget(t *testing.T) string {
+// checkedInUsdtTarget returns the absolute path of a checked-in target.
+func checkedInUsdtTarget(t *testing.T, target string) string {
 	t.Helper()
 
-	path, err := filepath.Abs(usdtTargetPath)
+	path, err := filepath.Abs(target)
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
 	return path
 }
 
-// privateUsdtTarget copies the loop target into the test's temporary
-// directory. A uprobe without a PID filter traps every process that maps its
-// file, so a test attaching without a PID uses its own copy and cannot place
-// breakpoints in a target another test is running.
-func privateUsdtTarget(t *testing.T) string {
+// privateUsdtTarget copies a target into the test's temporary directory. A
+// uprobe without a PID filter traps every process that maps its file, so a
+// test attaching without a PID uses its own copy and cannot place breakpoints
+// in a target another test is running.
+func privateUsdtTarget(t *testing.T, target string) string {
 	t.Helper()
 
-	data, err := os.ReadFile(usdtTargetPath)
+	data, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("read target: %v", err)
 	}
-	path := filepath.Join(t.TempDir(), filepath.Base(usdtTargetPath))
+	path := filepath.Join(t.TempDir(), filepath.Base(target))
 	if err := os.WriteFile(path, data, 0o755); err != nil {
 		t.Fatalf("copy target: %v", err)
 	}
@@ -400,15 +407,22 @@ func TestUsdtLoopTarget(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("the USDT target is an x86-64 binary")
 	}
-	target := startUsdtTarget(t, privateUsdtTarget(t))
+	target := startUsdtTarget(t, privateUsdtTarget(t, usdtTargetPath))
 	target.trigger(t)
 	target.trigger(t)
-	if err := target.stdin.Close(); err != nil {
-		t.Fatalf("close stdin: %v", err)
+	target.stop(t)
+}
+
+// TestUsdtSemaTarget does the same for the semaphore target, which reports a
+// zero semaphore when nothing traces it.
+func TestUsdtSemaTarget(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("the USDT target is an x86-64 binary")
 	}
-	if line, err := target.stdout.ReadString('\n'); err != io.EOF || line != "" {
-		t.Fatalf("after stdin closed the target said %q, %v, want EOF", line, err)
-	}
+	target := startUsdtTarget(t, privateUsdtTarget(t, usdtSemaTargetPath))
+	target.triggerSemaphore(t, 0)
+	target.triggerSemaphore(t, 0)
+	target.stop(t)
 }
 
 func (target *usdtLoopTarget) trigger(t *testing.T) {
@@ -418,6 +432,27 @@ func (target *usdtLoopTarget) trigger(t *testing.T) {
 		t.Fatalf("trigger: %v", err)
 	}
 	target.expect(t, "fired\n")
+}
+
+// triggerSemaphore fires the semaphore target's call sites once and requires
+// the semaphore value it prints afterwards to be want.
+func (target *usdtLoopTarget) triggerSemaphore(t *testing.T, want int) {
+	t.Helper()
+
+	target.trigger(t)
+	target.expect(t, fmt.Sprintf("semaphore %d\n", want))
+}
+
+// stop closes the target's input and requires it to exit without saying more.
+func (target *usdtLoopTarget) stop(t *testing.T) {
+	t.Helper()
+
+	if err := target.stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+	if line, err := target.stdout.ReadString('\n'); err != io.EOF || line != "" {
+		t.Fatalf("after stdin closed the target said %q, %v, want EOF", line, err)
+	}
 }
 
 func (target *usdtLoopTarget) expect(t *testing.T, want string) {
@@ -489,14 +524,14 @@ func loadUsdtObject(t *testing.T) (*BpfObject, *BpfProgram) {
 	return obj, BpfObjectFindProgramByName(obj, "handle_loop")
 }
 
-// attachUsdtOrSkip attaches the program to the target's probe. A kernel with
-// BPF cookies but no uprobe multi link needs a cookie on each tracefs uprobe,
-// which that path cannot carry: the attach must fail with EOPNOTSUPP and the
-// test skips.
-func attachUsdtOrSkip(t *testing.T, obj *BpfObject, prog *BpfProgram, pid int, path string) *BpfLink {
+// attachUsdtOrSkip attaches the program to the target's gobpfgo probe name.
+// A kernel with BPF cookies but no uprobe multi link needs a cookie on each
+// single uprobe, which that path cannot carry: the attach must fail with
+// EOPNOTSUPP and the test skips.
+func attachUsdtOrSkip(t *testing.T, obj *BpfObject, prog *BpfProgram, pid int, path, name string) *BpfLink {
 	t.Helper()
 
-	link, err := BpfProgramAttachUsdt(prog, pid, path, usdtProvider, usdtName, &BpfUsdtOpts{UsdtCookie: usdtTestCookie})
+	link, err := BpfProgramAttachUsdt(prog, pid, path, usdtProvider, name, &BpfUsdtOpts{UsdtCookie: usdtTestCookie})
 	if man := obj.usdtMan; man != nil && man.hasBpfCookie && !man.hasUprobeMulti {
 		if link != nil || !errors.Is(err, unix.EOPNOTSUPP) {
 			t.Fatalf("attach = %v, %v, want EOPNOTSUPP on the single-uprobe cookie path", link, err)
@@ -596,9 +631,9 @@ func lookupUsdtIP(obj *BpfObject, ip uint64) (int32, error) {
 func TestBpfProgramAttachUsdt(t *testing.T) {
 	obj, prog := loadUsdtObject(t)
 	checkUsdtLoad(t, obj, prog)
-	target := startUsdtTarget(t, checkedInUsdtTarget(t))
+	target := startUsdtTarget(t, checkedInUsdtTarget(t, usdtTargetPath))
 
-	link := attachUsdtOrSkip(t, obj, prog, target.pid, target.path)
+	link := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtName)
 	man := obj.usdtMan
 	t.Logf("BPF cookie %v, uprobe multi %v", man.hasBpfCookie, man.hasUprobeMulti)
 	if fd := BpfLinkFD(link); fd != -1 {
@@ -627,7 +662,7 @@ func TestBpfProgramAttachUsdt(t *testing.T) {
 		}
 	}
 
-	again := attachUsdtOrSkip(t, obj, prog, target.pid, target.path)
+	again := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtName)
 	slices.Reverse(ids)
 	if !slices.Equal(again.usdt.specIDs, ids) || man.nextFreeSpecID != 2 {
 		t.Errorf("second attach spec IDs = %v, next %d, want %v and 2", again.usdt.specIDs, man.nextFreeSpecID, ids)
@@ -643,7 +678,7 @@ func TestBpfProgramAttachUsdt(t *testing.T) {
 // with EOPNOTSUPP.
 func TestBpfProgramAttachUsdtAnyProcess(t *testing.T) {
 	obj, prog := loadUsdtObject(t)
-	target := startUsdtTarget(t, privateUsdtTarget(t))
+	target := startUsdtTarget(t, privateUsdtTarget(t, usdtTargetPath))
 
 	if !featBpfCookie.supported() {
 		link, err := BpfProgramAttachUsdt(prog, -1, target.path, usdtProvider, usdtName, nil)
@@ -653,7 +688,119 @@ func TestBpfProgramAttachUsdtAnyProcess(t *testing.T) {
 		return
 	}
 
-	attachUsdtOrSkip(t, obj, prog, -1, target.path)
+	attachUsdtOrSkip(t, obj, prog, -1, target.path, usdtName)
 	target.trigger(t)
 	checkLoopRecords(t, obj, 1, 1)
+}
+
+// TestUsdtSemaphoreTargets collects the call sites of gobpfgo:sema without a
+// kernel. The first has no semaphore and gets reference counter offset 0; the
+// second gets the file offset of the semaphore, which the kernel can only
+// count in a writable, file-backed part of the executable. A kernel that does
+// not count semaphores rejects the probe with EOPNOTSUPP.
+func TestUsdtSemaphoreTargets(t *testing.T) {
+	f, err := usdt.Open(usdtSemaTargetPath)
+	if err != nil {
+		t.Fatalf("usdt.Open: %v", err)
+	}
+	man := &usdtManager{hasBpfCookie: true, hasSemaRefcnt: true}
+
+	targets, err := man.collectTargets(f, usdtSemaTargetPath, -1, usdtProvider, usdtSemaName, 0)
+	if err != nil {
+		t.Fatalf("collectTargets: %v", err)
+	}
+	var got []uint64
+	for _, target := range targets {
+		got = append(got, target.semaOff)
+	}
+	if want := []uint64{0, usdtSemaphoreOffset(t)}; !slices.Equal(got, want) {
+		t.Errorf("semaphore offsets = %#x, want %#x", got, want)
+	}
+
+	man.hasSemaRefcnt = false
+	if _, err := man.collectTargets(f, usdtSemaTargetPath, -1, usdtProvider, usdtSemaName, 0); !errors.Is(err, unix.EOPNOTSUPP) {
+		t.Errorf("without semaphore counting: %v, want EOPNOTSUPP", err)
+	}
+}
+
+// usdtSemaphoreOffset returns the file offset of the semaphore symbol of the
+// semaphore target, from the ELF symbol table rather than the USDT note. The
+// symbol must lie in the file-backed part of a writable segment.
+func usdtSemaphoreOffset(t *testing.T) uint64 {
+	t.Helper()
+
+	f, err := elf.Open(usdtSemaTargetPath)
+	if err != nil {
+		t.Fatalf("open %s: %v", usdtSemaTargetPath, err)
+	}
+	defer f.Close()
+	syms, err := f.Symbols()
+	if err != nil {
+		t.Fatalf("symbols: %v", err)
+	}
+	i := slices.IndexFunc(syms, func(sym elf.Symbol) bool { return sym.Name == usdtSemaSymbol })
+	if i < 0 {
+		t.Fatalf("no symbol %s", usdtSemaSymbol)
+	}
+	sym := syms[i]
+
+	for _, prog := range f.Progs {
+		if prog.Type == elf.PT_LOAD && prog.Flags&elf.PF_W != 0 &&
+			sym.Value >= prog.Vaddr && sym.Value+sym.Size <= prog.Vaddr+prog.Filesz {
+			return sym.Value - prog.Vaddr + prog.Off
+		}
+	}
+	t.Fatalf("%s at %#x is not in the file-backed part of a writable segment", usdtSemaSymbol, sym.Value)
+	return 0
+}
+
+// checkUsdtSemaphoreLinks checks how the two call sites of gobpfgo:sema were
+// attached: through one uprobe multi link when the kernel has it, otherwise
+// with a tracefs uprobe for the call site without a semaphore and a uprobe
+// PMU event, which owns its perf event descriptor, for the one with it.
+func checkUsdtSemaphoreLinks(t *testing.T, ul *usdtLink) {
+	t.Helper()
+
+	if ul.man.hasUprobeMulti {
+		if ul.multiLink == nil || len(ul.uprobes) != 0 {
+			t.Errorf("multi link %v and %d uprobes, want one multi link", ul.multiLink, len(ul.uprobes))
+		}
+		return
+	}
+	if ul.multiLink != nil || len(ul.uprobes) != 2 {
+		t.Fatalf("multi link %v and %d uprobes, want 2 uprobes", ul.multiLink, len(ul.uprobes))
+	}
+	if plain := ul.uprobes[0]; plain.legacy == nil {
+		t.Errorf("call site without a semaphore: no tracefs event")
+	}
+	if sema := ul.uprobes[1]; sema.legacy != nil || sema.perfFD < 0 || sema.fd != sema.perfFD {
+		t.Errorf("call site with a semaphore: tracefs event %v, descriptors %d and %d, want a PMU event", sema.legacy, sema.fd, sema.perfFD)
+	}
+}
+
+// TestBpfProgramAttachUsdtSemaphore attaches handle_loop to gobpfgo:sema in
+// the running semaphore target. One of its two call sites has a semaphore, so
+// the attachment passes one zero and one real reference counter offset. The
+// target prints the semaphore after every round: 0 before the attach, 1 while
+// the link exists and 0 again after the link is destroyed, and the program
+// records the arguments of both call sites only in the attached round. On a
+// kernel with uprobe multi links the call sites share one link; without
+// them, as on 5.10, the call site with the semaphore goes through the uprobe
+// PMU and the other through tracefs.
+func TestBpfProgramAttachUsdtSemaphore(t *testing.T) {
+	obj, prog := loadUsdtObject(t)
+	target := startUsdtTarget(t, checkedInUsdtTarget(t, usdtSemaTargetPath))
+	target.triggerSemaphore(t, 0)
+
+	link := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtSemaName)
+	man := obj.usdtMan
+	t.Logf("BPF cookie %v, uprobe multi %v", man.hasBpfCookie, man.hasUprobeMulti)
+	checkUsdtSemaphoreLinks(t, link.usdt)
+
+	target.triggerSemaphore(t, 1)
+	checkLoopRecords(t, obj, 2, 1)
+
+	BpfLinkDestroy(link)
+	target.triggerSemaphore(t, 0)
+	checkLoopRecords(t, obj, 2, 1)
 }

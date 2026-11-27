@@ -16,8 +16,9 @@ import (
 )
 
 // BpfLink is an attached program. It owns either a BPF link descriptor or,
-// for the tracefs probe path, a perf event descriptor and the tracefs event.
-// A USDT link owns the links of its call sites instead and has no descriptor.
+// for the tracefs probe path, a perf event descriptor and the tracefs event,
+// or, for the uprobe PMU path, the perf event descriptor alone. A USDT link
+// owns the links of its call sites instead and has no descriptor.
 // BpfLinkDestroy releases them.
 type BpfLink struct {
 	fd           int
@@ -31,9 +32,9 @@ type BpfLink struct {
 }
 
 // BpfLinkFD returns the link descriptor, or -1 when the link has been detached
-// or destroyed. For a link created through the tracefs probe path, this is the
-// perf event descriptor, matching the path that created it. A USDT link has no
-// descriptor of its own and returns -1.
+// or destroyed. For a link created through the tracefs or uprobe PMU probe
+// path, this is the perf event descriptor, matching the path that created it.
+// A USDT link has no descriptor of its own and returns -1.
 func BpfLinkFD(link *BpfLink) int {
 	if link == nil || link.detached || link.destroyed || link.usdt != nil {
 		return -1
