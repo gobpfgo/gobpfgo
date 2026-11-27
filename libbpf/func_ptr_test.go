@@ -72,7 +72,8 @@ var callxLayouts = map[string]struct {
 // The offsets are the byte offsets of the functions in libbpf's code: at
 // instructions 20, 23 and 29 in handle_callx_one, and 18, 24 and 27 in
 // handle_callx_two. The global function's slot is 0. Both programs copy
-// .rodata.three, with callx_third at their own offset.
+// .rodata.three, with callx_third at their own offset. The load replaces the
+// offsets, see callxReached.
 var callxCopies = []struct {
 	prog  string
 	m     string
@@ -83,6 +84,19 @@ var callxCopies = []struct {
 	{"handle_callx_one", ".rodata.three", 5, []uint64{29 * 8}},
 	{"handle_callx_two", ".rodata.two", 6, []uint64{18 * 8, 24 * 8}},
 	{"handle_callx_two", ".rodata.three", 7, []uint64{27 * 8}},
+}
+
+// callxReached are the functions each program with callx keeps after a
+// privileged load, in order. The tables are frozen read-only data, so the
+// verifier knows the function each table load reaches and removes the
+// appended functions it never reaches as dead code. The kernel then stores
+// the jited address of each kept function in the program's copies and 0 for
+// a removed one. handle_callx_one reaches callx_first through the first
+// table; handle_callx_two reaches callx_second through the second and
+// callx_third through the third.
+var callxReached = map[string][]string{
+	"handle_callx_one": {"handle_callx_one", "callx_dispatch", "callx_first"},
+	"handle_callx_two": {"handle_callx_two", "callx_second", "callx_third"},
 }
 
 // words encodes 64-bit values in native byte order.
@@ -664,17 +678,18 @@ func callxRejected(err error) bool {
 		strings.Contains(e.Log, "BPF_CALL uses reserved fields")
 }
 
-// TestCallxLoad loads callx.bpf.o, attaches its three programs to
-// do_sys_openat2, opens a file and checks callxMarks: handle_callx_one called
-// callx_first and handle_callx_two callx_second through their tables,
-// callx_second called callx_third through the third, and handle_callx_plain
-// read callx_bias. Each program with callx loads its own
-// frozen copy of its table's map, which is not an object map, holds the
-// program's function offsets and is closed with the object.
+// TestCallxLoad loads callx.bpf.o, checks the copies with checkCallxCopies,
+// attaches its three programs to do_sys_openat2, opens a file and checks
+// callxMarks: handle_callx_one called callx_first and handle_callx_two
+// callx_second through their tables, callx_second called callx_third through
+// the third, and handle_callx_plain read callx_bias. Each mark is a distinct
+// sum, so no other function ran, callx_global included. The copies are
+// closed with the object.
 //
-// No released kernel runs callx, so 5.10 and 6.18 reject handle_callx_one.
-// The test then checks that the failed load closed the maps, the copies
-// included, and skips. It needs root or CAP_BPF.
+// 7.4 runs callx. 5.10, 6.18 and 7.3.6 reject handle_callx_one; the test then
+// checks that the failed load closed the maps, the copies included, and
+// skips. It needs root: the kernel resolves the pointers and removes dead
+// code only for a privileged load.
 func TestCallxLoad(t *testing.T) {
 	obj, err := BpfObjectOpenFile(callxObject, nil)
 	if err != nil {
@@ -712,8 +727,9 @@ func TestCallxLoad(t *testing.T) {
 }
 
 // checkCallxCopies checks the copies of a loaded callx.bpf.o against
-// callxCopies: each with its own descriptor, not an object map, holding the
-// program's function offsets and frozen.
+// callxCopies: each with its own descriptor, not an object map, and frozen.
+// The load has replaced the function offsets in each copy, so it holds
+// callxLoadedValue.
 func checkCallxCopies(t *testing.T, obj *BpfObject) {
 	t.Helper()
 
@@ -724,7 +740,7 @@ func checkCallxCopies(t *testing.T, obj *BpfObject) {
 	for i, want := range callxCopies {
 		c := obj.funcPtrMaps[i]
 		if c.prog.name != want.prog || c.m != BpfObjectFindMapByName(obj, want.m) || c.fd < 0 {
-			t.Errorf("copy %d = %s's copy of %s with descriptor %d", i, c.prog.name, BpfMapName(c.m), c.fd)
+			t.Fatalf("copy %d = %s's copy of %s with descriptor %d", i, c.prog.name, BpfMapName(c.m), c.fd)
 		}
 		for m := BpfObjectNextMap(obj, nil); m != nil; m = BpfObjectNextMap(obj, m) {
 			if BpfMapFD(m) == c.fd {
@@ -732,12 +748,64 @@ func checkCallxCopies(t *testing.T, obj *BpfObject) {
 			}
 		}
 
-		got := make([]byte, 8*len(want.value))
-		if err := sys.MapLookupElem(c.fd, key, got, 0); err != nil || !bytes.Equal(got, words(want.value...)) {
-			t.Errorf("%s's copy = %x, %v; want %x", want.prog, got, err, words(want.value...))
+		wantValue := callxLoadedValue(t, obj, want.prog, want.m)
+		got := make([]byte, len(wantValue))
+		if err := sys.MapLookupElem(c.fd, key, got, 0); err != nil || !bytes.Equal(got, wantValue) {
+			t.Errorf("%s's copy of %s = %x, %v; want %x", want.prog, want.m, got, err, wantValue)
 		}
 		if err := sys.MapUpdateElem(c.fd, key, got, 0); !errors.Is(err, unix.EPERM) {
 			t.Errorf("%s's copy update = %v, want EPERM from a frozen map", want.prog, err)
 		}
 	}
+}
+
+// callxLoadedValue returns what prog's copy of the map of section holds after
+// the load. It starts from the object map of the section, which keeps the
+// section's bytes, and sets each pointer of callxPointers in the section to
+// the jited address of its function in prog, or to 0 when prog does not have
+// the function: callx_global, or one the verifier removed. Every other byte
+// stays the object map's.
+func callxLoadedValue(t *testing.T, obj *BpfObject, prog, section string) []byte {
+	t.Helper()
+
+	m := BpfObjectFindMapByName(obj, section)
+	value := make([]byte, BpfMapValueSize(m))
+	if err := sys.MapLookupElem(BpfMapFD(m), make([]byte, internalMapKeySize), value, 0); err != nil {
+		t.Fatalf("lookup %s: %v", BpfMapName(m), err)
+	}
+
+	addrs := callxFuncAddrs(t, obj, prog)
+	for _, ptr := range callxPointers {
+		if ptr.section == section {
+			binary.NativeEndian.PutUint64(value[ptr.off:], addrs[ptr.function])
+		}
+	}
+	return value
+}
+
+// callxFuncAddrs returns the jited address of each function of the loaded
+// program prog by name. The kernel lists the jited functions in program order,
+// so they must be callxReached[prog], one nonzero address each; any other
+// count means the verifier kept or removed other functions. A caller that may
+// not read kernel addresses gets no addresses and fails here.
+func callxFuncAddrs(t *testing.T, obj *BpfObject, prog string) map[string]uint64 {
+	t.Helper()
+
+	reached := callxReached[prog]
+	info, err := BpfProgramInfo(BpfObjectFindProgramByName(obj, prog))
+	if err != nil {
+		t.Fatalf("%s: program info: %v", prog, err)
+	}
+	if info.NrJitedKsyms != uint32(len(reached)) {
+		t.Fatalf("%s has %d jited functions, want %d: %v", prog, info.NrJitedKsyms, len(reached), reached)
+	}
+	if len(info.JitedKsyms) != len(reached) || slices.Contains(info.JitedKsyms, 0) {
+		t.Fatalf("%s: jited function addresses %x, want %d nonzero", prog, info.JitedKsyms, len(reached))
+	}
+
+	addrs := make(map[string]uint64, len(reached))
+	for i, name := range reached {
+		addrs[name] = info.JitedKsyms[i]
+	}
+	return addrs
 }
