@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object_prepare, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data, poison_kfunc_call
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object_prepare, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_maps, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data, poison_map_ldimm64, poison_kfunc_call
 
 //go:build linux && (amd64 || arm64)
 
@@ -11,6 +11,7 @@ package libbpf
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gobpfgo/gobpfgo/internal/btf"
@@ -33,6 +34,11 @@ const bpfPseudoKfuncCall = 2
 // function gets, plus the extern's index. The verifier rejects the call with
 // that ID only if it is reachable.
 const poisonCallKfuncBase = 2002000000
+
+// poisonLdimm64MapBase is the helper ID of the two calls that replace a
+// reference to a map the load did not create, plus the map's index in the
+// object's maps. The verifier rejects the call only if it is reachable.
+const poisonLdimm64MapBase = 2001000000
 
 // Field offsets of struct bpf_func_info, the function record of
 // BPF_PROG_LOAD.
@@ -92,11 +98,21 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // type ids do not change; the object BTF keeps its decl tags. It then
 // creates the maps with their BTF type ids, writes the initial contents of
 // the internal maps, patches the map, global variable and extern
-// references and loads the programs. A subprogram is loaded only as part
-// of the programs that call it and has no descriptor. The .rodata and
-// .kconfig maps are frozen after their contents are written, so user space
-// can read but not change them. After the load, BpfProgramInsns returns
-// each program's final code.
+// references and loads the programs. When the kernel rejects a map with
+// its BTF type ids, the map is created again without BTF and its ids are
+// cleared. A per-CPU data map starts with its section image on every
+// possible CPU. A subprogram is loaded only as part of the programs that
+// call it and has no descriptor. The .rodata and .kconfig maps are frozen
+// after their contents are written, so user space can read but not change
+// them. After the load, BpfProgramInsns returns each program's final code.
+//
+// On a kernel without global per-CPU data, which lets a program load a
+// per-CPU array value directly, the per-CPU data maps are not created and
+// keep descriptor -1. Each program reference to one becomes two helper
+// calls the verifier rejects only if they are reachable, so an object whose
+// programs do not use their .percpu variables still loads. A program that
+// reaches a reference fails to load with EINVAL, and its log names the
+// instruction and the map that was not created.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
@@ -155,11 +171,9 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 	obj.btfFD = btfFD
 
-	for _, m := range obj.maps {
-		if err := createMap(m, btfFD); err != nil {
-			obj.closeLoadFDs()
-			return err
-		}
+	if err := createMaps(obj, btfFD, featPercpuData.supported); err != nil {
+		obj.closeLoadFDs()
+		return err
 	}
 	if err := relocateObjectData(codes); err != nil {
 		obj.closeLoadFDs()
@@ -231,10 +245,11 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 
 	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
 	if err != nil {
+		fixupVerifierLog(obj, logBuf)
 		return &Error{
 			Op:    "bpf_prog_load",
 			Errno: errnoFromError(err),
-			Log:   p.name + ": " + strings.TrimRight(string(logBuf), "\x00"),
+			Log:   p.name + ": " + verifierLogString(logBuf),
 		}
 	}
 	p.fd = fd
@@ -253,9 +268,38 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 	return nil
 }
 
+// createMaps creates the maps of obj in order with the object BTF btfFD.
+// A map whose autocreate flag is clear is skipped and keeps descriptor -1. A
+// per-CPU data map gets the flag cleared first when percpuData reports that
+// the kernel has no global per-CPU data; percpuData is called only for such
+// a map.
+func createMaps(obj *BpfObject, btfFD int, percpuData func() bool) error {
+	for _, m := range obj.maps {
+		gateMapAutocreate(m, percpuData)
+		if !m.autocreate {
+			continue
+		}
+		if err := createMap(m, btfFD); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// gateMapAutocreate clears the autocreate flag of a per-CPU data map when
+// percpuData reports that the kernel cannot load a per-CPU array value. The
+// map is then not created, and the program references to it are poisoned.
+func gateMapAutocreate(m *BpfMap, percpuData func() bool) {
+	if m.libbpfType == libbpfMapPercpu && !percpuData() {
+		m.autocreate = false
+	}
+}
+
 // createMap creates m with the object BTF and records its descriptor and id.
-// A reused map keeps its descriptor and only gets the id. A global data map
-// gets its initial contents after creation.
+// When the kernel rejects a map created with BTF type ids, the map is
+// created once more without BTF and its ids are cleared. A reused map keeps
+// its descriptor and only gets the id. A global data map gets its initial
+// contents after creation.
 func createMap(m *BpfMap, btfFD int) error {
 	if !m.reused {
 		attr := &sys.MapCreateAttr{
@@ -269,15 +313,15 @@ func createMap(m *BpfMap, btfFD int) error {
 			BtfValueTypeID: m.btfValueTypeID,
 		}
 		if !mapTakesBTF(m.mapType) {
-			attr.BtfFD = 0
-			attr.BtfKeyTypeID = 0
-			attr.BtfValueTypeID = 0
-			m.btfKeyTypeID = 0
-			m.btfValueTypeID = 0
+			clearMapBTF(attr, m)
 		}
 		attr.SetMapName(m.name)
 
 		fd, err := sys.MapCreate(attr, nil)
+		if err != nil && mapCreateSendsBTF(attr) {
+			clearMapBTF(attr, m)
+			fd, err = sys.MapCreate(attr, nil)
+		}
 		if err != nil {
 			return &Error{Op: "bpf_map_create", Errno: errnoFromError(err), Log: m.name}
 		}
@@ -298,12 +342,43 @@ func createMap(m *BpfMap, btfFD int) error {
 	return nil
 }
 
+// mapCreateSendsBTF reports whether attr passes a BTF key or value type id
+// to BPF_MAP_CREATE, so that a failed creation is retried without BTF.
+func mapCreateSendsBTF(attr *sys.MapCreateAttr) bool {
+	return attr.BtfKeyTypeID != 0 || attr.BtfValueTypeID != 0
+}
+
+// clearMapBTF removes the object BTF and the key and value type ids from the
+// creation attributes of m, and the type ids from m itself, so the map is
+// created without BTF and reports no BTF types.
+func clearMapBTF(attr *sys.MapCreateAttr, m *BpfMap) {
+	attr.BtfFD = 0
+	attr.BtfKeyTypeID = 0
+	attr.BtfValueTypeID = 0
+	m.btfKeyTypeID = 0
+	m.btfValueTypeID = 0
+}
+
 // populateInternalMap writes the initial value into the only element of an
 // internal map with one BPF_MAP_UPDATE_ELEM, then freezes a read-only data or
-// .kconfig map so user space cannot change it.
+// .kconfig map so user space cannot change it. A per-CPU data map gets the
+// initial value on every possible CPU and stays writable.
 func populateInternalMap(m *BpfMap) error {
+	value := m.initialValue
+	if m.libbpfType == libbpfMapPercpu {
+		numCPU := libbpfNumPossibleCPUs()
+		if numCPU < 0 {
+			return &Error{
+				Op:    "libbpf_num_possible_cpus",
+				Errno: unix.Errno(-numCPU),
+				Log:   fmt.Sprintf("map '%s': failed to set initial contents", BpfMapName(m)),
+			}
+		}
+		value = percpuInitialValue(m.initialValue, numCPU)
+	}
+
 	key := make([]byte, internalMapKeySize)
-	if err := sys.MapUpdateElem(m.fd, key, m.initialValue, 0); err != nil {
+	if err := sys.MapUpdateElem(m.fd, key, value, 0); err != nil {
 		return &Error{
 			Op:    "bpf_map_update_elem",
 			Errno: errnoFromError(err),
@@ -321,6 +396,20 @@ func populateInternalMap(m *BpfMap) error {
 		}
 	}
 	return nil
+}
+
+// percpuInitialValue returns the element value that sets every one of numCPU
+// possible CPUs of a per-CPU map to image: one copy of image per CPU, each
+// zero-padded to the kernel's 8-byte stride. A plain update with this buffer
+// works on every kernel, unlike a single value with BPF_F_ALL_CPUS, which
+// older kernels reject.
+func percpuInitialValue(image []byte, numCPU int) []byte {
+	stride := roundup(len(image), 8)
+	value := make([]byte, percpuValueSize(uint32(len(image)), numCPU))
+	for cpu := range numCPU {
+		copy(value[cpu*stride:], image)
+	}
+	return value
 }
 
 // programFuncInfo encodes the .BTF.ext function records of prog's own
@@ -414,13 +503,16 @@ func progExtInsnOff(prog *BpfProgram, byteOff uint32, subInsnOff int) uint32 {
 // reference becomes a BPF_PSEUDO_MAP_FD load of the map descriptor. A global
 // variable or .kconfig extern reference becomes a BPF_PSEUDO_MAP_VALUE load:
 // the first immediate holds the map descriptor and the second the variable's
-// offset in the map value. A .ksyms reference and a kernel function call
-// take what the extern resolved to, as patchKsymLD64 and patchExternCall
-// describe. The calls and the subprogram address loads were patched when the
-// subprograms were appended; an address load must still carry
-// BPF_PSEUDO_FUNC.
+// offset in the map value. A map or global variable reference to a map that
+// the load skipped is poisoned, as poisonMapLdimm64 describes; any other map
+// without a descriptor is an error. A .ksyms reference and a kernel function
+// call take what the extern resolved to, as patchKsymLD64 and
+// patchExternCall describe. The calls and the subprogram address loads were
+// patched when the subprograms were appended; an address load must still
+// carry BPF_PSEUDO_FUNC.
 func relocateData(code *progCode) error {
-	externs := code.prog.obj.externs
+	obj := code.prog.obj
+	externs := obj.externs
 	for i, r := range code.relocs {
 		switch {
 		case r.kind == relocCall:
@@ -432,6 +524,8 @@ func relocateData(code *progCode) error {
 			patchExternCall(code.insns[r.insnOff:], r.extIdx, &externs[r.extIdx])
 		case r.kind == relocExternLD64 && externs[r.extIdx].typ == extKsym:
 			patchKsymLD64(code.insns[r.insnOff:], &externs[r.extIdx])
+		case r.kind != relocExternLD64 && !r.m.autocreate:
+			poisonMapLdimm64(code.insns[r.insnOff:], slices.Index(obj.maps, r.m))
 		default:
 			if r.m.fd < 0 {
 				return fmt.Errorf("map %s has no descriptor", BpfMapName(r.m))
@@ -440,6 +534,16 @@ func relocateData(code *progCode) error {
 		}
 	}
 	return nil
+}
+
+// poisonMapLdimm64 replaces the ld_imm64 pair insn, which references the map
+// at index mapIdx of the object's maps, with two identical helper calls with
+// ID poisonLdimm64MapBase plus mapIdx. The map was not created, so the
+// verifier must reject the reference only if it is reachable.
+func poisonMapLdimm64(insn []byte, mapIdx int) {
+	call := bpfInsn{Code: bpfJMP | bpfCall, Imm: int32(poisonLdimm64MapBase + mapIdx)}
+	encodeBpfInsn(insn, call)
+	encodeBpfInsn(insn[bpfInsnLength:], call)
 }
 
 // patchKsymLD64 rewrites the ld_imm64 pair insn that loads the .ksyms

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: include/uapi/linux/bpf.h
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: enum bpf_map_type, enum bpf_prog_type, enum bpf_attach_type
+// libbpf-symbols: enum bpf_map_type, enum bpf_prog_type, enum bpf_attach_type, BPF_F_CPU, BPF_F_ALL_CPUS
 
 package libbpf
 
@@ -140,4 +140,14 @@ const (
 	BPF_ANY     uint64 = 0
 	BPF_NOEXIST uint64 = 1
 	BPF_EXIST   uint64 = 2
+)
+
+// Per-CPU map element flags. BPF_F_CPU reads or writes the value of the CPU
+// whose number is in the upper 32 bits of the flags, and BPF_F_ALL_CPUS writes
+// one value to every CPU; with either flag the element value is a single
+// value instead of one per possible CPU. Kernels without them reject the
+// flags with EINVAL.
+const (
+	BPF_F_CPU      uint64 = 8
+	BPF_F_ALL_CPUS uint64 = 16
 )

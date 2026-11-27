@@ -246,36 +246,33 @@ func TestGlobalDataDatasecOffsets(t *testing.T) {
 	}
 }
 
-// TestGlobalDataRelocation relocates handle_global with stand-in descriptors
-// and checks every ld_imm64 that references a variable: it loads the map value
-// of the variable's section, with the variable offset in the second immediate.
-// The data_static reference goes through the .data section symbol and carries
-// its offset in the instruction immediate.
-func TestGlobalDataRelocation(t *testing.T) {
-	obj := openGlobalData(t)
+// dataRef is a global variable reference: the ld_imm64 at instruction insn
+// loads the address of variable in section.
+type dataRef struct {
+	insn     int
+	section  string
+	variable string
+}
+
+// checkDataRelocations relocates program name of obj with stand-in map
+// descriptors and checks that its relocations are exactly want, in order:
+// each ld_imm64 becomes a BPF_PSEUDO_MAP_VALUE load of the section's internal
+// map with the variable offset in the second immediate. It returns the
+// program.
+func checkDataRelocations(t *testing.T, obj *BpfObject, name string, want []dataRef) *BpfProgram {
+	t.Helper()
+
 	for i, m := range obj.maps {
 		m.fd = 100 + i
 	}
-	p := BpfObjectFindProgramByName(obj, "handle_global")
+	p := BpfObjectFindProgramByName(obj, name)
 	if p == nil {
-		t.Fatal("program handle_global not found")
+		t.Fatalf("program %s not found", name)
 	}
 
 	insns := append([]byte(nil), p.insns...)
 	if err := relocateProgram(obj, p, insns); err != nil {
 		t.Fatalf("relocateProgram: %v", err)
-	}
-
-	want := []struct {
-		insn     int
-		section  string
-		variable string
-	}{
-		{1, ".data", "data_counter"},
-		{5, ".bss", "bss_counter"},
-		{8, ".data", "data_static"},
-		{13, ".rodata", "rodata_value"},
-		{16, ".bss", "bss_seen"},
 	}
 	if len(p.relocs) != len(want) {
 		t.Fatalf("program has %d relocations, want %d", len(p.relocs), len(want))
@@ -300,6 +297,23 @@ func TestGlobalDataRelocation(t *testing.T) {
 			t.Errorf("%s: imm = %d/%d, want fd %d and offset %d", w.variable, got.Imm, next.Imm, m.fd, wantOff)
 		}
 	}
+	return p
+}
+
+// TestGlobalDataRelocation relocates handle_global with stand-in descriptors
+// and checks every ld_imm64 that references a variable: it loads the map value
+// of the variable's section, with the variable offset in the second immediate.
+// The data_static reference goes through the .data section symbol and carries
+// its offset in the instruction immediate.
+func TestGlobalDataRelocation(t *testing.T) {
+	obj := openGlobalData(t)
+	p := checkDataRelocations(t, obj, "handle_global", []dataRef{
+		{1, ".data", "data_counter"},
+		{5, ".bss", "bss_counter"},
+		{8, ".data", "data_static"},
+		{13, ".rodata", "rodata_value"},
+		{16, ".bss", "bss_seen"},
+	})
 
 	// The static variable reference is the section symbol plus the
 	// instruction immediate.
@@ -366,28 +380,41 @@ func TestGlobalDataRelocationErrors(t *testing.T) {
 	}
 }
 
+// TestInternalMapName checks the kernel names of internal maps: the object
+// name prefix, the seven-character section reservation, the 15-character cut
+// and the character sanitizing. Custom dotted sections and per-CPU data
+// sections take no object name prefix.
 func TestInternalMapName(t *testing.T) {
-	for _, tc := range []struct{ obj, section, want string }{
-		{"global_data", ".data", "global_d.data"},
-		{"global_data", ".rodata", "global_d.rodata"},
-		{"global_data", ".bss", "global_d.bss"},
-		{"my_object_name", ".rodata", "my_objec.rodata"},
-		{"my_object_name", ".kconfig", "my_obje.kconfig"},
-		{"obj", ".data", "obj.data"},
-		{"my-obj", ".bss", "my_obj.bss"},
-		{"obj", ".rodata.abracadabra", ".rodata.abracad"},
-		{"obj", ".data.custom", ".data.custom"},
-		{"obj", ".rodata.str1.1", ".rodata.str1.1"},
+	for _, tc := range []struct {
+		obj, section string
+		typ          libbpfMapType
+		want         string
+	}{
+		{"global_data", ".data", libbpfMapData, "global_d.data"},
+		{"global_data", ".rodata", libbpfMapRodata, "global_d.rodata"},
+		{"global_data", ".bss", libbpfMapBss, "global_d.bss"},
+		{"my_object_name", ".rodata", libbpfMapRodata, "my_objec.rodata"},
+		{"my_object_name", ".kconfig", libbpfMapKconfig, "my_obje.kconfig"},
+		{"obj", ".data", libbpfMapData, "obj.data"},
+		{"my-obj", ".bss", libbpfMapBss, "my_obj.bss"},
+		{"obj", ".rodata.abracadabra", libbpfMapRodata, ".rodata.abracad"},
+		{"obj", ".data.custom", libbpfMapData, ".data.custom"},
+		{"obj", ".rodata.str1.1", libbpfMapRodata, ".rodata.str1.1"},
+		{"percpu", ".percpu", libbpfMapPercpu, ".percpu"},
+		{"my_object_name", ".percpu", libbpfMapPercpu, ".percpu"},
+		{"obj", ".percpu.custom", libbpfMapPercpu, ".percpu.custom"},
+		{"obj", ".percpu.custom_data", libbpfMapPercpu, ".percpu.custom_"},
+		{"obj", ".percpu.a-b", libbpfMapPercpu, ".percpu.a_b"},
 	} {
-		if got := internalMapName(tc.obj, tc.section); got != tc.want {
-			t.Errorf("internalMapName(%q, %q) = %q, want %q", tc.obj, tc.section, got, tc.want)
+		if got := internalMapName(tc.obj, tc.section, tc.typ); got != tc.want {
+			t.Errorf("internalMapName(%q, %q, %d) = %q, want %q", tc.obj, tc.section, tc.typ, got, tc.want)
 		}
 	}
 }
 
-// TestBpfMapNameCustomSection checks that a custom data section map is named
-// after its whole section name, which its kernel name may cut, while the
-// standard sections use the kernel name.
+// TestBpfMapNameCustomSection checks that a custom data section map and every
+// per-CPU data map are named after the whole section name, which the kernel
+// name may cut, while the standard sections use the kernel name.
 func TestBpfMapNameCustomSection(t *testing.T) {
 	for _, tc := range []struct {
 		typ     libbpfMapType
@@ -400,8 +427,10 @@ func TestBpfMapNameCustomSection(t *testing.T) {
 		{libbpfMapData, ".data.custom", ".data.custom"},
 		{libbpfMapRodata, ".rodata.abracadabra", ".rodata.abracadabra"},
 		{libbpfMapRodata, ".data.rel.ro", ".data.rel.ro"},
+		{libbpfMapPercpu, ".percpu", ".percpu"},
+		{libbpfMapPercpu, ".percpu.custom_data", ".percpu.custom_data"},
 	} {
-		m := &BpfMap{name: internalMapName("obj", tc.section), realName: tc.section, libbpfType: tc.typ}
+		m := &BpfMap{name: internalMapName("obj", tc.section, tc.typ), realName: tc.section, libbpfType: tc.typ}
 		if got := BpfMapName(m); got != tc.want {
 			t.Errorf("BpfMapName(%s) = %q, want %q", tc.section, got, tc.want)
 		}
@@ -430,6 +459,12 @@ func TestDataSectionType(t *testing.T) {
 		{".rodata.str1.1", progbits, elf.SHF_ALLOC, 8, libbpfMapRodata},
 		{".bss", nobits, wa, 8, libbpfMapBss},
 		{".bss.custom", nobits, wa, 8, libbpfMapBss},
+		{".percpu", progbits, wa, 12, libbpfMapPercpu},
+		{".percpu.custom", progbits, wa, 4, libbpfMapPercpu},
+		{".percpu", progbits, wa, 0, libbpfMapUnspec},
+		{".percpu", progbits, ax, 8, libbpfMapUnspec},
+		{".percpu", nobits, wa, 8, libbpfMapUnspec},
+		{".percpux", progbits, wa, 8, libbpfMapUnspec},
 		{".data", progbits, wa, 0, libbpfMapUnspec},
 		{".data", progbits, ax, 8, libbpfMapUnspec},
 		{".datax", progbits, wa, 8, libbpfMapUnspec},

@@ -14,9 +14,52 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// bpffsTempDir creates a directory with prefix on /sys/fs/bpf and skips the
+// test when bpffs is not mounted or not writable. The caller removes it.
+func bpffsTempDir(t *testing.T, prefix string) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/sys/fs/bpf", prefix)
+	if err != nil {
+		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrNotExist) {
+			t.Skipf("bpffs unavailable: %v", err)
+		}
+		t.Fatalf("create bpffs directory: %v", err)
+	}
+	return dir
+}
+
 func TestCheckBpfFS(t *testing.T) {
 	if err := checkBpfFS("/tmp/gobpfgo-pin"); !errors.Is(err, unix.EINVAL) {
 		t.Fatalf("checkBpfFS(/tmp) = %v, want EINVAL", err)
+	}
+}
+
+// TestObjectPinMapsSkipsUncreated pins an object whose only map has
+// autocreate cleared and a stored pin path, as a per-CPU data map has after a
+// load on a kernel without global per-CPU data. The map has no descriptor, so
+// the precondition must not count it and the pin must not try it; a created
+// map is still required to have a descriptor.
+func TestObjectPinMapsSkipsUncreated(t *testing.T) {
+	skipped := &BpfMap{name: ".percpu", fd: -1, pinPath: "/sys/fs/bpf/gobpfgo-uncreated"}
+	obj := &BpfObject{maps: []*BpfMap{skipped}}
+
+	if !objectMapsLoaded(obj) {
+		t.Fatal("objectMapsLoaded = false with only an autocreate-cleared map")
+	}
+	if err := BpfObjectPinMaps(obj, nil); err != nil {
+		t.Fatalf("BpfObjectPinMaps: %v", err)
+	}
+	if BpfMapIsPinned(skipped) {
+		t.Error("autocreate-cleared map reports pinned")
+	}
+
+	obj.maps = append(obj.maps, &BpfMap{name: ".bss", fd: -1, autocreate: true})
+	if objectMapsLoaded(obj) {
+		t.Error("objectMapsLoaded = true with an uncreated autocreate map")
+	}
+	if err := BpfObjectPinMaps(obj, nil); !errors.Is(err, unix.ENOENT) {
+		t.Errorf("BpfObjectPinMaps = %v, want ENOENT", err)
 	}
 }
 
@@ -33,13 +76,7 @@ func TestBpfObjectPin(t *testing.T) {
 	}
 	defer BpfObjectClose(obj)
 
-	dir, err := os.MkdirTemp("/sys/fs/bpf", "gobpfgo-object-")
-	if err != nil {
-		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrNotExist) {
-			t.Skipf("bpffs unavailable: %v", err)
-		}
-		t.Fatalf("create bpffs directory: %v", err)
-	}
+	dir := bpffsTempDir(t, "gobpfgo-object-")
 	defer func() {
 		_ = BpfObjectUnpin(obj, dir)
 		_ = os.Remove(dir)
@@ -118,13 +155,7 @@ func TestBpfMapAndProgramPin(t *testing.T) {
 		t.Fatalf("map counts or program handle_open not found")
 	}
 
-	dir, err := os.MkdirTemp("/sys/fs/bpf", "gobpfgo-test-")
-	if err != nil {
-		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, os.ErrNotExist) {
-			t.Skipf("bpffs unavailable: %v", err)
-		}
-		t.Fatalf("create bpffs directory: %v", err)
-	}
+	dir := bpffsTempDir(t, "gobpfgo-test-")
 	mapPin := filepath.Join(dir, "counts")
 	programPin := filepath.Join(dir, "handle_open")
 	defer func() {
