@@ -93,15 +93,11 @@ func loadKernelBTFs() ([]*btf.Spec, error) {
 		if err != nil {
 			continue
 		}
-		module, err := btf.Parse(data, binary.NativeEndian)
+		module, err := btf.ParseSplit(data, binary.NativeEndian, vmlinux)
 		if err != nil {
 			continue
 		}
-		merged, err := btf.MergeSplit(vmlinux, module)
-		if err != nil {
-			continue
-		}
-		kernels = append(kernels, merged)
+		kernels = append(kernels, module)
 	}
 
 	return kernels, nil

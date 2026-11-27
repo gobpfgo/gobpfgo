@@ -161,12 +161,14 @@ func TestLoadKernelBTFs(t *testing.T) {
 	if len(kernels) == 0 {
 		t.Fatal("no kernel BTF loaded")
 	}
-	base, err := loadKernelBTF()
-	if err != nil {
-		t.Fatalf("loadKernelBTF: %v", err)
-	}
-	if len(kernels) > 1 && len(kernels[1].Types) <= len(base.Types) {
-		t.Fatalf("module BTF types were not merged: %d <= %d", len(kernels[1].Types), len(base.Types))
+	if len(kernels) > 1 {
+		module := kernels[1]
+		if module.StartID() <= 1 {
+			t.Fatalf("module BTF has no own types: start id %d", module.StartID())
+		}
+		if _, err := module.TypeByID(module.StartID()); err != nil {
+			t.Fatalf("module BTF first own type: %v", err)
+		}
 	}
 }
 
