@@ -293,24 +293,32 @@ static void object_json(struct json *j, struct bpf_object *obj) {
 	json_arr_end(j);
 }
 
+/* open_linked opens the linked object with libbpf. It returns NULL and sets
+ * *open_errno when libbpf rejects it, as it does for an unresolved extern.
+ */
+static struct bpf_object *open_linked(const char *output, int *open_errno) {
+	struct bpf_object *obj = bpf_object__open_file(output, NULL);
+	long err               = libbpf_get_error(obj);
+
+	*open_errno = (int)-err;
+	return err ? NULL : obj;
+}
+
 /* report_linked opens the linked object with libbpf and libelf and prints the
- * inputs, the maps and programs, the sections and the symbols.
+ * inputs, the maps and programs, the sections and the symbols. When libbpf
+ * cannot open the object, it prints the open errno instead of the maps and
+ * programs.
  */
 static int report_linked(const char *const *inputs, int count, const char *output) {
 	struct oracle_meta meta = {.case_name = "linker", .version = true};
 	struct linker_elf le;
 	struct bpf_object *obj;
 	struct json j;
+	int open_errno;
 	int ret = 0;
-	long err;
 	int i;
 
-	obj = bpf_object__open_file(output, NULL);
-	err = libbpf_get_error(obj);
-	if (err) {
-		fprintf(stderr, "open %s: %s\n", output, strerror((int)-err));
-		return 1;
-	}
+	obj = open_linked(output, &open_errno);
 	if (linker_elf_open(output, &le) != 0) {
 		bpf_object__close(obj);
 		return 1;
@@ -326,7 +334,10 @@ static int report_linked(const char *const *inputs, int count, const char *outpu
 	json_arr_end(&j);
 	json_str(&j, "output", LINKER_OUTPUT_NAME);
 
-	object_json(&j, obj);
+	if (obj)
+		object_json(&j, obj);
+	else
+		json_s32(&j, "open_errno", open_errno);
 	if (sections_json(&j, &le) != 0)
 		ret = 1;
 	symbols_json(&j, &le);

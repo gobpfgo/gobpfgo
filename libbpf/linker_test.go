@@ -27,9 +27,12 @@ import (
 const linkerInputPath = "../testdata/progs/kprobe.bpf.o"
 
 // linkerFixture is a linker oracle file: the object libbpf's linker writes
-// for the listed objects, as bpf_object__open_file and libelf see it.
+// for the listed objects, as bpf_object__open_file and libelf see it. When
+// bpf_object__open_file rejects the object, OpenErrno is its errno and there
+// are no object name, maps or programs.
 type linkerFixture struct {
 	Objects    []string               `json:"objects"`
+	OpenErrno  int32                  `json:"open_errno"`
 	ObjectName string                 `json:"object_name"`
 	Maps       []linkerFixtureMap     `json:"maps"`
 	Programs   []linkerFixtureProgram `json:"programs"`
@@ -139,12 +142,35 @@ func TestBpfLinkerKprobe(t *testing.T) {
 }
 
 // compareLinked opens the linked object at path and compares it with the
-// oracle fixture: object name, maps, programs, symbols and every section,
-// including the .BTF and .BTF.ext bytes.
+// oracle fixture: object name, maps, programs, or the open errno, then
+// symbols and every section, including the .BTF and .BTF.ext bytes.
 func compareLinked(t *testing.T, want linkerFixture, path string) {
 	t.Helper()
 
+	compareLinkedObject(t, want, path)
+	f := openLinkedELF(t, path)
+	if got := linkedSymbols(t, f); !reflect.DeepEqual(got, want.Symbols) {
+		t.Fatalf("symbols = %+v\nwant %+v", got, want.Symbols)
+	}
+	compareSections(t, linkedSections(t, f), want.Sections)
+}
+
+// compareLinkedObject opens the linked object at path and compares its name,
+// maps and programs with the fixture, or, when libbpf could not open it,
+// expects the open to fail with the same errno.
+func compareLinkedObject(t *testing.T, want linkerFixture, path string) {
+	t.Helper()
+
 	obj, err := BpfObjectOpenFile(path, nil)
+	if want.OpenErrno != 0 {
+		if err == nil {
+			BpfObjectClose(obj)
+		}
+		if !errors.Is(err, unix.Errno(want.OpenErrno)) {
+			t.Fatalf("BpfObjectOpenFile = %v, want errno %d", err, want.OpenErrno)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("BpfObjectOpenFile: %v", err)
 	}
@@ -159,12 +185,6 @@ func compareLinked(t *testing.T, want linkerFixture, path string) {
 	if got := linkedPrograms(obj); !reflect.DeepEqual(got, want.Programs) {
 		t.Fatalf("programs = %+v, want %+v", got, want.Programs)
 	}
-
-	f := openLinkedELF(t, path)
-	if got := linkedSymbols(t, f); !reflect.DeepEqual(got, want.Symbols) {
-		t.Fatalf("symbols = %+v\nwant %+v", got, want.Symbols)
-	}
-	compareSections(t, linkedSections(t, f), want.Sections)
 }
 
 // compareSections compares two sorted section lists.

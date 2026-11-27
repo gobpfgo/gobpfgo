@@ -1,0 +1,36 @@
+{
+  "case": "subprog",
+  "libbpf_commit": "4f05fb027a08a8a66d03916cf6a68a91e2c720ea",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "link_extern_a.bpf.o",
+    "link_extern_b.bpf.o"
+  ],
+  "errno": 0,
+  "maps": [
+    "linked.bss",
+    "linked.data"
+  ],
+  "programs": [
+    {
+      "name": "handle_extern",
+      "section": "kprobe/do_sys_openat2",
+      "insn_cnt": 15,
+      "insns": "b70100000100000018620000010000000000000000000000db12000000000000b701000000120000b7020000340000008510000005000000186100000000000000000000000000007b01000000000000b7000000000000009500000000000000bf200000000000000f100000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 4},
+        {"insn_off": 12, "type_id": 8}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 110, "line_off": 0, "line_col": 19458},
+        {"insn_off": 4, "file_name_off": 110, "line_off": 0, "line_col": 20493},
+        {"insn_off": 7, "file_name_off": 110, "line_off": 0, "line_col": 20491},
+        {"insn_off": 10, "file_name_off": 110, "line_off": 0, "line_col": 22530},
+        {"insn_off": 12, "file_name_off": 172, "line_off": 0, "line_col": 15360},
+        {"insn_off": 13, "file_name_off": 172, "line_off": 0, "line_col": 16399},
+        {"insn_off": 14, "file_name_off": 172, "line_off": 0, "line_col": 16386}
+      ]
+    }
+  ]
+}

@@ -17,13 +17,13 @@ import (
 const stVisibilityMask = 0x3
 
 // linkerGlobSym is a global or weak symbol of the output, known by name
-// across the inputs. Externs never get here: they are rejected until extern
-// resolution is ported.
+// across the inputs: a definition, or an extern that no input has defined
+// yet.
 type linkerGlobSym struct {
 	name   string
 	symIdx uint32
 	// secIdx is the output section ELF index, or 0 for a symbol outside a
-	// section.
+	// section and for an extern in .extern or in no DATASEC.
 	secIdx int
 	// btfID is the output BTF VAR or FUNC, or 0 until the BTF of the object
 	// that defined the symbol is merged.
@@ -36,7 +36,10 @@ type linkerGlobSym struct {
 	// varIdx is the symbol's entry among its section's DATASEC variables,
 	// or -1.
 	varIdx int
-	isWeak bool
+	// isExtern holds until a definition resolves the symbol. isWeak holds
+	// until a strong symbol, extern or not, binds it; it never goes back.
+	isExtern bool
+	isWeak   bool
 }
 
 // findGlobSym returns the global symbol named name, or nil.
@@ -70,20 +73,20 @@ func (out *linkerOutput) appendSyms(in *linkerInput) error {
 
 // appendSym adds input symbol i to the output. A symbol in a skipped section
 // is dropped, and each output section keeps one STT_SECTION symbol. A local
-// symbol is always added. A global or weak symbol needs a BTF description,
-// except in .jumptables, and is resolved against an earlier symbol of the
-// same name.
+// symbol is always added. A global or weak symbol, defined or extern, needs a
+// BTF description, except in .jumptables, and is resolved against an earlier
+// symbol of the same name. An extern that no earlier object defines is added
+// as an undefined symbol and stays one until a definition resolves it.
 func (out *linkerOutput) appendSym(in *linkerInput, i int) error {
 	sym := &in.elf.Symbols[i]
-	if sym.SectionIndex == elf.SHN_UNDEF {
-		if in.btf == nil {
-			return linkerErrorf(unix.ENOTSUP, "externs without BTF info are not supported")
-		}
-		return linkerErrorf(unix.EOPNOTSUPP, "extern symbol '%s' in %s: extern resolution is not supported yet", sym.Name, in.name)
+	isExtern := sym.SectionIndex == elf.SHN_UNDEF
+	if isExtern && in.btf == nil {
+		return linkerErrorf(unix.ENOTSUP, "externs without BTF info are not supported")
 	}
 
 	resolve := sym.Bind != elf.STB_LOCAL
-	if sym.SectionIndex < elf.SHN_LORESERVE {
+	dstSec := 0
+	if !isExtern && sym.SectionIndex < elf.SHN_LORESERVE {
 		src := &in.secs[sym.SectionIndex]
 		if src.skipped {
 			return nil
@@ -95,38 +98,56 @@ func (out *linkerOutput) appendSym(in *linkerInput, i int) error {
 		if in.elf.Sections[sym.SectionIndex].Name == jumptablesSec {
 			resolve = false
 		}
+		dstSec = src.dst
 	}
 
 	if resolve {
-		_, btfID, err := in.findGlobSymBTF(sym.Name)
+		secID, btfID, err := in.findGlobSymBTF(sym.Name)
 		if err != nil {
 			return err
 		}
+		if isExtern {
+			if dstSec, err = in.externDstSec(secID); err != nil {
+				return err
+			}
+		}
 		if g := out.findGlobSym(sym.Name); g != nil {
-			return out.resolveGlobSym(in, i, g, btfID)
+			return out.resolveGlobSym(in, i, g, btfID, dstSec)
 		}
 	}
 
 	idx := out.addInputSym(in, i)
 	if sym.Bind != elf.STB_LOCAL {
 		out.addGlobSym(linkerGlobSym{
-			name:   sym.Name,
-			symIdx: idx,
-			secIdx: outputSecIdx(in, sym),
-			varIdx: -1,
-			isWeak: sym.Bind == elf.STB_WEAK,
+			name:     sym.Name,
+			symIdx:   idx,
+			secIdx:   dstSec,
+			varIdx:   -1,
+			isExtern: isExtern,
+			isWeak:   sym.Bind == elf.STB_WEAK,
 		})
 	}
 	return nil
 }
 
-// outputSecIdx returns the ELF index of the output section that holds an
-// input symbol, or 0 for a symbol outside a section.
-func outputSecIdx(in *linkerInput, sym *objelf.Symbol) int {
-	if sym.SectionIndex == elf.SHN_UNDEF || sym.SectionIndex >= elf.SHN_LORESERVE {
-		return 0
+// externDstSec returns the output section of an extern whose BTF VAR or FUNC
+// is in the DATASEC secID. Clang puts an extern declared in .extern there and
+// leaves other extern variables and functions out of any DATASEC; neither
+// has a section. An extern in any other DATASEC belongs to the input section
+// of that name, which must exist.
+func (in *linkerInput) externDstSec(secID uint32) (int, error) {
+	if secID == 0 {
+		return 0, nil
 	}
-	return in.secs[sym.SectionIndex].dst
+	name := in.btf.Types[secID].Name
+	if name == btfExternSec {
+		return 0, nil
+	}
+	idx := in.findSecByName(name)
+	if idx == 0 {
+		return 0, linkerErrorf(unix.ENOENT, "failed to find matching ELF sec '%s'", name)
+	}
+	return in.secs[idx].dst, nil
 }
 
 // placeSym returns the output section index and value of an input symbol. A
@@ -160,15 +181,24 @@ func (out *linkerOutput) addInputSym(in *linkerInput, i int) uint32 {
 	return idx
 }
 
-// resolveGlobSym merges input symbol i into the earlier global g of the same
-// name. Two strong definitions conflict, and the two BTF types must match.
-// A strong binding and a stricter visibility win. A strong definition then
-// replaces a weak one, while a weak definition leaves g as it is.
-func (out *linkerOutput) resolveGlobSym(in *linkerInput, i int, g *linkerGlobSym, btfID uint32) error {
+// resolveGlobSym merges input symbol i, whose output section is dstSec, into
+// the earlier global g of the same name. Two strong definitions conflict; an
+// extern conflicts with nothing. The two BTF types must match. A strong
+// binding and a stricter visibility win, even from an extern.
+//
+// An extern then leaves g as it is, and so does a weak definition when g is
+// already defined. Any other definition replaces g: a strong one replaces a
+// weak definition, and any one resolves an extern. The output symbol takes
+// the definition's type, section, value and size, the relocations of every
+// object keep pointing at it, and its BTF VAR or FUNC is completed from the
+// definition's. A strong extern followed by a weak definition leaves g
+// strong, so a later strong definition conflicts.
+func (out *linkerOutput) resolveGlobSym(in *linkerInput, i int, g *linkerGlobSym, btfID uint32, dstSec int) error {
 	sym := &in.elf.Symbols[i]
+	isExtern := sym.SectionIndex == elf.SHN_UNDEF
 	in.symMap[i] = g.symIdx
 
-	if !g.isWeak && sym.Bind != elf.STB_WEAK {
+	if !isExtern && !g.isExtern && !g.isWeak && sym.Bind != elf.STB_WEAK {
 		return linkerErrorf(unix.EINVAL, "conflicting non-weak symbol #%d (%s) definition in '%s'", i, sym.Name, in.name)
 	}
 	if err := out.globSymsMatch(in, g, sym.Name, btfID); err != nil {
@@ -183,14 +213,15 @@ func (out *linkerOutput) resolveGlobSym(in *linkerInput, i int, g *linkerGlobSym
 	if vis := sym.Other & stVisibilityMask; vis > dst.Other&stVisibilityMask {
 		dst.Other = dst.Other&^stVisibilityMask | vis
 	}
-	if sym.Bind == elf.STB_WEAK {
+	if isExtern || (!g.isExtern && sym.Bind == elf.STB_WEAK) {
 		return nil
 	}
 
 	dst.Info = elf.ST_INFO(elf.ST_BIND(dst.Info), sym.Type)
 	dst.Section, dst.Value = placeSym(in, sym)
 	dst.Size = sym.Size
-	g.secIdx = outputSecIdx(in, sym)
+	g.secIdx = dstSec
+	g.isExtern = false
 
 	if err := out.btf.completeExternInfo(g.btfID, in.btf, btfID); err != nil {
 		return err

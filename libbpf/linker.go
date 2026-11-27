@@ -36,10 +36,21 @@ type BpfLinkerFileOpts struct{}
 // types from different objects become one, forward declarations resolve to
 // their definitions, and the .BTF.ext records follow the new type IDs.
 //
-// Extern symbols, and the .kconfig and .ksyms sections that hold them, are
-// not resolved yet: an object with an extern is rejected with EOPNOTSUPP.
-// DWARF, the input string tables, .llvm_addrsig, an empty .text and the .BTF
-// and .BTF.ext relocations are dropped.
+// An extern, an undefined global or weak symbol whose BTF VAR or FUNC has
+// extern linkage, such as one in the .extern DATASEC, is resolved by name
+// against the definitions of the other objects, in either order. Its BTF
+// must match the definition's. The output symbol becomes the definition and
+// every relocation against the extern follows it; a strong extern makes a
+// weak definition strong. The extern's BTF VAR becomes allocated and its FUNC
+// global with the definition's parameter names. An extern that no object
+// defines, strong or weak, stays an undefined symbol with extern BTF and is
+// left out of every DATASEC; finalizing does not fail, and opening such an
+// object fails later because the extern has no DATASEC.
+//
+// The .kconfig and .ksyms externs, whose DATASECs have no ELF section, are
+// not linked yet: an object with them is rejected with EOPNOTSUPP. DWARF, the
+// input string tables, .llvm_addrsig, an empty .text and the .BTF and
+// .BTF.ext relocations are dropped.
 //
 // Create a linker with BpfLinkerNew or BpfLinkerNewFD, add the objects, write
 // the output with BpfLinkerFinalize and release the linker with
@@ -108,9 +119,11 @@ func newLinker(filename string, fd int, owned bool) *BpfLinker {
 // into the output. It returns EINVAL after BpfLinkerFinalize or
 // BpfLinkerFree, the open or read errno, EINVAL for a malformed object or a
 // conflict with the objects already added, such as two strong definitions of
-// one symbol or two sections of one name with different types or flags, and
-// EOPNOTSUPP for an object the linker cannot handle yet, such as one with an
-// extern symbol. A failed add leaves the linker unchanged.
+// one symbol, two sections of one name with different types or flags, or an
+// extern whose BTF does not match its definition, ENOTSUP for an extern in
+// an object without BTF, and EOPNOTSUPP for an object the linker cannot
+// handle yet, such as one with .kconfig or .ksyms externs. A failed add
+// leaves the linker unchanged.
 func BpfLinkerAddFile(l *BpfLinker, filename string, opts *BpfLinkerFileOpts) error {
 	const op = "bpf_linker__add_file"
 	if err := l.canAdd(op); err != nil {

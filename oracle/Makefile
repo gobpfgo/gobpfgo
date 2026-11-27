@@ -80,6 +80,10 @@ linker-fixture: $(ORACLE)
 	$(ORACLE) linker ../testdata/progs/link_a.bpf.o ../testdata/progs/link_b.bpf.o > ../testdata/oracle/linker-merge.json
 	$(ORACLE) linker ../testdata/progs/link_b.bpf.o ../testdata/progs/link_a.bpf.o > ../testdata/oracle/linker-merge-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/linker-text.json
+	$(ORACLE) linker ../testdata/progs/link_extern_a.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/linker-extern.json
+	$(ORACLE) linker ../testdata/progs/link_extern_b.bpf.o ../testdata/progs/link_extern_a.bpf.o > ../testdata/oracle/linker-extern-reverse.json
+	$(ORACLE) linker ../testdata/progs/link_extern_weak.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/linker-extern-weak.json
+	$(ORACLE) linker ../testdata/progs/link_extern_a.bpf.o > ../testdata/oracle/linker-extern-unresolved.json
 
 subprog-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
@@ -87,6 +91,8 @@ subprog-fixture: $(ORACLE)
 	$(ORACLE) subprog ../testdata/progs/subprog_callback.bpf.o > ../testdata/oracle/subprog-callback.json
 	$(ORACLE) subprog ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/subprog-link-text.json
 	$(ORACLE) subprog ../testdata/progs/link_text_b.bpf.o ../testdata/progs/link_text_a.bpf.o > ../testdata/oracle/subprog-link-text-reverse.json
+	$(ORACLE) subprog ../testdata/progs/link_extern_a.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/subprog-link-extern.json
+	$(ORACLE) subprog ../testdata/progs/link_extern_b.bpf.o ../testdata/progs/link_extern_a.bpf.o > ../testdata/oracle/subprog-link-extern-reverse.json
 
 # The USDT target is a host program, built by testdata/progs; this target
 # does not rebuild it. The scenario needs an x86-64 host and no privileges.

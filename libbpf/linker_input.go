@@ -433,9 +433,10 @@ func (in *linkerInput) findSymByName(secIdx int, typ elf.SymType, name string) *
 
 // fixupBTF sets each DATASEC size to its ELF section size and each allocated
 // global variable's offset to its ELF symbol value, and records each
-// section's DATASEC. .extern is left alone. Any other DATASEC without an ELF
-// section, such as .kconfig or .ksyms, holds externs, which this linker does
-// not resolve yet.
+// section's DATASEC. .extern is left alone: its externs are resolved by
+// symbol, and the DATASEC itself is not carried to the output. Any other
+// DATASEC without an ELF section, such as .kconfig or .ksyms, holds externs
+// the loader resolves, which this linker does not pass through yet.
 func (in *linkerInput) fixupBTF() error {
 	if in.btf == nil {
 		return nil
@@ -452,7 +453,7 @@ func (in *linkerInput) fixupBTF() error {
 			continue
 		}
 		if secIdx == 0 {
-			return linkerErrorf(unix.EOPNOTSUPP, "extern section '%s' in %s: extern resolution is not supported yet", t.Name, in.name)
+			return linkerErrorf(unix.EOPNOTSUPP, "extern section '%s' in %s is not supported yet", t.Name, in.name)
 		}
 
 		in.secs[secIdx].btfTypeID = t.ID

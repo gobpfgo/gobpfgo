@@ -17,7 +17,8 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	ringbuf.bpf.o perfbuf.bpf.o link_a.bpf.o link_b.bpf.o \
 	link_text_a.bpf.o link_text_b.bpf.o global_data.bpf.o \
 	kconfig.bpf.o kconfig_types.bpf.o usdt_attach.bpf.o subprog.bpf.o \
-	subprog_callback.bpf.o
+	subprog_callback.bpf.o link_extern_a.bpf.o link_extern_b.bpf.o \
+	link_extern_weak.bpf.o
 
 # A host program with SystemTap SDT probes for the USDT parser. It is built
 # with the host compiler, kept unstripped so .note.stapsdt and the symbols
