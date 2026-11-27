@@ -250,8 +250,8 @@ func (out *linkerOutput) appendDatasec(in *linkerInput, i int) error {
 			if g = out.findGlobSym(t.Name); g == nil {
 				return linkerErrorf(unix.EINVAL, "global '%s' has no symbol", t.Name)
 			}
-			if g.secIdx != src.dst {
-				return linkerErrorf(unix.EINVAL, "global '%s': section mismatch %d vs %d", t.Name, g.secIdx, src.dst)
+			if g.secID != src.dst {
+				return linkerErrorf(unix.EINVAL, "global '%s': section mismatch %d vs %d", t.Name, g.secID, src.dst)
 			}
 		}
 

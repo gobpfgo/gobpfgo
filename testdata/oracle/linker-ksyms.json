@@ -1,0 +1,42 @@
+{
+  "case": "linker",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "link_ksyms.bpf.o"
+  ],
+  "output": "linked.bpf.o",
+  "object_name": "linked",
+  "maps": [
+    {"name": "linked.bss", "type": 2, "key_size": 4, "value_size": 4, "max_entries": 1}
+  ],
+  "programs": [
+    {"name": "handle_ksyms", "type": 2, "section": "kprobe/do_sys_openat2"}
+  ],
+  "sections": [
+    {"name": ".BTF", "type": 1, "flags": 0, "size": 550, "align": 8, "data": "9feb010020000000000000003401000034010000d20000000000000000000000000000000000000200000000000000000100000d03000000010000000100000005000000000000010400000020000001090000000100000c02000000000000000000000d00000000160000000200000c05000000280000000200000c05000000000000000000000a030000003c0000000000000e08000000020000004c0000000000000e0300000001000000580000000000000101000000080000010000000000000003000000000b0000000d000000040000005d000000000000010400000020000000710000000000000e0c00000001000000a80000000100000f040000000a0000000000000004000000ad0000000100000f040000000e0000000000000004000000b50000000300000f000000000600000000000000000000000700000000000000000000000900000000000000040000000063747800696e740068616e646c655f6b73796d73006270665f7263755f726561645f6c6f636b006270665f7263755f726561645f756e6c6f636b006270665f70726f675f616374697665006b73796d5f6163746976650063686172005f5f41525241595f53495a455f545950455f5f004c4943454e5345002f6275696c642f676f627066676f2f74657374646174612f70726f67732f6c696e6b5f6b73796d732e6270662e63002e627373006c6963656e7365002e6b73796d73006b70726f62652f646f5f7379735f6f70656e61743200"},
+    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 160, "align": 8, "data": "9feb0100200000000000000014000000140000006c000000800000000000000008000000bc00000001000000000000000400000010000000bc000000060000000000000079000000000000001650000020000000790000000000000002580000280000007900000000000000105c00003000000079000000000000000e5c00004800000079000000000000000260000050000000790000000000000002680000"},
+    {"name": ".bss", "type": 8, "flags": 3, "size": 4, "align": 4},
+    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 64, "align": 8, "relocations": [
+        {"offset": 0, "type": 1, "symbol": "bpf_prog_active"},
+        {"offset": 32, "type": 10, "symbol": "bpf_rcu_read_lock"},
+        {"offset": 48, "type": 1, "symbol": "ksym_active"},
+        {"offset": 72, "type": 10, "symbol": "bpf_rcu_read_unlock"}
+      ]},
+    {"name": ".strtab", "type": 3, "flags": 32, "size": 196, "align": 1},
+    {"name": ".symtab", "type": 2, "flags": 0, "size": 216, "align": 8},
+    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 96, "align": 8, "data": "18010000000000000000000000000000850000009a000000bf0600000000000085100000ffffffff616100000000000018020000000000000000000000000000631200000000000085100000ffffffffb7000000000000009500000000000000"},
+    {"name": "license", "type": 1, "flags": 3, "size": 4, "align": 1, "data": "47504c00"}
+  ],
+  "symbols": [
+    {"name": "link_ksyms.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": "kprobe/do_sys_openat2", "type": 3, "bind": 0, "section": "kprobe/do_sys_openat2", "value": 0, "size": 0},
+    {"name": "handle_ksyms", "type": 2, "bind": 1, "section": "kprobe/do_sys_openat2", "value": 0, "size": 96},
+    {"name": "bpf_prog_active", "type": 0, "bind": 1, "section": "UND", "value": 0, "size": 0},
+    {"name": "bpf_rcu_read_lock", "type": 0, "bind": 1, "section": "UND", "value": 0, "size": 0},
+    {"name": "ksym_active", "type": 1, "bind": 1, "section": ".bss", "value": 0, "size": 4},
+    {"name": "bpf_rcu_read_unlock", "type": 0, "bind": 1, "section": "UND", "value": 0, "size": 0},
+    {"name": "LICENSE", "type": 1, "bind": 1, "section": "license", "value": 0, "size": 4}
+  ]
+}

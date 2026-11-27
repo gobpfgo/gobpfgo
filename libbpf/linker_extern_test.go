@@ -366,15 +366,6 @@ func TestBpfLinkerExternDeterministic(t *testing.T) {
 	}
 }
 
-// TestBpfLinkerKconfigExtern links an object with .kconfig externs, which the
-// linker does not pass through yet.
-func TestBpfLinkerKconfigExtern(t *testing.T) {
-	err := addBufs(t, readProg(t, "kconfig.bpf.o"))
-	if !errors.Is(err, unix.EOPNOTSUPP) || !strings.Contains(err.Error(), "extern section '.kconfig'") {
-		t.Fatalf("add = %v, want EOPNOTSUPP for the .kconfig section", err)
-	}
-}
-
 // externMatchBTF builds the BTF of the matching and completion tests. Its
 // type IDs are the match constants, and its names are in its string table.
 func externMatchBTF() *linkerBTF {

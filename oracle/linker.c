@@ -304,12 +304,26 @@ static struct bpf_object *open_linked(const char *output, int *open_errno) {
 	return err ? NULL : obj;
 }
 
+/* kconfig_json resolves the linked object's .kconfig externs with kconfig as
+ * the extra config, through a generated loader, and prints the config, the
+ * load errno and the .kconfig map value.
+ */
+static int kconfig_json(struct json *j, const char *output, const char *kconfig) {
+	int err;
+
+	json_obj_begin(j, "kconfig");
+	json_str(j, "config", kconfig);
+	err = oracle_kconfig_resolve(j, output, kconfig);
+	json_obj_end(j);
+	return err;
+}
+
 /* report_linked opens the linked object with libbpf and libelf and prints the
  * inputs, the maps and programs, the sections and the symbols. When libbpf
  * cannot open the object, it prints the open errno instead of the maps and
- * programs.
+ * programs. With a kconfig text, it also resolves the .kconfig externs.
  */
-static int report_linked(const char *const *inputs, int count, const char *output) {
+static int report_linked(const char *const *inputs, int count, const char *output, const char *kconfig) {
 	struct oracle_meta meta = {.case_name = "linker", .version = true};
 	struct linker_elf le;
 	struct bpf_object *obj;
@@ -341,6 +355,8 @@ static int report_linked(const char *const *inputs, int count, const char *outpu
 	if (sections_json(&j, &le) != 0)
 		ret = 1;
 	symbols_json(&j, &le);
+	if (kconfig && kconfig_json(&j, output, kconfig) != 0)
+		ret = 1;
 
 	json_obj_end(&j);
 	fputc('\n', stdout);
@@ -351,6 +367,14 @@ static int report_linked(const char *const *inputs, int count, const char *outpu
 }
 
 int oracle_linker(const char *const *paths, int count) {
+	return oracle_linker_kconfig(NULL, paths, count);
+}
+
+/* oracle_linker_kconfig links the objects and reports the result like
+ * oracle_linker. A non-NULL kconfig is the extra config the .kconfig externs
+ * of the linked object are resolved with.
+ */
+int oracle_linker_kconfig(const char *kconfig, const char *const *paths, int count) {
 	char dir[] = "/tmp/gobpfgo-linker-XXXXXX";
 	char output[PATH_MAX];
 	int ret = 1;
@@ -363,7 +387,7 @@ int oracle_linker(const char *const *paths, int count) {
 	snprintf(output, sizeof(output), "%s/%s", dir, LINKER_OUTPUT_NAME);
 
 	if (oracle_link_objects(paths, count, output) == 0)
-		ret = report_linked(paths, count, output);
+		ret = report_linked(paths, count, output, kconfig);
 
 	unlink(output);
 	rmdir(dir);

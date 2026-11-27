@@ -22,9 +22,10 @@ const stVisibilityMask = 0x3
 type linkerGlobSym struct {
 	name   string
 	symIdx uint32
-	// secIdx is the output section ELF index, or 0 for a symbol outside a
-	// section and for an extern in .extern or in no DATASEC.
-	secIdx int
+	// secID is the position of the output section, or 0 for a symbol
+	// outside a section and for an extern in .extern or in no DATASEC. An
+	// extern in .kconfig or .ksyms has its ephemeral section.
+	secID int
 	// btfID is the output BTF VAR or FUNC, or 0 until the BTF of the object
 	// that defined the symbol is merged.
 	btfID uint32
@@ -121,7 +122,7 @@ func (out *linkerOutput) appendSym(in *linkerInput, i int) error {
 		out.addGlobSym(linkerGlobSym{
 			name:     sym.Name,
 			symIdx:   idx,
-			secIdx:   dstSec,
+			secID:    dstSec,
 			varIdx:   -1,
 			isExtern: isExtern,
 			isWeak:   sym.Bind == elf.STB_WEAK,
@@ -133,8 +134,9 @@ func (out *linkerOutput) appendSym(in *linkerInput, i int) error {
 // externDstSec returns the output section of an extern whose BTF VAR or FUNC
 // is in the DATASEC secID. Clang puts an extern declared in .extern there and
 // leaves other extern variables and functions out of any DATASEC; neither
-// has a section. An extern in any other DATASEC belongs to the input section
-// of that name, which must exist.
+// has a section. An extern in any other DATASEC, such as .kconfig or .ksyms,
+// belongs to the input section of that name, usually an ephemeral one, which
+// must exist.
 func (in *linkerInput) externDstSec(secID uint32) (int, error) {
 	if secID == 0 {
 		return 0, nil
@@ -150,15 +152,15 @@ func (in *linkerInput) externDstSec(secID uint32) (int, error) {
 	return in.secs[idx].dst, nil
 }
 
-// placeSym returns the output section index and value of an input symbol. A
-// symbol in a section moves with the section's contents; a reserved index
-// such as SHN_ABS is kept.
-func placeSym(in *linkerInput, sym *objelf.Symbol) (elf.SectionIndex, uint64) {
+// placeSym returns the output ELF section index and value of an input
+// symbol. A symbol in a section moves with the section's contents; an extern
+// stays undefined and a reserved index such as SHN_ABS is kept.
+func (out *linkerOutput) placeSym(in *linkerInput, sym *objelf.Symbol) (elf.SectionIndex, uint64) {
 	if sym.SectionIndex == elf.SHN_UNDEF || sym.SectionIndex >= elf.SHN_LORESERVE {
 		return sym.SectionIndex, sym.Value
 	}
 	src := &in.secs[sym.SectionIndex]
-	return elf.SectionIndex(src.dst), src.dstOff + sym.Value
+	return out.elfIndex(src.dst), src.dstOff + sym.Value
 }
 
 // addInputSym appends input symbol i as a new output symbol and returns its
@@ -166,7 +168,7 @@ func placeSym(in *linkerInput, sym *objelf.Symbol) (elf.SectionIndex, uint64) {
 func (out *linkerOutput) addInputSym(in *linkerInput, i int) uint32 {
 	sym := &in.elf.Symbols[i]
 	o := objelf.OutputSymbol{Name: sym.Name, Info: sym.Info, Other: sym.Other, Size: sym.Size}
-	o.Section, o.Value = placeSym(in, sym)
+	o.Section, o.Value = out.placeSym(in, sym)
 
 	sectionSym := sym.Type == elf.STT_SECTION && o.Section != 0 && sym.SectionIndex < elf.SHN_LORESERVE
 	if sectionSym {
@@ -176,7 +178,7 @@ func (out *linkerOutput) addInputSym(in *linkerInput, i int) uint32 {
 	idx := out.addSym(o)
 	in.symMap[i] = idx
 	if sectionSym {
-		out.sec(int(o.Section)).secSymIdx = idx
+		out.sec(in.secs[sym.SectionIndex].dst).secSymIdx = idx
 	}
 	return idx
 }
@@ -218,9 +220,9 @@ func (out *linkerOutput) resolveGlobSym(in *linkerInput, i int, g *linkerGlobSym
 	}
 
 	dst.Info = elf.ST_INFO(elf.ST_BIND(dst.Info), sym.Type)
-	dst.Section, dst.Value = placeSym(in, sym)
+	dst.Section, dst.Value = out.placeSym(in, sym)
 	dst.Size = sym.Size
-	g.secIdx = dstSec
+	g.secID = dstSec
 	g.isExtern = false
 
 	if err := out.btf.completeExternInfo(g.btfID, in.btf, btfID); err != nil {
@@ -242,7 +244,7 @@ func (out *linkerOutput) globSymsMatch(in *linkerInput, g *linkerGlobSym, name s
 	if srcT.Kind != btf.KindVar && srcT.Kind != btf.KindFunc {
 		return linkerErrorf(unix.EINVAL, "only extern variables and functions are supported, but got '%s' for '%s'", srcT.Kind, name)
 	}
-	if g.secIdx != 0 && out.sec(g.secIdx).name == mapsSecName {
+	if g.secID != 0 && out.sec(g.secID).name == mapsSecName {
 		return globMapDefsMatch(name, out.btf.spec, g.btfID, in.btf, btfID)
 	}
 	return globSymBTFMatches(name, true, out.btf.spec, g.btfID, in.btf, btfID)

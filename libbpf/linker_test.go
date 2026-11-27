@@ -29,7 +29,8 @@ const linkerInputPath = "../testdata/progs/kprobe.bpf.o"
 // linkerFixture is a linker oracle file: the object libbpf's linker writes
 // for the listed objects, as bpf_object__open_file and libelf see it. When
 // bpf_object__open_file rejects the object, OpenErrno is its errno and there
-// are no object name, maps or programs.
+// are no object name, maps or programs. Kconfig, when present, is how libbpf
+// resolved the linked object's .kconfig externs.
 type linkerFixture struct {
 	Objects    []string               `json:"objects"`
 	OpenErrno  int32                  `json:"open_errno"`
@@ -38,6 +39,17 @@ type linkerFixture struct {
 	Programs   []linkerFixtureProgram `json:"programs"`
 	Sections   []linkerFixtureSection `json:"sections"`
 	Symbols    []linkerFixtureSymbol  `json:"symbols"`
+	Kernel     string                 `json:"kernel"`
+	Kconfig    *linkerFixtureKconfig  `json:"kconfig"`
+}
+
+// linkerFixtureKconfig is the result of loading the linked object, opened
+// with Config as the extra kernel config, through libbpf's generated loader:
+// the load errno, negative, and the hex .kconfig map value.
+type linkerFixtureKconfig struct {
+	Config string `json:"config"`
+	Errno  int32  `json:"errno"`
+	Value  string `json:"value"`
 }
 
 type linkerFixtureMap struct {
@@ -143,7 +155,9 @@ func TestBpfLinkerKprobe(t *testing.T) {
 
 // compareLinked opens the linked object at path and compares it with the
 // oracle fixture: object name, maps, programs, or the open errno, then
-// symbols and every section, including the .BTF and .BTF.ext bytes.
+// symbols and every section, including the .BTF and .BTF.ext bytes, and the
+// resolved .kconfig externs when the fixture has them. Every relocation
+// section must also apply to the section it is named after.
 func compareLinked(t *testing.T, want linkerFixture, path string) {
 	t.Helper()
 
@@ -153,6 +167,32 @@ func compareLinked(t *testing.T, want linkerFixture, path string) {
 		t.Fatalf("symbols = %+v\nwant %+v", got, want.Symbols)
 	}
 	compareSections(t, linkedSections(t, f), want.Sections)
+	checkRelocTargets(t, f)
+	if want.Kconfig != nil {
+		compareLinkedKconfig(t, want, path)
+	}
+}
+
+// checkRelocTargets requires each relocation section .relX to have sh_info
+// pointing at section X and sh_link at the symbol table, as libbpf writes
+// them. The fixture sections do not record either index.
+func checkRelocTargets(t *testing.T, f *elf.File) {
+	t.Helper()
+
+	for _, s := range f.Sections {
+		if s.Type != elf.SHT_REL {
+			continue
+		}
+		if int(s.Info) >= len(f.Sections) || int(s.Link) >= len(f.Sections) {
+			t.Fatalf("%s: sh_info %d or sh_link %d is out of range", s.Name, s.Info, s.Link)
+		}
+		if target := f.Sections[s.Info].Name; relSecPrefix+target != s.Name {
+			t.Errorf("%s applies to section %d (%s)", s.Name, s.Info, target)
+		}
+		if f.Sections[s.Link].Type != elf.SHT_SYMTAB {
+			t.Errorf("%s links section %d (%s), not the symbol table", s.Name, s.Link, f.Sections[s.Link].Name)
+		}
+	}
 }
 
 // compareLinkedObject opens the linked object at path and compares its name,

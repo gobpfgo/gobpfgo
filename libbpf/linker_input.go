@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/linker.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: linker_load_obj_file, is_dwarf_sec_name, is_ignored_sec, linker_sanity_check_elf, linker_sanity_check_elf_symtab, linker_sanity_check_elf_relos, linker_sanity_check_btf, linker_sanity_check_btf_ext, check_btf_type_id, check_btf_str_off, find_src_sec_by_name, find_sym_by_name, linker_fixup_btf, btf_is_non_static, find_glob_sym_btf
+// libbpf-symbols: linker_load_obj_file, add_src_sec, is_dwarf_sec_name, is_ignored_sec, linker_sanity_check_elf, linker_sanity_check_elf_symtab, linker_sanity_check_elf_relos, linker_sanity_check_btf, linker_sanity_check_btf_ext, check_btf_type_id, check_btf_str_off, find_src_sec_by_name, find_sym_by_name, linker_fixup_btf, btf_is_non_static, find_glob_sym_btf
 
 package libbpf
 
@@ -30,8 +30,9 @@ const (
 	relSecPrefix   = ".rel"
 )
 
-// linkerInput is one input object being added. secs is parallel to the ELF
-// sections, so secs[i] describes section i.
+// linkerInput is one input object being added. secs[i] describes ELF
+// section i, and the ephemeral sections of the DATASECs that have no ELF
+// section, such as .kconfig and .ksyms, follow the ELF ones.
 type linkerInput struct {
 	name      string
 	elf       *objelf.Object
@@ -50,12 +51,15 @@ type linkerInput struct {
 	btfTypeMap []uint32
 }
 
-// linkerInputSec records how an input section reaches the output. dst is the
-// output ELF section index, or 0 when the section has none, and dstOff is the
-// offset of the section's contents inside it. btfTypeID is the section's
-// DATASEC, or 0.
+// linkerInputSec records how an input section reaches the output. An
+// ephemeral section stands for a DATASEC of externs the loader resolves and
+// has no ELF section or contents. dst is the position of the output section,
+// or 0 when the section has none, and dstOff is the offset of the section's
+// contents inside it. btfTypeID is the section's DATASEC, or 0.
 type linkerInputSec struct {
+	name      string
 	skipped   bool
+	ephemeral bool
 	dst       int
 	dstOff    uint64
 	btfTypeID uint32
@@ -76,6 +80,9 @@ func linkerLoadObj(name string, data []byte) (*linkerInput, error) {
 	}
 
 	in := &linkerInput{name: name, elf: e, secs: make([]linkerInputSec, len(e.Sections))}
+	for i := range e.Sections {
+		in.secs[i].name = e.Sections[i].Name
+	}
 	if err := in.classifySections(); err != nil {
 		return nil, err
 	}
@@ -409,14 +416,30 @@ func forEachExtRecord(blocks []btf.ExtRecords, fn func(rec []byte) error) error 
 	return nil
 }
 
-// findSecByName returns the index of the first section named name, or 0.
+// findSecByName returns the index of the first section named name, ELF or
+// ephemeral, or 0.
 func (in *linkerInput) findSecByName(name string) int {
-	for i := 1; i < len(in.elf.Sections); i++ {
-		if in.elf.Sections[i].Name == name {
+	for i := 1; i < len(in.secs); i++ {
+		if in.secs[i].name == name {
 			return i
 		}
 	}
 	return 0
+}
+
+// addEphemeralSec adds an ephemeral section named name and returns its index.
+func (in *linkerInput) addEphemeralSec(name string) int {
+	in.secs = append(in.secs, linkerInputSec{name: name, ephemeral: true})
+	return len(in.secs) - 1
+}
+
+// elfIndex returns the ELF index of section i, or 0, SHN_UNDEF, for an
+// ephemeral section.
+func (in *linkerInput) elfIndex(i int) int {
+	if in.secs[i].ephemeral {
+		return 0
+	}
+	return i
 }
 
 // findSymByName returns the first symbol of type typ named name in section
@@ -436,7 +459,8 @@ func (in *linkerInput) findSymByName(secIdx int, typ elf.SymType, name string) *
 // section's DATASEC. .extern is left alone: its externs are resolved by
 // symbol, and the DATASEC itself is not carried to the output. Any other
 // DATASEC without an ELF section, such as .kconfig or .ksyms, holds externs
-// the loader resolves, which this linker does not pass through yet.
+// the loader resolves; it gets an ephemeral section, keeps its size, and
+// reaches the output with its externs still undefined.
 func (in *linkerInput) fixupBTF() error {
 	if in.btf == nil {
 		return nil
@@ -449,18 +473,19 @@ func (in *linkerInput) fixupBTF() error {
 		}
 
 		secIdx := in.findSecByName(t.Name)
-		if secIdx == 0 && t.Name == btfExternSec {
-			continue
-		}
 		if secIdx == 0 {
-			return linkerErrorf(unix.EOPNOTSUPP, "extern section '%s' in %s is not supported yet", t.Name, in.name)
+			if t.Name == btfExternSec {
+				continue
+			}
+			secIdx = in.addEphemeralSec(t.Name)
+		} else if !in.secs[secIdx].ephemeral {
+			if err := in.btf.SetDatasecSize(t.ID, uint32(in.elf.Sections[secIdx].Size)); err != nil {
+				return linkerErrorf(unix.EINVAL, "%v", err)
+			}
 		}
 
 		in.secs[secIdx].btfTypeID = t.ID
-		if err := in.btf.SetDatasecSize(t.ID, uint32(in.elf.Sections[secIdx].Size)); err != nil {
-			return linkerErrorf(unix.EINVAL, "%v", err)
-		}
-		if err := in.fixupDatasecVars(t, secIdx); err != nil {
+		if err := in.fixupDatasecVars(t, in.elfIndex(secIdx)); err != nil {
 			return err
 		}
 	}
@@ -468,7 +493,9 @@ func (in *linkerInput) fixupBTF() error {
 }
 
 // fixupDatasecVars writes the offsets of the allocated global variables of
-// the DATASEC t, whose ELF section is secIdx.
+// the DATASEC t, whose ELF section is secIdx. An ephemeral section's index is
+// SHN_UNDEF, which defines no variable, so an allocated variable in its
+// DATASEC is not found.
 func (in *linkerInput) fixupDatasecVars(t *btf.Type, secIdx int) error {
 	for j, vi := range t.DataSec {
 		vt, err := in.btf.TypeByID(vi.Type)
