@@ -1,0 +1,46 @@
+{
+  "case": "linker",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "link_extern_b.bpf.o",
+    "link_extern_a.bpf.o"
+  ],
+  "output": "linked.bpf.o",
+  "object_name": "linked",
+  "maps": [
+    {"name": "linked.data", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1},
+    {"name": "linked.bss", "type": 2, "key_size": 4, "value_size": 8, "max_entries": 1}
+  ],
+  "programs": [
+    {"name": "handle_extern", "type": 2, "section": "kprobe/do_sys_openat2"}
+  ],
+  "sections": [
+    {"name": ".BTF", "type": 1, "flags": 0, "size": 633, "align": 8, "data": "9feb010020000000000000004c0100004c0100000d010000000000000000000001000000000000080200000007000000000000010800000040000000000000000200000d010000001a000000010000002000000001000000260000000100000c030000002e0000000000000e01000000010000003a0000000000000101000000080000010000000000000003000000000600000008000000040000003f000000000000010400000020000000530000000000000e0700000001000000000000000000000200000000000000000100000d0c0000008d0000000a00000091000000000000010400000020000001950000000100000c0b000000000000000200000d0100000000000000010000000000000001000000a30000000000000e0100000001000000de0000000100000f08000000050000000000000008000000e40000000100000f04000000090000000000000004000000ec0000000100000f080000000f0000000000000008000000005f5f75363400756e7369676e6564206c6f6e67206c6f6e670076616c75650064656c7461006578745f616464006578745f636f756e7465720063686172005f5f41525241595f53495a455f545950455f5f004c4943454e5345002f6275696c642f676f627066676f2f74657374646174612f70726f67732f6c696e6b5f65787465726e5f622e6270662e630063747800696e740068616e646c655f65787465726e006578745f7365656e002f6275696c642f676f627066676f2f74657374646174612f70726f67732f6c696e6b5f65787465726e5f612e6270662e63002e64617461006c6963656e7365002e627373002e74657874006b70726f62652f646f5f7379735f6f70656e61743200"},
+    {"name": ".BTF.ext", "type": 1, "flags": 0, "size": 200, "align": 8, "data": "9feb01002000000000000000240000002400000084000000a80000000000000008000000f1000000010000000000000004000000f700000001000000000000000d00000010000000f100000003000000000000005b00000000000000003c0000080000005b000000000000000f400000100000005b0000000000000002400000f70000000400000000000000ac00000000000000024c000020000000ac000000000000000d50000038000000ac000000000000000b50000050000000ac0000000000000002580000"},
+    {"name": ".bss", "type": 8, "flags": 3, "size": 8, "align": 8},
+    {"name": ".data", "type": 1, "flags": 3, "size": 8, "align": 8, "data": "6400000000000000"},
+    {"name": ".relkprobe/do_sys_openat2", "type": 9, "flags": 64, "size": 48, "align": 8, "relocations": [
+        {"offset": 8, "type": 1, "symbol": "ext_counter"},
+        {"offset": 48, "type": 10, "symbol": "ext_add"},
+        {"offset": 56, "type": 1, "symbol": "ext_seen"}
+      ]},
+    {"name": ".strtab", "type": 3, "flags": 32, "size": 195, "align": 1},
+    {"name": ".symtab", "type": 2, "flags": 0, "size": 240, "align": 8},
+    {"name": ".text", "type": 1, "flags": 6, "size": 24, "align": 8, "data": "bf200000000000000f100000000000009500000000000000"},
+    {"name": "kprobe/do_sys_openat2", "type": 1, "flags": 6, "size": 96, "align": 8, "data": "b70100000100000018020000000000000000000000000000db12000000000000b701000000120000b70200003400000085100000ffffffff180100000000000000000000000000007b01000000000000b7000000000000009500000000000000"},
+    {"name": "license", "type": 1, "flags": 3, "size": 4, "align": 1, "data": "47504c00"}
+  ],
+  "symbols": [
+    {"name": "link_extern_b.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": ".text", "type": 3, "bind": 0, "section": ".text", "value": 0, "size": 0},
+    {"name": "ext_add", "type": 2, "bind": 1, "section": ".text", "value": 0, "size": 24},
+    {"name": "ext_counter", "type": 1, "bind": 1, "section": ".data", "value": 0, "size": 8},
+    {"name": "LICENSE", "type": 1, "bind": 1, "section": "license", "value": 0, "size": 4},
+    {"name": "link_extern_a.bpf.c", "type": 4, "bind": 0, "section": "ABS", "value": 0, "size": 0},
+    {"name": "kprobe/do_sys_openat2", "type": 3, "bind": 0, "section": "kprobe/do_sys_openat2", "value": 0, "size": 0},
+    {"name": "handle_extern", "type": 2, "bind": 1, "section": "kprobe/do_sys_openat2", "value": 0, "size": 96},
+    {"name": "ext_seen", "type": 1, "bind": 1, "section": ".bss", "value": 0, "size": 8}
+  ]
+}

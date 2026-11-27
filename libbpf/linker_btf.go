@@ -102,8 +102,10 @@ func (b *linkerBTF) addDatasec(name string, size uint64, vars []btf.VarSecInfo) 
 }
 
 // completeExternInfo marks the output VAR or FUNC dstID as a definition after
-// a strong symbol replaced a weak one: a VAR becomes allocated, and a FUNC
-// becomes global and takes the parameter names of the input FUNC srcID.
+// the input definition srcID resolved an extern or replaced a weak
+// definition: a VAR becomes allocated, and a FUNC becomes global and takes
+// the parameter names of srcID's prototype, which an extern prototype lacks.
+// The output keeps both prototypes; dedup merges them once the names agree.
 func (b *linkerBTF) completeExternInfo(dstID uint32, src *btf.Spec, srcID uint32) error {
 	dst, err := b.spec.TypeByID(dstID)
 	if err != nil {
@@ -227,7 +229,10 @@ func (out *linkerOutput) remapBTFTypes(in *linkerInput, startID int) error {
 // appendDatasec merges the DATASEC of input section i into its output
 // section: each variable moves by the section's output offset. A global that
 // is already in the section keeps one entry, which follows the winning
-// definition's offset and size.
+// definition's offset and size. The .extern DATASEC has no input section, so
+// its externs reach the output only through the section of the definition
+// that resolves them; like libbpf, an unresolved extern is left in no
+// DATASEC.
 func (out *linkerOutput) appendDatasec(in *linkerInput, i int) error {
 	src := &in.secs[i]
 	if src.btfTypeID == 0 || src.skipped {
@@ -268,15 +273,18 @@ func (out *linkerOutput) appendDatasec(in *linkerInput, i int) error {
 	return nil
 }
 
-// updateDatasecVar points the DATASEC entry of g at its current symbol value
-// and the size of its current type.
+// updateDatasecVar points the DATASEC entry of g at the size of its current
+// type and, once g is defined, at its symbol value. An extern keeps the
+// offset it was added with.
 func (out *linkerOutput) updateDatasecVar(dst *linkerSec, g *linkerGlobSym) error {
+	v := &dst.vars[g.varIdx]
+	if !g.isExtern {
+		v.Offset = uint32(out.sym(g.symIdx).Value)
+	}
 	size, err := out.btf.spec.SizeOf(uint32(g.underlyingBtfID))
 	if err != nil {
 		return linkerErrorf(unix.EINVAL, "global '%s': failed to resolve size of underlying type: %v", g.name, err)
 	}
-	v := &dst.vars[g.varIdx]
-	v.Offset = uint32(out.sym(g.symIdx).Value)
 	v.Size = size
 	return nil
 }

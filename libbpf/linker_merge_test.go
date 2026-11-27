@@ -359,9 +359,9 @@ func TestBpfLinkerMergeErrors(t *testing.T) {
 		{"section flags", func(o *objelf.Output) { o.Sections[synthRodata-1].Flags |= elf.SHF_WRITE }, unix.EINVAL, "flags mismatch"},
 		{"section entsize", func(o *objelf.Output) { o.Sections[synthRodata-1].Entsize = 1 }, unix.EINVAL, "entsize mismatch"},
 		{"license", func(o *objelf.Output) { o.Sections[synthLic-1].Data = []byte("MIT\x00") }, unix.EINVAL, "non-identical contents"},
-		{"extern", func(o *objelf.Output) {
+		{"extern without BTF", func(o *objelf.Output) {
 			o.Symbols = append(o.Symbols, objelf.OutputSymbol{Name: "ext", Info: elf.ST_INFO(elf.STB_GLOBAL, elf.STT_NOTYPE)})
-		}, unix.EOPNOTSUPP, "extern"},
+		}, unix.ENOTSUP, "externs without BTF info are not supported"},
 		{"data section relocation", func(o *objelf.Output) {
 			o.Sections[synthRel-1].Info = synthRodata
 			o.Sections[synthRel-1].Name = ".rel.rodata"

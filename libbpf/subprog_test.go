@@ -214,7 +214,11 @@ func TestSubprogOpen(t *testing.T) {
 // link_text_a.bpf.o and link_text_b.bpf.o first, in both orders, so each
 // program calls its own static bump in the merged .text.
 func TestSubprogOracle(t *testing.T) {
-	fixtures := []string{"subprog.json", "subprog-callback.json", "subprog-link-text.json", "subprog-link-text-reverse.json"}
+	fixtures := []string{
+		"subprog.json", "subprog-callback.json",
+		"subprog-link-text.json", "subprog-link-text-reverse.json",
+		"subprog-link-extern.json", "subprog-link-extern-reverse.json",
+	}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
 			want := loadSubprogFixture(t, fixture)
