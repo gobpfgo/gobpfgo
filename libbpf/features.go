@@ -2,7 +2,7 @@
 // libbpf-source: src/features.c
 // libbpf-source: src/libbpf_probes.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_arg_ctx_tag, feat_supported, libbpf__load_raw_btf
+// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_btf_type_tag, probe_kern_btf_enum64, probe_kern_btf_qmark_datasec, probe_kern_btf_float, probe_kern_arg_ctx_tag, feat_supported, probe_fd, libbpf__load_raw_btf
 
 //go:build linux && (amd64 || arm64)
 
@@ -46,6 +46,19 @@ var (
 	// load passes the kernel a copy of the object BTF in which every decl
 	// tag is an INT.
 	featBtfDeclTag = kernelFeature{probe: probeBtfDeclTag}
+	// featBtfTypeTag is BTF_KIND_TYPE_TAG in BPF_BTF_LOAD. Without it
+	// every type tag in the copy is an unnamed CONST.
+	featBtfTypeTag = kernelFeature{probe: probeBtfTypeTag}
+	// featBtfEnum64 is BTF_KIND_ENUM64 in BPF_BTF_LOAD. Without it every
+	// ENUM64 in the copy is a UNION of placeholder INT members and no ENUM
+	// has the kind flag that marks it signed.
+	featBtfEnum64 = kernelFeature{probe: probeBtfEnum64}
+	// featBtfQmarkDatasec is a DATASEC name that starts with '?' in
+	// BPF_BTF_LOAD. Without it such names start with '_' in the copy.
+	featBtfQmarkDatasec = kernelFeature{probe: probeBtfQmarkDatasec}
+	// featBtfFloat is BTF_KIND_FLOAT in BPF_BTF_LOAD. Without it every
+	// FLOAT in the copy is an anonymous empty STRUCT of the same size.
+	featBtfFloat = kernelFeature{probe: probeBtfFloat}
 	// featArgCtxTag is the verifier's own support for the arg:ctx decl
 	// tag on a global function argument. Without it the load rewrites the
 	// tagged arguments' BTF types to the program's context struct.
@@ -112,14 +125,32 @@ func uprobeMultiProbeFails(progFD int, pid uint32, want unix.Errno) bool {
 	return errors.Is(err, want)
 }
 
-// probeBtfDeclTag reports whether BPF_BTF_LOAD accepts BTF_KIND_DECL_TAG.
-func probeBtfDeclTag() bool {
-	fd, err := sys.BtfLoad(declTagBTF(), nil, 0)
+// kernelBTFFeatures returns the BTF features of the running kernel that
+// the load's BTF sanitizer depends on, probing each on first use.
+func kernelBTFFeatures() btf.KernelFeatures {
+	return btf.KernelFeatures{
+		DeclTag:      featBtfDeclTag.supported(),
+		TypeTag:      featBtfTypeTag.supported(),
+		Enum64:       featBtfEnum64.supported(),
+		QmarkDatasec: featBtfQmarkDatasec.supported(),
+		Float:        featBtfFloat.supported(),
+	}
+}
+
+// probeBTFLoad reports whether BPF_BTF_LOAD accepts the BTF blob raw. The
+// descriptor of an accepted blob is closed.
+func probeBTFLoad(raw []byte) bool {
+	fd, err := sys.BtfLoad(raw, nil, 0)
 	if err != nil {
 		return false
 	}
 	unix.Close(fd)
 	return true
+}
+
+// probeBtfDeclTag reports whether BPF_BTF_LOAD accepts BTF_KIND_DECL_TAG.
+func probeBtfDeclTag() bool {
+	return probeBTFLoad(declTagBTF())
 }
 
 // declTagBTF returns the BTF of the decl tag probe: an int, a static
@@ -134,6 +165,81 @@ func declTagBTF() []byte {
 		1, btfTypeInfo(btf.KindVar, 0), 1, btf.VarStatic,
 		// [3] DECL_TAG tag on [2] itself, component -1.
 		1, btfTypeInfo(btf.KindDeclTag, 0), 2, ^uint32(0),
+	}
+	return rawBTF(types, strs)
+}
+
+// probeBtfTypeTag reports whether BPF_BTF_LOAD accepts BTF_KIND_TYPE_TAG.
+func probeBtfTypeTag() bool {
+	return probeBTFLoad(typeTagBTF())
+}
+
+// typeTagBTF returns the BTF of the type tag probe: an int, a type tag
+// named tag on it, and a pointer to the tag.
+func typeTagBTF() []byte {
+	const strs = "\x00tag\x00"
+	types := []uint32{
+		// [1] INT: signed, 32 bits, 4 bytes.
+		0, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
+		// [2] TYPE_TAG tag on [1].
+		1, btfTypeInfo(btf.KindTypeTag, 0), 1,
+		// [3] PTR to [2].
+		0, btfTypeInfo(btf.KindPtr, 0), 2,
+	}
+	return rawBTF(types, strs)
+}
+
+// probeBtfEnum64 reports whether BPF_BTF_LOAD accepts BTF_KIND_ENUM64.
+func probeBtfEnum64() bool {
+	return probeBTFLoad(enum64BTF())
+}
+
+// enum64BTF returns the BTF of the enum64 probe: one ENUM64 named enum64,
+// of 8 bytes and without values.
+func enum64BTF() []byte {
+	const strs = "\x00enum64\x00"
+	types := []uint32{
+		// [1] ENUM64 enum64: unsigned, 8 bytes, no values.
+		1, btfTypeInfo(btf.KindEnum64, 0), 8,
+	}
+	return rawBTF(types, strs)
+}
+
+// probeBtfQmarkDatasec reports whether BPF_BTF_LOAD accepts a DATASEC
+// whose name starts with '?'.
+func probeBtfQmarkDatasec() bool {
+	return probeBTFLoad(qmarkDatasecBTF())
+}
+
+// qmarkDatasecBTF returns the BTF of the '?' DATASEC probe: an int, a
+// static variable x of it, and a DATASEC named ?.data that holds x.
+func qmarkDatasecBTF() []byte {
+	const strs = "\x00x\x00?.data\x00"
+	types := []uint32{
+		// [1] INT: signed, 32 bits, 4 bytes.
+		0, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
+		// [2] VAR x of [1], static.
+		1, btfTypeInfo(btf.KindVar, 0), 1, btf.VarStatic,
+		// [3] DATASEC ?.data: 4 bytes, one variable.
+		3, btfTypeInfo(btf.KindDatasec, 1), 4,
+		// [2] at offset 0, 4 bytes.
+		2, 0, 4,
+	}
+	return rawBTF(types, strs)
+}
+
+// probeBtfFloat reports whether BPF_BTF_LOAD accepts BTF_KIND_FLOAT.
+func probeBtfFloat() bool {
+	return probeBTFLoad(floatBTF())
+}
+
+// floatBTF returns the BTF of the float probe: one FLOAT named float, of 4
+// bytes.
+func floatBTF() []byte {
+	const strs = "\x00float\x00"
+	types := []uint32{
+		// [1] FLOAT float: 4 bytes.
+		1, btfTypeInfo(btf.KindFloat, 0), 4,
 	}
 	return rawBTF(types, strs)
 }
