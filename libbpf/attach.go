@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_uprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_uprobe_multi, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
+// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_uprobe_multi, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
 
 //go:build linux && (amd64 || arm64)
 
@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -31,19 +30,6 @@ type BpfKprobeOpts struct {
 	Retprobe  bool
 	Offset    uint64
 	BpfCookie uint64
-}
-
-// BpfUprobeOpts are the optional settings of BpfProgramAttachUprobeOpts.
-// FuncName resolves to a file offset in binaryPath and is added to the
-// explicit offset. RefCtrOffset is the file offset of a USDT semaphore the
-// kernel counts while the uprobe is installed; a nonzero value selects the
-// uprobe perf PMU. BpfCookie requires the perf link path, which neither the
-// tracefs nor the PMU path provides.
-type BpfUprobeOpts struct {
-	Retprobe     bool
-	RefCtrOffset uint64
-	FuncName     string
-	BpfCookie    uint64
 }
 
 // BpfTracepointOpts are the optional settings of
@@ -161,128 +147,6 @@ func BpfProgramAttachKprobeOpts(prog *BpfProgram, funcName string, opts *BpfKpro
 	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
 		BpfLinkDestroy(link)
 		return nil, attachErr(op, errnoFromError(err))
-	}
-	return link, nil
-}
-
-// BpfProgramAttachUprobe attaches a loaded program to binaryPath at offset.
-// pid -1 attaches for every process; pid 0 attaches to the calling process.
-//
-// The call uses the tracefs uprobe path and one perf event, and the caller
-// must release the link with BpfLinkDestroy.
-func BpfProgramAttachUprobe(prog *BpfProgram, pid int, binaryPath string, offset uint64) (*BpfLink, error) {
-	return BpfProgramAttachUprobeOpts(prog, pid, binaryPath, offset, nil)
-}
-
-// BpfProgramAttachUprobeOpts attaches a loaded program to binaryPath with the
-// given options. FuncName, when set, is resolved to a file offset in
-// binaryPath. A nonzero BpfCookie returns EOPNOTSUPP.
-//
-// Without RefCtrOffset the call uses the tracefs uprobe path, like
-// BpfProgramAttachUprobe. A nonzero RefCtrOffset opens the uprobe through the
-// uprobe perf PMU instead, which makes the kernel increment the 16-bit counter
-// at that file offset of binaryPath in every process the uprobe is installed
-// in, and decrement it when the link is destroyed. The program is attached to
-// the perf event with PERF_EVENT_IOC_SET_BPF and the link owns the event
-// descriptor, which BpfLinkFD returns. A RefCtrOffset that does not fit in 32
-// bits returns EINVAL, and a kernel without the uprobe PMU, or without its
-// retprobe format bit for a uretprobe, returns EOPNOTSUPP.
-//
-// binaryPath may name an ELF member of a zip archive as "archive!/member",
-// the form Android uses for libraries stored uncompressed in an APK. FuncName
-// is then resolved inside the member and the probe is placed on the archive
-// file at the member's data offset plus the function offset. A compressed
-// member returns LIBBPF_ERRNO__FORMAT (4001). Without FuncName the probe uses
-// the member path itself.
-func BpfProgramAttachUprobeOpts(prog *BpfProgram, pid int, binaryPath string, offset uint64, opts *BpfUprobeOpts) (*BpfLink, error) {
-	const op = "bpf_program__attach_uprobe"
-	if err := checkAttachProgram(prog, op); err != nil {
-		return nil, err
-	}
-	if binaryPath == "" {
-		return nil, attachErr(op, unix.EINVAL)
-	}
-	if opts == nil {
-		opts = &BpfUprobeOpts{}
-	}
-	if opts.FuncName != "" {
-		path, funcOffset, err := findUprobeFuncOffset(binaryPath, opts.FuncName)
-		if err != nil {
-			return nil, attachErr(op, errnoFromError(err))
-		}
-		binaryPath = path
-		offset += funcOffset
-	} else if _, member, ok := strings.Cut(binaryPath, archiveSep); ok {
-		// The archive path replaces the member only when a function was
-		// resolved in it; an explicit offset alone probes the member path,
-		// as libbpf does.
-		binaryPath = member
-	}
-	if opts.BpfCookie != 0 {
-		return nil, attachErr(op, unix.EOPNOTSUPP)
-	}
-	if opts.RefCtrOffset != 0 {
-		link, err := attachUprobePMU(prog, pid, binaryPath, offset, opts)
-		if err != nil {
-			return nil, attachErr(op, err)
-		}
-		return link, nil
-	}
-
-	root, err := tracefsRoot()
-	if err != nil {
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	kind := probeUprobe
-	prefix := byte('p')
-	if opts.Retprobe {
-		kind = probeUretprobe
-		prefix = 'r'
-	}
-	label := fmt.Sprintf("%s_0x%x", filepath.Base(binaryPath), offset)
-	event := &legacyEvent{root: root, kind: kind, name: probeEventName(label)}
-	line := fmt.Sprintf("%c:%s/%s %s:0x%x\n", prefix, event.group(), event.name, binaryPath, offset)
-	if err := event.add(line); err != nil {
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	id, err := event.id()
-	if err != nil {
-		_ = event.remove()
-		return nil, attachErr(op, errnoFromError(err))
-	}
-	cpu := -1
-	if pid == -1 {
-		cpu = 0
-	}
-	perfFD, err := openTracepointPerf(id, pid, cpu)
-	if err != nil {
-		_ = event.remove()
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	link := &BpfLink{fd: perfFD, perfFD: perfFD, legacy: event}
-	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
-		BpfLinkDestroy(link)
-		return nil, attachErr(op, errnoFromError(err))
-	}
-	return link, nil
-}
-
-// attachUprobePMU opens the uprobe through the uprobe perf PMU with the
-// options' retprobe flag and reference counter, and attaches the program to
-// it. The returned link owns the perf event; on failure the event is closed.
-func attachUprobePMU(prog *BpfProgram, pid int, binaryPath string, offset uint64, opts *BpfUprobeOpts) (*BpfLink, error) {
-	perfFD, err := perfEventOpenUprobe(opts.Retprobe, binaryPath, offset, pid, opts.RefCtrOffset)
-	if err != nil {
-		return nil, err
-	}
-
-	link := &BpfLink{fd: perfFD, perfFD: perfFD}
-	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
-		BpfLinkDestroy(link)
-		return nil, err
 	}
 	return link, nil
 }

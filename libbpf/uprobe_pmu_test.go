@@ -86,6 +86,7 @@ func TestUprobePerfEventAttr(t *testing.T) {
 		{"other retprobe bit", 7, true, 5, 0x24, 0x2, 0x0000_0002_0000_0020},
 		{"largest counter", 9, false, 0, 0x1000, math.MaxUint32, 0xffff_ffff_0000_0000},
 		{"no counter", 9, true, 0, 0x10, 0, 0x0000_0000_0000_0001},
+		{"plain uprobe", 9, false, 0, 0x1024, 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,7 +106,7 @@ func TestUprobePerfEventAttr(t *testing.T) {
 
 // TestPerfEventOpenUprobeRefCtrLimit checks that a reference counter offset
 // past 32 bits is EINVAL before the PMU is looked up: the PMU directory is
-// empty, so the largest valid offset reaches the lookup and gets EOPNOTSUPP.
+// empty, so the largest valid offset reaches the lookup and gets ENOENT.
 func TestPerfEventOpenUprobeRefCtrLimit(t *testing.T) {
 	fakeUprobePMU(t, nil)
 
@@ -113,7 +114,7 @@ func TestPerfEventOpenUprobeRefCtrLimit(t *testing.T) {
 		refCtrOffset uint64
 		want         syscall.Errno
 	}{
-		{math.MaxUint32, unix.EOPNOTSUPP},
+		{math.MaxUint32, unix.ENOENT},
 		{1 << 32, unix.EINVAL},
 		{math.MaxUint64, unix.EINVAL},
 	}
@@ -126,30 +127,49 @@ func TestPerfEventOpenUprobeRefCtrLimit(t *testing.T) {
 }
 
 // TestPerfEventOpenUprobeNoPMU covers kernels without the uprobe PMU files:
-// no PMU type at all, and a PMU without the retprobe format bit, which only
-// a uretprobe needs. Both are EOPNOTSUPP and neither reaches the kernel.
+// no PMU type at all, and a PMU without the retprobe format file, which only
+// a uretprobe needs. Both are ENOENT, the error of the missing file, and
+// neither reaches the kernel.
 func TestPerfEventOpenUprobeNoPMU(t *testing.T) {
 	t.Run("no type", func(t *testing.T) {
 		fakeUprobePMU(t, nil)
-		if _, err := determineUprobePerfType(); !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Errorf("perf type: %v, want EOPNOTSUPP", err)
+		if _, err := determineUprobePerfType(); !errors.Is(err, unix.ENOENT) {
+			t.Errorf("perf type: %v, want ENOENT", err)
 		}
 		fd, err := perfEventOpenUprobe(false, "/bin/true", 0x1000, -1, 0x3000)
-		if fd != -1 || !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Errorf("open: %d, %v, want EOPNOTSUPP", fd, err)
+		if fd != -1 || !errors.Is(err, unix.ENOENT) {
+			t.Errorf("open: %d, %v, want ENOENT", fd, err)
 		}
 	})
 
 	t.Run("no retprobe bit", func(t *testing.T) {
 		fakeUprobePMU(t, map[string]string{"type": "9\n"})
-		if _, err := determineUprobeRetprobeBit(); !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Errorf("retprobe bit: %v, want EOPNOTSUPP", err)
+		if _, err := determineUprobeRetprobeBit(); !errors.Is(err, unix.ENOENT) {
+			t.Errorf("retprobe bit: %v, want ENOENT", err)
 		}
 		fd, err := perfEventOpenUprobe(true, "/bin/true", 0x1000, -1, 0x3000)
-		if fd != -1 || !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Errorf("open: %d, %v, want EOPNOTSUPP", fd, err)
+		if fd != -1 || !errors.Is(err, unix.ENOENT) {
+			t.Errorf("open: %d, %v, want ENOENT", fd, err)
 		}
 	})
+}
+
+// TestProbePidCPU checks the perf_event_open pid and cpu of a uprobe: every
+// process on CPU 0, or one process on every CPU.
+func TestProbePidCPU(t *testing.T) {
+	tests := []struct {
+		pid, wantPid, wantCPU int
+	}{
+		{-1, -1, 0},
+		{0, 0, -1},
+		{4242, 4242, -1},
+		{-2, -1, -1},
+	}
+	for _, tt := range tests {
+		if pid, cpu := probePidCPU(tt.pid); pid != tt.wantPid || cpu != tt.wantCPU {
+			t.Errorf("probePidCPU(%d) = %d, %d, want %d, %d", tt.pid, pid, cpu, tt.wantPid, tt.wantCPU)
+		}
+	}
 }
 
 // TestUprobePMUFiles reads the PMU type and the retprobe bit in the kernel's
@@ -201,37 +221,56 @@ func TestUprobePMUFiles(t *testing.T) {
 	}
 }
 
-// TestBpfProgramAttachUprobeRefCtrPath checks which path a uprobe attach
-// takes without a kernel: tracefs is a temporary directory and the uprobe PMU
-// directory is empty. Without a reference counter the attach writes its
-// tracefs event and fails with ENOENT on the missing event ID; with one it
-// goes to the PMU instead, which is EOPNOTSUPP here, or EINVAL for an offset
-// past 32 bits, and leaves tracefs alone. A BPF cookie is EOPNOTSUPP on both.
-func TestBpfProgramAttachUprobeRefCtrPath(t *testing.T) {
-	events := fakeTracefs(t)
-	fakeUprobePMU(t, nil)
-	const target = "/nonexistent/usdt_sema_target"
+// uprobeRoute is one attach of TestBpfProgramAttachUprobeRouting: the uprobe
+// PMU files the kernel has, the options, the expected error and the tracefs
+// commands the attach must leave, "" for none.
+type uprobeRoute struct {
+	name   string
+	pmu    map[string]string
+	opts   BpfUprobeOpts
+	want   syscall.Errno
+	events string
+}
 
-	tests := []struct {
-		name       string
-		opts       *BpfUprobeOpts
-		want       syscall.Errno
-		wantEvents bool
-	}{
-		{"no counter", &BpfUprobeOpts{}, unix.ENOENT, true},
-		{"counter", &BpfUprobeOpts{RefCtrOffset: 0x3000}, unix.EOPNOTSUPP, false},
-		{"counter past 32 bits", &BpfUprobeOpts{RefCtrOffset: 1 << 32}, unix.EINVAL, false},
-		{"retprobe counter", &BpfUprobeOpts{Retprobe: true, RefCtrOffset: 0x3000}, unix.EOPNOTSUPP, false},
-		{"cookie", &BpfUprobeOpts{BpfCookie: 1}, unix.EOPNOTSUPP, false},
-		{"cookie and counter", &BpfUprobeOpts{BpfCookie: 1, RefCtrOffset: 0x3000}, unix.EOPNOTSUPP, false},
+// TestBpfProgramAttachUprobeRouting checks which path a uprobe attach takes
+// without a kernel: tracefs is a temporary directory and the uprobe PMU
+// directory holds the case's files. A tracefs attach writes its event and
+// fails with ENOENT on the missing event ID, which removes the event again; a
+// PMU attach stops at the missing retprobe bit or the 32-bit counter limit and
+// leaves tracefs alone. Without the PMU type the default mode takes tracefs,
+// the perf and link modes are EOPNOTSUPP and a reference counter is EINVAL.
+// A BPF cookie is not refused before the attach.
+func TestBpfProgramAttachUprobeRouting(t *testing.T) {
+	events := fakeTracefs(t)
+	const target = "/nonexistent/usdt_sema_target"
+	pmu := map[string]string{"type": "9\n"}
+
+	tests := []uprobeRoute{
+		{"default without PMU", nil, BpfUprobeOpts{}, unix.ENOENT, "uprobes"},
+		{"uretprobe without PMU", nil, BpfUprobeOpts{Retprobe: true}, unix.ENOENT, "uretprobes"},
+		{"cookie without PMU", nil, BpfUprobeOpts{BpfCookie: 1}, unix.ENOENT, "uprobes"},
+		{"counter without PMU", nil, BpfUprobeOpts{RefCtrOffset: 0x3000}, unix.EINVAL, ""},
+		{"counter past 32 bits without PMU", nil, BpfUprobeOpts{RefCtrOffset: 1 << 32}, unix.EINVAL, ""},
+		{"legacy without PMU", nil, BpfUprobeOpts{AttachMode: ProbeAttachModeLegacy}, unix.ENOENT, "uprobes"},
+		{"perf without PMU", nil, BpfUprobeOpts{AttachMode: ProbeAttachModePerf}, unix.EOPNOTSUPP, ""},
+		{"link without PMU", nil, BpfUprobeOpts{AttachMode: ProbeAttachModeLink}, unix.EOPNOTSUPP, ""},
+		{"unknown mode", nil, BpfUprobeOpts{AttachMode: ProbeAttachModeLink + 1}, unix.EINVAL, ""},
+		{"negative mode", pmu, BpfUprobeOpts{AttachMode: -1}, unix.EINVAL, ""},
+		{"uretprobe without retprobe bit", pmu, BpfUprobeOpts{Retprobe: true}, unix.ENOENT, ""},
+		{"perf uretprobe without retprobe bit", pmu, BpfUprobeOpts{Retprobe: true, AttachMode: ProbeAttachModePerf}, unix.ENOENT, ""},
+		{"counter past 32 bits", pmu, BpfUprobeOpts{RefCtrOffset: 1 << 32}, unix.EINVAL, ""},
+		{"legacy with PMU", pmu, BpfUprobeOpts{AttachMode: ProbeAttachModeLegacy}, unix.ENOENT, "uprobes"},
+		{"legacy uretprobe with PMU", pmu, BpfUprobeOpts{Retprobe: true, AttachMode: ProbeAttachModeLegacy}, unix.ENOENT, "uretprobes"},
+		{"legacy counter with PMU", pmu, BpfUprobeOpts{RefCtrOffset: 0x3000, AttachMode: ProbeAttachModeLegacy}, unix.EINVAL, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			fakeUprobePMU(t, tt.pmu)
 			if err := os.Truncate(events, 0); err != nil {
 				t.Fatal(err)
 			}
 
-			link, err := BpfProgramAttachUprobeOpts(fakeLoadedProgram(), -1, target, 0x1024, tt.opts)
+			link, err := BpfProgramAttachUprobeOpts(fakeLoadedProgram(), -1, target, 0x1024, &tt.opts)
 			if link != nil {
 				BpfLinkDestroy(link)
 				t.Fatal("attach returned a link")
@@ -239,19 +278,29 @@ func TestBpfProgramAttachUprobeRefCtrPath(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("attach error = %v, want %v", err, tt.want)
 			}
-
-			commands := string(readTestFile(t, events))
-			if !tt.wantEvents {
-				if commands != "" {
-					t.Fatalf("uprobe_events got %q, want nothing", commands)
-				}
-				return
-			}
-			lines := strings.Split(strings.TrimSuffix(commands, "\n"), "\n")
-			if len(lines) != 2 || !strings.HasPrefix(lines[0], "p:uprobes/gobpfgo_") ||
-				!strings.HasSuffix(lines[0], " "+target+":0x1024") || !strings.HasPrefix(lines[1], "-:uprobes/gobpfgo_") {
-				t.Fatalf("uprobe_events got %q, want the event added and removed", commands)
-			}
+			checkUprobeEventCommands(t, string(readTestFile(t, events)), tt.events, target+":0x1024")
 		})
+	}
+}
+
+// checkUprobeEventCommands requires the tracefs commands to add an event to
+// group for location and remove it again, or, when group is "", to be empty.
+func checkUprobeEventCommands(t *testing.T, commands, group, location string) {
+	t.Helper()
+
+	if group == "" {
+		if commands != "" {
+			t.Fatalf("uprobe_events got %q, want nothing", commands)
+		}
+		return
+	}
+	prefix := "p:"
+	if group == "uretprobes" {
+		prefix = "r:"
+	}
+	lines := strings.Split(strings.TrimSuffix(commands, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], prefix+group+"/gobpfgo_") ||
+		!strings.HasSuffix(lines[0], " "+location) || !strings.HasPrefix(lines[1], "-:"+group+"/gobpfgo_") {
+		t.Fatalf("uprobe_events got %q, want a %s event added and removed", commands, group)
 	}
 }

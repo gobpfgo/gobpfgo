@@ -15,11 +15,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BpfLink is an attached program. It owns either a BPF link descriptor or,
-// for the tracefs probe path, a perf event descriptor and the tracefs event,
-// or, for the uprobe PMU path, the perf event descriptor alone. A USDT link
-// owns the links of its call sites instead and has no descriptor.
-// BpfLinkDestroy releases them.
+// BpfLink is an attached program. It owns a BPF link descriptor, a perf event
+// descriptor attached with PERF_EVENT_IOC_SET_BPF, or a BPF perf link and its
+// perf event descriptor; a probe created through tracefs also owns its tracefs
+// event. A USDT link owns the links of its call sites instead and has no
+// descriptor. BpfLinkDestroy releases them.
 type BpfLink struct {
 	fd           int
 	perfFD       int
@@ -32,9 +32,10 @@ type BpfLink struct {
 }
 
 // BpfLinkFD returns the link descriptor, or -1 when the link has been detached
-// or destroyed. For a link created through the tracefs or uprobe PMU probe
-// path, this is the perf event descriptor, matching the path that created it.
-// A USDT link has no descriptor of its own and returns -1.
+// or destroyed. For a perf event attached with PERF_EVENT_IOC_SET_BPF, such as
+// a tracefs kprobe or a uprobe on a kernel without BPF perf links, this is the
+// perf event descriptor. A USDT link has no descriptor of its own and returns
+// -1.
 func BpfLinkFD(link *BpfLink) int {
 	if link == nil || link.detached || link.destroyed || link.usdt != nil {
 		return -1
@@ -65,8 +66,14 @@ func BpfLinkDetach(link *BpfLink) error {
 	case link.usdt != nil:
 		link.usdt.detach()
 	case link.legacy != nil:
-		if err := unix.IoctlSetInt(link.fd, unix.PERF_EVENT_IOC_DISABLE, 0); err != nil {
+		// The tracefs event can only be removed after its perf event is
+		// closed, whether the program is attached to it by ioctl or
+		// through a BPF perf link.
+		if err := unix.IoctlSetInt(link.perfFD, unix.PERF_EVENT_IOC_DISABLE, 0); err != nil {
 			firstErr = err
+		}
+		if link.perfFD != link.fd {
+			unix.Close(link.perfFD)
 		}
 		unix.Close(link.fd)
 		if err := link.legacy.remove(); err != nil && firstErr == nil {

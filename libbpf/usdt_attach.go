@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"github.com/gobpfgo/gobpfgo/internal/usdt"
@@ -93,23 +94,23 @@ type usdtLink struct {
 // argument spec of the probe gets a spec ID and an entry in the spec map.
 // When the kernel has uprobe multi links, the program is loaded for them and
 // all call sites are attached through one link, with the spec IDs as BPF
-// cookies. On a kernel without BPF cookies each call site gets its own
-// uprobe; the program finds the spec ID by instruction address, and the call
-// writes the runtime address of each call site to the IP map. For a shared
+// cookies. Otherwise each call site gets its own uprobe, attached like
+// BpfProgramAttachUprobeOpts in ProbeAttachModeDefault. With BPF cookies the
+// uprobe carries the spec ID as its cookie through a BPF perf link. Without
+// them the program finds the spec ID by instruction address, and the call
+// writes the runtime address of each call site to the IP map; for a shared
 // library that address comes from the load base in /proc/<pid>/maps, so pid
 // -1 returns EOPNOTSUPP on such kernels.
 //
 // A call site with a semaphore passes its file offset to the kernel as the
 // uprobe's reference counter, so the semaphore stays raised in the traced
 // processes while the link exists. The uprobe multi link takes one counter
-// per call site, zero for a call site without a semaphore. On the
-// single-uprobe path such a call site is opened through the uprobe perf PMU,
-// and one without a semaphore uses the tracefs uprobe events. A kernel that
-// does not count USDT semaphores returns EOPNOTSUPP for a probe that has one.
+// per call site, zero for a call site without a semaphore, and a single
+// uprobe takes it through the uprobe perf PMU. A kernel that does not count
+// USDT semaphores returns EOPNOTSUPP for a probe that has one.
 //
-// Neither single-uprobe path carries a BPF cookie, so a kernel with cookies
-// but without uprobe multi links, Linux 5.15 to 6.5, returns EOPNOTSUPP.
-// binaryPath is used as given; a bare name is not searched in PATH.
+// A binaryPath without a slash is searched for as in
+// BpfProgramAttachUprobeOpts, and a name that is not found is ENOENT.
 //
 // The returned link has no descriptor: BpfLinkFD returns -1, and pinning
 // returns EOPNOTSUPP. Errors carry the errno of the failing step: EINVAL for
@@ -127,6 +128,13 @@ func BpfProgramAttachUsdt(prog *BpfProgram, pid int, binaryPath, provider, name 
 	}
 	if opts == nil {
 		opts = &BpfUsdtOpts{}
+	}
+	if !strings.Contains(binaryPath, "/") {
+		resolved, err := resolveFullPath(binaryPath)
+		if err != nil {
+			return nil, &Error{Op: op, Errno: errnoFromError(err), Path: binaryPath, Log: err.Error()}
+		}
+		binaryPath = resolved
 	}
 
 	man, err := objectUsdtManager(prog.obj)
@@ -189,13 +197,6 @@ func newUsdtManager(obj *BpfObject) (*usdtManager, error) {
 // attach collects the call sites of provider:name in path and attaches prog
 // to them. On failure it releases everything it set up.
 func (man *usdtManager) attach(prog *BpfProgram, pid int, path, provider, name string, cookie uint64) (*BpfLink, error) {
-	// The program reads its spec ID from the BPF cookie, and only the
-	// uprobe multi link can set one: a single uprobe would leave every
-	// call site with cookie 0, which is spec ID 0.
-	if man.hasBpfCookie && !man.hasUprobeMulti {
-		return nil, fmt.Errorf("BPF cookies on single uprobes are not supported: %w", unix.EOPNOTSUPP)
-	}
-
 	f, err := usdt.Open(path)
 	if err != nil {
 		return nil, err
@@ -308,8 +309,7 @@ func (man *usdtManager) attachTargets(prog *BpfProgram, ul *usdtLink, pid int, p
 			continue
 		}
 
-		opts := &BpfUprobeOpts{RefCtrOffset: t.semaOff}
-		link, err := BpfProgramAttachUprobeOpts(prog, pid, path, t.relIP, opts)
+		link, err := BpfProgramAttachUprobeOpts(prog, pid, path, t.relIP, man.uprobeOpts(t, id))
 		if err != nil {
 			return fmt.Errorf("uprobe #%d at offset %#x: %w", i, t.relIP, err)
 		}
@@ -324,6 +324,18 @@ func (man *usdtManager) attachTargets(prog *BpfProgram, ul *usdtLink, pid int, p
 		ul.multiLink = link
 	}
 	return nil
+}
+
+// uprobeOpts returns the options of the single uprobe at call site t with
+// spec ID id: the semaphore offset as the reference counter and, on a kernel
+// with BPF cookies, the spec ID as the cookie. Without cookies the program
+// finds the spec ID in the IP map instead.
+func (man *usdtManager) uprobeOpts(t usdtTarget, id int32) *BpfUprobeOpts {
+	opts := &BpfUprobeOpts{RefCtrOffset: t.semaOff}
+	if man.hasBpfCookie {
+		opts.BpfCookie = uint64(id)
+	}
+	return opts
 }
 
 // allocateSpecID returns the spec ID for a spec string. Within one attachment

@@ -215,10 +215,11 @@ func TestFindUprobeFuncOffsetErrors(t *testing.T) {
 }
 
 // TestBpfProgramAttachUprobeArchive attaches a uprobe to a function inside a
-// stored archive member and checks the event the kernel registered. The
-// probe never fires: nothing maps the archive and runs the member, which a
-// test without cgo cannot do. The offset test is the proof of the offset; this
-// one proves the event names the archive file at that offset.
+// stored archive member in the legacy mode and checks the tracefs event the
+// kernel registered. The probe never fires: nothing maps the archive and runs
+// the member, which a test without cgo cannot do. The offset test is the
+// proof of the offset; this one proves the event names the archive file at
+// that offset.
 func TestBpfProgramAttachUprobeArchive(t *testing.T) {
 	archivePath := objectArchive(t, zip.Store)
 	_, want, err := findUprobeFuncOffset(archivePath+"!/"+funcTestMember, funcTestName)
@@ -238,7 +239,8 @@ func TestBpfProgramAttachUprobeArchive(t *testing.T) {
 	}
 
 	link, err := BpfProgramAttachUprobeOpts(prog, -1, archivePath+"!/"+funcTestMember, 0, &BpfUprobeOpts{
-		FuncName: funcTestName,
+		FuncName:   funcTestName,
+		AttachMode: ProbeAttachModeLegacy,
 	})
 	if err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || errors.Is(err, unix.EOPNOTSUPP) {

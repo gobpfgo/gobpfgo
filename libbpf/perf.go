@@ -213,6 +213,21 @@ func openTracepointPerf(id, pid, cpu int) (int, error) {
 	return unix.PerfEventOpen(&attr, pid, cpu, -1, unix.PERF_FLAG_FD_CLOEXEC)
 }
 
+// probePidCPU returns the perf_event_open pid and cpu of a uprobe for pid: -1
+// probes every process on CPU 0, and a pid of 0 or more probes that process
+// on every CPU. Any other negative pid becomes pid -1 on every CPU, which
+// perf_event_open rejects.
+func probePidCPU(pid int) (int, int) {
+	switch {
+	case pid == -1:
+		return -1, 0
+	case pid < 0:
+		return -1, -1
+	default:
+		return pid, -1
+	}
+}
+
 // perfEventOpenUprobe opens a uprobe or uretprobe at offset in the file at
 // path through the uprobe perf PMU. Unlike the tracefs path, the PMU takes a
 // reference counter: a nonzero refCtrOffset is the file offset of a USDT
@@ -220,10 +235,8 @@ func openTracepointPerf(id, pid, cpu int) (int, error) {
 // installed in, and decrements when the event is closed.
 //
 // A refCtrOffset that does not fit in 32 bits is EINVAL, checked before
-// anything else. A kernel without the uprobe PMU, or without its retprobe bit
-// for a uretprobe, is EOPNOTSUPP. pid -1 opens the event for every process on
-// CPU 0, and a pid of 0 or more for that process on every CPU. Any other
-// negative pid is passed as -1 for every CPU, which perf_event_open rejects.
+// anything else. A missing PMU type file, or retprobe format file for a
+// uretprobe, is ENOENT. The pid selects the processes as in probePidCPU.
 func perfEventOpenUprobe(retprobe bool, path string, offset uint64, pid int, refCtrOffset uint64) (int, error) {
 	if refCtrOffset >= 1<<perfUprobeRefCtrOffsetBits {
 		return -1, unix.EINVAL
@@ -241,14 +254,8 @@ func perfEventOpenUprobe(retprobe bool, path string, offset uint64, pid int, ref
 	}
 
 	attr := uprobePerfEventAttr(perfType, retprobe, retprobeBit, offset, refCtrOffset)
-	cpu := -1
-	if pid == -1 {
-		cpu = 0
-	}
-	if pid < 0 {
-		pid = -1
-	}
-	return sys.PerfEventOpenUprobe(&attr, path, pid, cpu)
+	perfPid, cpu := probePidCPU(pid)
+	return sys.PerfEventOpenUprobe(&attr, path, perfPid, cpu)
 }
 
 // uprobePerfEventAttr builds the perf event attribute of a uprobe PMU event
@@ -270,27 +277,16 @@ func uprobePerfEventAttr(perfType uint32, retprobe bool, retprobeBit uint32, off
 }
 
 // determineUprobePerfType reads the type of the uprobe perf PMU. A kernel
-// without the PMU is EOPNOTSUPP.
+// without the PMU has no type file, which is ENOENT.
 func determineUprobePerfType() (uint32, error) {
-	return parseUprobePMUFile("type", "")
+	return parseUintFromFile(filepath.Join(uprobePMUDir, "type"), "")
 }
 
 // determineUprobeRetprobeBit reads the config bit that turns a uprobe PMU
-// event into a uretprobe. The sysfs format file says "config:<bit>". A kernel
-// without the file is EOPNOTSUPP.
+// event into a uretprobe. The sysfs format file says "config:<bit>"; a kernel
+// without it is ENOENT.
 func determineUprobeRetprobeBit() (uint32, error) {
-	return parseUprobePMUFile(filepath.Join("format", "retprobe"), "config:")
-}
-
-// parseUprobePMUFile reads the number in a file of the uprobe PMU's sysfs
-// directory; a missing file means the kernel lacks the feature.
-func parseUprobePMUFile(name, prefix string) (uint32, error) {
-	file := filepath.Join(uprobePMUDir, name)
-	v, err := parseUintFromFile(file, prefix)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("%s does not exist: %w", file, unix.EOPNOTSUPP)
-	}
-	return v, err
+	return parseUintFromFile(filepath.Join(uprobePMUDir, "format", "retprobe"), "config:")
 }
 
 // parseUintFromFile reads the decimal number in [0, 2^31-1] that follows
