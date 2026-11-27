@@ -6,6 +6,7 @@
 package libbpf
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -45,9 +46,8 @@ type openFixture struct {
 	ObjectName string              `json:"object_name"`
 	Maps       []openFixtureMap    `json:"maps"`
 	Kconfig    *openFixtureKconfig `json:"kconfig"`
-	// KsymsBTF is the hex object BTF after open, for an object with a
-	// .ksyms DATASEC.
-	KsymsBTF string `json:"ksyms_btf"`
+	// BTF is the hex object BTF after open, before any load-time rewrite.
+	BTF      string `json:"btf"`
 	Programs []struct {
 		Name               string `json:"name"`
 		Type               uint32 `json:"type"`
@@ -207,6 +207,19 @@ func TestBpfObjectOpenKprobe(t *testing.T) {
 	}
 	if BpfObjectFindProgramByName(obj, wantProg.Name) != p {
 		t.Fatal("FindProgramByName did not return the program")
+	}
+	checkOpenBTF(t, obj, f)
+}
+
+// checkOpenBTF compares the whole object BTF after open with libbpf's.
+func checkOpenBTF(t *testing.T, obj *BpfObject, f openFixture) {
+	t.Helper()
+
+	if f.BTF == "" {
+		t.Fatal("fixture has no BTF")
+	}
+	if got := hex.EncodeToString(obj.btf.Raw()); got != f.BTF {
+		t.Errorf("BTF after open:\n got %s\nwant %s", got, f.BTF)
 	}
 }
 

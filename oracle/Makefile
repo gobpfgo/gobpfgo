@@ -52,6 +52,8 @@ fixtures: $(ORACLE)
 	$(ORACLE) open ../testdata/progs/link_ksyms.bpf.o > ../testdata/oracle/open-ksyms.json
 	$(ORACLE) open ../testdata/progs/link_ksyms_addr.bpf.o > ../testdata/oracle/open-ksyms-addr.json
 	$(ORACLE) open ../testdata/progs/link_ksyms_weak.bpf.o > ../testdata/oracle/open-ksyms-weak.json
+	$(ORACLE) open ../testdata/progs/subprog_hidden.bpf.o > ../testdata/oracle/open-subprog-hidden.json
+	$(ORACLE) open ../testdata/progs/subprog_arg_ctx.bpf.o > ../testdata/oracle/open-subprog-arg-ctx.json
 	$(ORACLE) kconfig ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/kconfig.json
 	$(ORACLE) dump ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump.txt
 	$(ORACLE) dump-decl ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl.txt
@@ -107,6 +109,8 @@ subprog-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
 	$(ORACLE) subprog ../testdata/progs/subprog.bpf.o > ../testdata/oracle/subprog.json
 	$(ORACLE) subprog ../testdata/progs/subprog_callback.bpf.o > ../testdata/oracle/subprog-callback.json
+	$(ORACLE) subprog ../testdata/progs/subprog_hidden.bpf.o > ../testdata/oracle/subprog-hidden.json
+	$(ORACLE) subprog ../testdata/progs/subprog_arg_ctx.bpf.o > ../testdata/oracle/subprog-arg-ctx.json
 	$(ORACLE) subprog ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/subprog-link-text.json
 	$(ORACLE) subprog ../testdata/progs/link_text_b.bpf.o ../testdata/progs/link_text_a.bpf.o > ../testdata/oracle/subprog-link-text-reverse.json
 	$(ORACLE) subprog ../testdata/progs/link_extern_a.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/subprog-link-extern.json

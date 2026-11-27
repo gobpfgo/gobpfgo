@@ -88,9 +88,13 @@ func addPrograms(e *objelf.Object, sec objelf.Program, textShndx int, def secDef
 }
 
 // newProgram builds the program for the function sym of section sec. A
-// subprogram in .text has no SEC entry and keeps the zero program type.
+// subprogram in .text has no SEC entry and keeps the zero program type. A
+// global or weak function with hidden or internal visibility is marked so
+// the load gives its BTF FUNC static linkage if it is a subprogram.
 func newProgram(sec objelf.Program, sym objelf.Symbol, def secDef) *BpfProgram {
 	end := sym.Value + sym.Size
+	global := sym.Bind != elf.STB_LOCAL
+	vis := elf.ST_VISIBILITY(sym.Other)
 	prog := &BpfProgram{
 		name:               sym.Name,
 		progType:           def.progType,
@@ -101,7 +105,8 @@ func newProgram(sec objelf.Program, sym objelf.Symbol, def secDef) *BpfProgram {
 		secIdx:             sec.SectionIndex,
 		secInsnOff:         int(sym.Value / bpfInsnSize),
 		secInsnCnt:         int(sym.Size / bpfInsnSize),
-		symGlobal:          sym.Bind != elf.STB_LOCAL,
+		symGlobal:          global,
+		markBtfStatic:      global && (vis == elf.STV_HIDDEN || vis == elf.STV_INTERNAL),
 		insns:              sec.Insns[sym.Value:end:end],
 		fd:                 -1,
 	}

@@ -123,6 +123,7 @@ const (
 	BPF_FUNC_get_current_pid_tgid BpfFuncID = 14
 	BPF_FUNC_redirect             BpfFuncID = 23
 	BPF_FUNC_perf_event_output    BpfFuncID = 25
+	BPF_FUNC_get_func_ip          BpfFuncID = 173
 	BPF_FUNC_get_attach_cookie    BpfFuncID = 174
 )
 

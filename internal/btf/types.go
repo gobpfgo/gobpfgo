@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: include/uapi/linux/btf.h
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: enum btf_kind, struct btf_type, struct btf_member, struct btf_array, struct btf_enum, struct btf_param, struct btf_var, struct btf_var_secinfo, struct btf_decl_tag, struct btf_enum64
+// libbpf-symbols: enum btf_kind, enum btf_func_linkage, struct btf_type, struct btf_member, struct btf_array, struct btf_enum, struct btf_param, struct btf_var, struct btf_var_secinfo, struct btf_decl_tag, struct btf_enum64
 
 package btf
 
@@ -130,6 +130,14 @@ const (
 	VarStatic          uint32 = 0
 	VarGlobalAllocated uint32 = 1
 	VarGlobalExtern    uint32 = 2
+)
+
+// Function linkage values from linux/btf.h. A FUNC keeps its linkage in the
+// vlen bits of its info word.
+const (
+	FuncStatic uint32 = 0
+	FuncGlobal uint32 = 1
+	FuncExtern uint32 = 2
 )
 
 // Var is the BTF_KIND_VAR payload. Linkage is one of the BTF_VAR_* values.

@@ -3,6 +3,7 @@
 
 #include "oracle.h"
 
+#include "btf.h"
 #include "libbpf.h"
 
 #include <linux/bpf.h>
@@ -67,9 +68,27 @@ static void program_json(struct json *j, const struct bpf_program *prog) {
 	json_obj_end(j);
 }
 
+/* btf_json prints the object BTF after the load, as hex. The generated loader
+ * assumes the latest kernel, so the load marks hidden subprograms static but
+ * never rewrites arg:ctx arguments.
+ */
+static void btf_json(struct json *j, const struct bpf_object *obj) {
+	struct btf *btf = bpf_object__btf(obj);
+	const void *raw;
+	__u32 size;
+
+	if (!btf)
+		return;
+
+	raw = btf__raw_data(btf, &size);
+	if (raw)
+		json_hex(j, "btf", raw, size);
+}
+
 /* subprog_report loads the object through a generated loader, which runs
  * libbpf's relocation without creating anything in the kernel, and prints the
- * load errno, the map names in map index order and every main program.
+ * load errno, the BTF after the load, the map names in map index order and
+ * every main program.
  */
 static int subprog_report(struct json *j, const char *path) {
 	LIBBPF_OPTS(gen_loader_opts, gen);
@@ -88,6 +107,7 @@ static int subprog_report(struct json *j, const char *path) {
 	if (!err)
 		err = bpf_object__load(obj);
 	json_s32(j, "errno", err);
+	btf_json(j, obj);
 
 	json_arr_begin(j, "maps");
 	for (map = bpf_object__next_map(obj, NULL); map; map = bpf_object__next_map(obj, map))

@@ -51,11 +51,15 @@ type relocator struct {
 
 // relocateObject relocates the programs of obj for loading and returns the
 // code of each main program, in program order. CO-RE runs first, on every
-// program and subprogram, then the calls build each main program's code, then
-// the map, global data and extern loads of that code are patched. The program
-// instructions are not changed; each step works on copies. ext may be nil,
-// and kernels is empty when there is no CO-RE relocation.
-func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec) ([]*progCode, error) {
+// program and subprogram, then the calls build each main program's code
+// with its function and line records. Last, each main program's records of
+// global functions with arg:ctx arguments are fixed up, which adds types to
+// the object BTF, unless argCtxTag reports that the kernel reads the tag.
+// relocateObjectData patches the map, global data and extern loads once the
+// maps exist. The program instructions are not changed; each step works on
+// copies. ext may be nil, and kernels is empty when there is no CO-RE
+// relocation.
+func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag func() bool) ([]*progCode, error) {
 	r := &relocator{
 		obj:    obj,
 		ext:    ext,
@@ -81,12 +85,30 @@ func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec) ([]*p
 				Log:   fmt.Sprintf("prog '%s': failed to relocate calls: %v", p.name, err),
 			}
 		}
-		if err := relocateData(code); err != nil {
-			return nil, &Error{Op: "bpf_prog_load", Errno: unix.EINVAL, Log: err.Error()}
-		}
 		codes = append(codes, code)
 	}
+
+	for _, code := range codes {
+		if err := fixupFuncInfo(obj, ext, code, argCtxTag); err != nil {
+			return nil, &Error{
+				Op:    "bpf_object__relocate",
+				Errno: unix.EINVAL,
+				Log:   fmt.Sprintf("prog '%s': failed to perform .BTF.ext fix ups: %v", code.prog.name, err),
+			}
+		}
+	}
 	return codes, nil
+}
+
+// relocateObjectData patches the map, global data and extern loads in the
+// code of every main program. The maps must have their descriptors.
+func relocateObjectData(codes []*progCode) error {
+	for _, code := range codes {
+		if err := relocateData(code); err != nil {
+			return &Error{Op: "bpf_prog_load", Errno: unix.EINVAL, Log: err.Error()}
+		}
+	}
+	return nil
 }
 
 // prepare copies p's instructions, applies its CO-RE relocations, records its
