@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,13 +41,48 @@ const (
 
 // relocateProgram records p's relocations against insns and patches its map,
 // global data and extern loads in place, as the loader does for a program
-// that calls no subprogram.
+// that calls no subprogram and has no callx.
 func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
 	relocs, err := recordRelocs(obj, p, insns)
 	if err != nil {
 		return err
 	}
-	return relocateData(&progCode{prog: p, insns: insns, relocs: relocs})
+	return relocateData(&progCode{prog: p, insns: insns, relocs: relocs}, noFuncPtrMap)
+}
+
+// noFuncPtrMap fails the relocation of an object that must not copy a map
+// with function pointers.
+func noFuncPtrMap(m *BpfMap, _ []byte) (int, error) {
+	return -1, fmt.Errorf("unexpected copy of map %s", BpfMapName(m))
+}
+
+// funcPtrMapStandIn creates no kernel map for a program's copy of a map with
+// function pointers. Like libbpf's generated loader, it numbers each copy
+// after the object's maps, in the order the relocation asks for them, and the
+// number stands in for the descriptor. values keeps each copy's value by that
+// number.
+type funcPtrMapStandIn struct {
+	obj    *BpfObject
+	values map[int][]byte
+}
+
+func newFuncPtrMapStandIn(obj *BpfObject) *funcPtrMapStandIn {
+	return &funcPtrMapStandIn{obj: obj, values: make(map[int][]byte)}
+}
+
+func (s *funcPtrMapStandIn) create(_ *BpfMap, value []byte) (int, error) {
+	fd := len(s.obj.maps) + len(s.obj.funcPtrMaps)
+	s.values[fd] = value
+	return fd, nil
+}
+
+// standInCopy is one program's copy of a map with function pointers, made by
+// funcPtrMapStandIn.
+type standInCopy struct {
+	prog  *BpfProgram
+	m     *BpfMap
+	fd    int
+	value []byte
 }
 
 // subprogFixture is the output of the subprog oracle: libbpf's object BTF
@@ -136,6 +172,18 @@ func relocateWithoutKernel(t *testing.T, obj *BpfObject, ext *btf.ExtSpec) ([]*p
 func relocateWithoutKernelArgCtx(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtxTag func() bool) ([]*progCode, error) {
 	t.Helper()
 
+	codes, _, err := relocateWithStandIns(t, obj, ext, argCtxTag)
+	return codes, err
+}
+
+// relocateWithStandIns relocates obj like relocateWithoutKernelArgCtx and
+// also returns the programs' copies of the maps with function pointers, which
+// funcPtrMapStandIn numbers as libbpf's generated loader does. The stand-in
+// descriptors and copies are cleared before it returns, so closing the object
+// closes none of them.
+func relocateWithStandIns(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtxTag func() bool) ([]*progCode, []standInCopy, error) {
+	t.Helper()
+
 	for i, m := range obj.maps {
 		m.fd = i
 	}
@@ -143,15 +191,23 @@ func relocateWithoutKernelArgCtx(t *testing.T, obj *BpfObject, ext *btf.ExtSpec,
 		for _, m := range obj.maps {
 			m.fd = -1
 		}
+		obj.funcPtrMaps = nil
 	}()
+
 	codes, err := relocateObject(obj, ext, nil, argCtxTag)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := relocateObjectData(codes); err != nil {
-		return nil, err
+	standIn := newFuncPtrMapStandIn(obj)
+	if err := relocateObjectData(codes, standIn.create); err != nil {
+		return nil, nil, err
 	}
-	return codes, nil
+
+	var copies []standInCopy
+	for _, c := range obj.funcPtrMaps {
+		copies = append(copies, standInCopy{prog: c.prog, m: c.m, fd: c.fd, value: standIn.values[c.fd]})
+	}
+	return codes, copies, nil
 }
 
 func objectExt(t *testing.T, obj *BpfObject) *btf.ExtSpec {
@@ -238,13 +294,17 @@ func TestSubprogOpen(t *testing.T) {
 // loader assumes, and compares the whole object BTF. The link-text cases
 // link link_text_a.bpf.o and link_text_b.bpf.o first, in both orders, so each
 // program calls its own static bump in the merged .text. In the hidden case
-// only the hidden .text subprogram's FUNC becomes static.
+// only the hidden .text subprogram's FUNC becomes static. In the callx case
+// each program with callx gets the static functions of its function table
+// appended and loads its own copy of the table's map, which takes the
+// generated loader's next map index; the copies are not object maps.
 func TestSubprogOracle(t *testing.T) {
 	fixtures := []string{
 		"subprog.json", "subprog-callback.json",
 		"subprog-link-text.json", "subprog-link-text-reverse.json",
 		"subprog-link-extern.json", "subprog-link-extern-reverse.json",
 		"subprog-hidden.json", "subprog-arg-ctx.json",
+		"subprog-callx.json",
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {

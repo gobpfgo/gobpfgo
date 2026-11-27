@@ -42,6 +42,12 @@ type BpfMap struct {
 	autocreate bool
 	fd         int
 	id         uint32
+
+	// funcPtrs are the pointers to .text functions in a read-only data
+	// map's section, a slice of the object's, sorted by offset. A program
+	// with callx that loads the map gets its own copy, with the offsets of
+	// the functions in that program.
+	funcPtrs []funcPtr
 }
 
 // BpfMapName returns the name declared in the map definition, or an empty

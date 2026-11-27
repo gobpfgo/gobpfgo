@@ -44,17 +44,19 @@ const (
 	SHN_LORESERVE = elf.SHN_LORESERVE
 )
 
-// Reloc is one relocation entry. Section is the target section name, Symbol
-// the referenced symbol name, SymbolIndex its index in Object.Symbols, Type the
-// ELF relocation type and Addend the RELA addend. A section symbol has an empty
-// name; SymbolIndex still identifies it.
+// Reloc is one relocation entry. Section is the target section name and
+// SectionIndex its index, the relocation section's sh_info. Symbol is the
+// referenced symbol name, SymbolIndex its index in Object.Symbols, Type the
+// ELF relocation type and Addend the RELA addend. A section symbol has an
+// empty name; SymbolIndex still identifies it.
 type Reloc struct {
-	Section     string
-	Offset      uint64
-	Symbol      string
-	SymbolIndex uint32
-	Type        uint32
-	Addend      int64
+	Section      string
+	SectionIndex int
+	Offset       uint64
+	Symbol       string
+	SymbolIndex  uint32
+	Type         uint32
+	Addend       int64
 }
 
 // Symbol type and binding values used by the object loader.
@@ -269,10 +271,11 @@ func parseRelocs(s *elf.Section, target string, symbols []Symbol, order binary.B
 		info := order.Uint64(data[off+8:])
 		symIndex := info >> 32
 		reloc := Reloc{
-			Section:     target,
-			Offset:      order.Uint64(data[off:]),
-			SymbolIndex: uint32(symIndex),
-			Type:        uint32(info & 0xffffffff),
+			Section:      target,
+			SectionIndex: int(s.Info),
+			Offset:       order.Uint64(data[off:]),
+			SymbolIndex:  uint32(symIndex),
+			Type:         uint32(info & 0xffffffff),
 		}
 		if symIndex < uint64(len(symbols)) {
 			reloc.Symbol = symbols[symIndex].Name
