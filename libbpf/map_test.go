@@ -57,4 +57,11 @@ func TestBpfMapLookupElemChecks(t *testing.T) {
 	if err := BpfMapLookupElem(m, make([]byte, 4), make([]byte, 7), 0); !errors.Is(err, unix.EINVAL) {
 		t.Fatalf("short value: got %v, want EINVAL", err)
 	}
+
+	// A per-CPU map without BPF_F_CPU or BPF_F_ALL_CPUS returns one value
+	// per possible CPU, so a single value is too short.
+	m.mapType = BPF_MAP_TYPE_PERCPU_ARRAY
+	if err := BpfMapLookupElem(m, make([]byte, 4), make([]byte, 8), 0); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("per-CPU map with one value: got %v, want EINVAL", err)
+	}
 }

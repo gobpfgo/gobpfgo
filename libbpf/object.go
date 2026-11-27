@@ -325,7 +325,7 @@ func parseMaps(spec *btf.Spec) ([]*BpfMap, error) {
 			return nil, fmt.Errorf("map %s has kind %v, want struct", v.Name, st.Kind)
 		}
 
-		m := &BpfMap{name: v.Name, symbolName: v.Name, fd: -1}
+		m := &BpfMap{name: v.Name, symbolName: v.Name, autocreate: true, fd: -1}
 		if err := fillMapDef(spec, st, m); err != nil {
 			return nil, fmt.Errorf("map %s: %w", v.Name, err)
 		}

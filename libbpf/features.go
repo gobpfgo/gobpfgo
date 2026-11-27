@@ -2,7 +2,7 @@
 // libbpf-source: src/features.c
 // libbpf-source: src/libbpf_probes.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_btf_type_tag, probe_kern_btf_enum64, probe_kern_btf_qmark_datasec, probe_kern_btf_float, probe_kern_arg_ctx_tag, feat_supported, probe_fd, libbpf__load_raw_btf
+// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_btf_type_tag, probe_kern_btf_enum64, probe_kern_btf_qmark_datasec, probe_kern_btf_float, probe_kern_arg_ctx_tag, probe_kern_percpu_data, feat_supported, probe_fd, libbpf__load_raw_btf
 
 //go:build linux && (amd64 || arm64)
 
@@ -63,6 +63,10 @@ var (
 	// tag on a global function argument. Without it the load rewrites the
 	// tagged arguments' BTF types to the program's context struct.
 	featArgCtxTag = kernelFeature{probe: probeArgCtxTag}
+	// featPercpuData is global per-CPU data: a program may load the value
+	// of a per-CPU array directly, which .percpu variables need. Without it
+	// the load does not create the per-CPU data maps.
+	featPercpuData = kernelFeature{probe: probePercpuData}
 )
 
 // probeBpfCookie reports whether a program can read a BPF cookie: the kernel
@@ -106,6 +110,51 @@ func probeUprobeMultiLink() bool {
 		return false
 	}
 	return uprobeMultiProbeFails(progFD, ^uint32(0), unix.EINVAL)
+}
+
+// probePercpuData reports whether a program can load the value of a per-CPU
+// array directly. It creates a one-entry per-CPU array without BTF and loads
+// the socket filter of percpuDataProbeInsns on it.
+func probePercpuData() bool {
+	attr := &sys.MapCreateAttr{
+		MapType:    uint32(BPF_MAP_TYPE_PERCPU_ARRAY),
+		KeySize:    4,
+		ValueSize:  8,
+		MaxEntries: 1,
+	}
+	attr.SetMapName("libbpf_percpu")
+	mapFD, err := sys.MapCreate(attr, nil)
+	if err != nil {
+		return false
+	}
+	defer unix.Close(mapFD)
+
+	progAttr := &sys.ProgLoadAttr{
+		ProgType: uint32(BPF_PROG_TYPE_SOCKET_FILTER),
+		InsnCnt:  4,
+	}
+	fd, err := sys.ProgLoad(progAttr, percpuDataProbeInsns(mapFD), []byte("GPL\x00"), nil, nil, nil, nil)
+	if err != nil {
+		return false
+	}
+	unix.Close(fd)
+	return true
+}
+
+// percpuDataProbeInsns returns the program of the per-CPU data probe: r1 =
+// the value of map mapFD, r0 = *(u64 *)(r1 + 0), exit.
+func percpuDataProbeInsns(mapFD int) []byte {
+	insns := make([]byte, 4*bpfInsnLength)
+	for i, insn := range []bpfInsn{
+		// The two-instruction ld_imm64 of the map value at offset 0.
+		{Code: bpfLD | bpfImm | bpfSizeDW, Dst: 1, Src: bpfPseudoMapValue, Imm: int32(mapFD)},
+		{},
+		{Code: bpfLDX | bpfMem | bpfSizeDW, Dst: 0, Src: 1},
+		{Code: bpfJMP | bpfExit},
+	} {
+		encodeBpfInsn(insns[i*bpfInsnLength:], insn)
+	}
+	return insns
 }
 
 // uprobeMultiProbeFails creates a uprobe multi link on "/" at offset 0 for

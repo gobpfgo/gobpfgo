@@ -54,6 +54,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) open ../testdata/progs/link_ksyms_weak.bpf.o > ../testdata/oracle/open-ksyms-weak.json
 	$(ORACLE) open ../testdata/progs/subprog_hidden.bpf.o > ../testdata/oracle/open-subprog-hidden.json
 	$(ORACLE) open ../testdata/progs/subprog_arg_ctx.bpf.o > ../testdata/oracle/open-subprog-arg-ctx.json
+	$(ORACLE) open ../testdata/progs/percpu.bpf.o > ../testdata/oracle/open-percpu.json
 	$(ORACLE) kconfig ../testdata/progs/kconfig_types.bpf.o > ../testdata/oracle/kconfig.json
 	$(ORACLE) dump ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump.txt
 	$(ORACLE) dump-decl ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl.txt

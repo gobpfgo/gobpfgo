@@ -22,12 +22,13 @@ const (
 	rodataSec    = ".rodata"
 	bssSec       = ".bss"
 	dataRelRoSec = ".data.rel.ro"
+	percpuSec    = ".percpu"
 	mapsSec      = ".maps"
 )
 
-// libbpfMapType tells an internal map, one of the global data maps or the
-// .kconfig map, from a map defined in the .maps section, which is
-// libbpfMapUnspec.
+// libbpfMapType tells an internal map, one of the global data maps, the
+// .kconfig map or a per-CPU data map, from a map defined in the .maps section,
+// which is libbpfMapUnspec.
 type libbpfMapType int
 
 const (
@@ -36,6 +37,7 @@ const (
 	libbpfMapBss
 	libbpfMapRodata
 	libbpfMapKconfig
+	libbpfMapPercpu
 )
 
 // internalMapKeySize is the key size of every global data map: one int index.
@@ -46,10 +48,10 @@ func secNameIs(name, base string) bool {
 	return name == base || strings.HasPrefix(name, base+".")
 }
 
-// dataSectionType classifies an ELF section as a global data section. Data
-// and read-only data must be non-empty, non-executable PROGBITS sections; the
-// .data.rel.ro constants are read-only data. Zero-initialized data must be a
-// NOBITS section.
+// dataSectionType classifies an ELF section as a global data section. Data,
+// read-only data and per-CPU data must be non-empty, non-executable PROGBITS
+// sections; the .data.rel.ro constants are read-only data. Zero-initialized
+// data must be a NOBITS section.
 func dataSectionType(s *objelf.Section) libbpfMapType {
 	switch {
 	case s.Type == elf.SHT_PROGBITS && s.Size > 0 && s.Flags&elf.SHF_EXECINSTR == 0:
@@ -60,6 +62,8 @@ func dataSectionType(s *objelf.Section) libbpfMapType {
 			return libbpfMapData
 		case secNameIs(s.Name, rodataSec):
 			return libbpfMapRodata
+		case secNameIs(s.Name, percpuSec):
+			return libbpfMapPercpu
 		}
 	case s.Type == elf.SHT_NOBITS && secNameIs(s.Name, bssSec):
 		return libbpfMapBss
@@ -68,8 +72,8 @@ func dataSectionType(s *objelf.Section) libbpfMapType {
 }
 
 // initGlobalDataMaps returns one internal map per non-empty data, read-only
-// data and zero-initialized data section, in ELF section order. objName is
-// the object name used as the map name prefix.
+// data, zero-initialized data and per-CPU data section, in ELF section order.
+// objName is the object name used as the map name prefix.
 func initGlobalDataMaps(e *objelf.Object, spec *btf.Spec, objName string) []*BpfMap {
 	var maps []*BpfMap
 	for i := 1; i < len(e.Sections); i++ {
@@ -95,13 +99,15 @@ func newInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, s *objelf
 }
 
 // initInternalMap builds a single-entry array map of size bytes for the
-// internal map realName at ELF section secIdx. Read-only data and .kconfig
-// maps are read-only for programs. The BTF value type is the DATASEC named
-// realName, when there is one, and a map with a variable visible outside the
-// object is mmapable. The initial value is data padded with zeroes to size.
+// internal map realName at ELF section secIdx. A per-CPU data map is a per-CPU
+// array, so each CPU has its own copy of the value. Read-only data and
+// .kconfig maps are read-only for programs. The BTF value type is the DATASEC
+// named realName, when there is one, and a map other than a per-CPU one with a
+// variable visible outside the object is mmapable. The initial value is data
+// padded with zeroes to size; a per-CPU map starts with it on every CPU.
 func initInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, realName string, secIdx int, data []byte, size uint32) *BpfMap {
 	m := &BpfMap{
-		name:       internalMapName(objName, realName),
+		name:       internalMapName(objName, realName, typ),
 		realName:   realName,
 		libbpfType: typ,
 		secIdx:     secIdx,
@@ -109,7 +115,11 @@ func initInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, realName
 		keySize:    internalMapKeySize,
 		valueSize:  size,
 		maxEntries: 1,
+		autocreate: true,
 		fd:         -1,
+	}
+	if typ == libbpfMapPercpu {
+		m.mapType = BPF_MAP_TYPE_PERCPU_ARRAY
 	}
 	if typ == libbpfMapRodata || typ == libbpfMapKconfig {
 		m.mapFlags = unix.BPF_F_RDONLY_PROG
@@ -127,20 +137,21 @@ func initInternalMap(spec *btf.Spec, objName string, typ libbpfMapType, realName
 	return m
 }
 
-// internalMapName returns the kernel name of the map for section realName.
+// internalMapName returns the kernel name of the internal map of type typ for
+// section realName.
 //
 // The name keeps as much of the object name as fits in front of the section
 // name, reserving at least seven characters for the section, so object
 // "my_object_name" gives "my_objec.rodata" and "my_objec.bss". A section name
-// with a second dot, such as ".rodata.custom", is used alone. The result is
-// cut to the kernel's 15 characters and every character the kernel rejects
-// becomes '_'.
-func internalMapName(objName, realName string) string {
+// with a second dot, such as ".rodata.custom", and a per-CPU data section,
+// such as ".percpu", are used alone. The result is cut to the kernel's 15
+// characters and every character the kernel rejects becomes '_'.
+func internalMapName(objName, realName string, typ libbpfMapType) string {
 	const maxLen = sys.BPF_OBJ_NAME_LEN - 1
 
 	sfxLen := min(max(7, len(realName)), maxLen)
 	pfxLen := 0
-	if !strings.Contains(realName[min(1, len(realName)):], ".") {
+	if !strings.Contains(realName[min(1, len(realName)):], ".") && typ != libbpfMapPercpu {
 		pfxLen = min(maxLen-sfxLen, len(objName))
 	}
 
@@ -177,9 +188,13 @@ func mapFillBtfTypeInfo(spec *btf.Spec, m *BpfMap) {
 
 // mapIsMmapable reports whether an internal map exposes a variable outside the
 // object: its value type is a DATASEC with at least one non-static VAR. Global
-// variables with hidden or internal visibility count as static.
+// variables with hidden or internal visibility count as static. A per-CPU data
+// map is never mmapable, because the kernel cannot map a per-CPU array.
 func mapIsMmapable(spec *btf.Spec, m *BpfMap) bool {
 	if spec == nil || m.btfValueTypeID == 0 {
+		return false
+	}
+	if m.libbpfType == libbpfMapPercpu {
 		return false
 	}
 	t, err := spec.TypeByID(m.btfValueTypeID)
@@ -200,13 +215,16 @@ func mapIsMmapable(spec *btf.Spec, m *BpfMap) bool {
 
 // mapUsesRealName reports whether the user-visible map name is the section
 // name instead of the kernel name. That is the case for custom data sections
-// such as ".data.custom", whose kernel name may be truncated.
+// such as ".data.custom" and for every per-CPU data section, whose kernel name
+// may be truncated.
 func mapUsesRealName(m *BpfMap) bool {
 	switch m.libbpfType {
 	case libbpfMapData:
 		return m.realName != dataSec
 	case libbpfMapRodata:
 		return m.realName != rodataSec
+	case libbpfMapPercpu:
+		return true
 	}
 	return false
 }

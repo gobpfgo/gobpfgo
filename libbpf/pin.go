@@ -163,8 +163,10 @@ func BpfProgramUnpin(p *BpfProgram, path string) error {
 //
 // When path is nil, each map's stored pin path is used and maps without one
 // are skipped. When path is non-nil, each map is pinned at path/<map-name>;
-// dots in the resulting path become underscores, matching libbpf. If a pin
-// fails, the maps pinned by this call are unpinned.
+// dots in the resulting path become underscores, matching libbpf. Maps with
+// autocreate cleared, such as a per-CPU data map on a kernel without global
+// per-CPU data, are skipped and get no pin. If a pin fails, the maps pinned
+// by this call are unpinned.
 func BpfObjectPinMaps(obj *BpfObject, path *string) error {
 	const op = "bpf_object__pin_maps"
 
@@ -174,8 +176,11 @@ func BpfObjectPinMaps(obj *BpfObject, path *string) error {
 
 	pinned := make([]*BpfMap, 0, len(obj.maps))
 	for _, m := range obj.maps {
-		var pinPath *string
+		if !m.autocreate {
+			continue
+		}
 
+		var pinPath *string
 		switch {
 		case path != nil:
 			p := sanitizePinPath(filepath.Join(*path, BpfMapName(m)))
@@ -315,13 +320,14 @@ func BpfObjectUnpin(obj *BpfObject, path string) error {
 	return BpfObjectUnpinMaps(obj, &path)
 }
 
-// objectMapsLoaded reports whether obj has maps and all of them are created.
+// objectMapsLoaded reports whether obj is open and every map the load creates
+// has a descriptor. Maps with autocreate cleared are not checked.
 func objectMapsLoaded(obj *BpfObject) bool {
 	if obj == nil || obj.closed {
 		return false
 	}
 	for _, m := range obj.maps {
-		if m.fd < 0 {
+		if m.autocreate && m.fd < 0 {
 			return false
 		}
 	}
