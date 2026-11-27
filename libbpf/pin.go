@@ -178,7 +178,7 @@ func BpfObjectPinMaps(obj *BpfObject, path *string) error {
 
 		switch {
 		case path != nil:
-			p := sanitizePinPath(filepath.Join(*path, m.name))
+			p := sanitizePinPath(filepath.Join(*path, BpfMapName(m)))
 			pinPath = &p
 		case m.pinPath == "":
 			continue
@@ -209,7 +209,7 @@ func BpfObjectUnpinMaps(obj *BpfObject, path *string) error {
 
 		switch {
 		case path != nil:
-			p := sanitizePinPath(filepath.Join(*path, m.name))
+			p := sanitizePinPath(filepath.Join(*path, BpfMapName(m)))
 			pinPath = &p
 		case m.pinPath == "":
 			continue

@@ -380,6 +380,58 @@ func (s *Spec) FixupDatasecOffsets(offsets map[string]uint32) error {
 	return nil
 }
 
+// FixupDatasecHiddenVars marks the global DATASEC variables named in hidden as
+// static, in both the raw blob and the parsed types. The caller passes the
+// variables whose ELF symbol has hidden or internal visibility; such a variable
+// is not visible outside the object, so the loader treats it like a static
+// one. Static and extern variables are left alone.
+func (s *Spec) FixupDatasecHiddenVars(hidden map[string]bool) error {
+	for i := range s.Types {
+		t := &s.Types[i]
+		if t.Kind != KindDatasec || t.ID == 0 {
+			continue
+		}
+		for j := range t.DataSec {
+			varType, err := s.TypeByID(t.DataSec[j].Type)
+			if err != nil {
+				return err
+			}
+			if varType.Kind != KindVar || varType.Var == nil {
+				return fmt.Errorf("btf: datasec %s: member %d is not a VAR", t.Name, j)
+			}
+			if varType.Var.Linkage == VarStatic || varType.Var.Linkage == VarGlobalExtern {
+				continue
+			}
+			if !hidden[varType.Name] {
+				continue
+			}
+			if err := s.SetVarLinkage(varType.ID, VarStatic); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// SetVarLinkage writes linkage into the VAR type id, in both the raw blob and
+// the parsed type. It returns an error when id is not a VAR.
+func (s *Spec) SetVarLinkage(id uint32, linkage uint32) error {
+	t, err := s.TypeByID(id)
+	if err != nil {
+		return err
+	}
+	if t.Kind != KindVar || t.Var == nil {
+		return fmt.Errorf("btf: type %d is %v, not a VAR", id, t.Kind)
+	}
+	off := s.typeStart + int(t.rawOff) + 12
+	if off+4 > len(s.raw) {
+		return fmt.Errorf("btf: var %s: linkage field out of bounds", t.Name)
+	}
+	s.ByteOrder.PutUint32(s.raw[off:], linkage)
+	t.Var.Linkage = linkage
+	return nil
+}
+
 // SortDatasecVars orders each DATASEC's variables by their offset, as libbpf
 // does before BPF_BTF_LOAD. The kernel requires the offsets to be ascending.
 func (s *Spec) SortDatasecVars() error {

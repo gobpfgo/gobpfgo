@@ -38,6 +38,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) layout > ../testdata/oracle/layout.json
 	$(ORACLE) attr > ../testdata/oracle/attr.json
 	$(ORACLE) open ../testdata/progs/kprobe.bpf.o > ../testdata/oracle/open.json
+	$(ORACLE) open ../testdata/progs/global_data.bpf.o > ../testdata/oracle/open-global-data.json
 	$(ORACLE) dump ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump.txt
 	$(ORACLE) dump-decl ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl.txt
 	$(ORACLE) dump-decl-strip ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl-strip.txt

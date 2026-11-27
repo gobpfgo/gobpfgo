@@ -24,6 +24,7 @@ const (
 	BPF_OBJ_GET_INFO_BY_FD  = 15
 	BPF_RAW_TRACEPOINT_OPEN = 17
 	BPF_BTF_LOAD            = 18
+	BPF_MAP_FREEZE          = 22
 	BPF_LINK_CREATE         = 28
 	BPF_LINK_UPDATE         = 29
 	BPF_LINK_DETACH         = 34

@@ -1,0 +1,16 @@
+{
+  "case": "open",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "global_data.bpf.o",
+  "object_name": "global_data",
+  "maps": [
+    {"name": "global_d.data", "type": 2, "key_size": 4, "value_size": 24, "max_entries": 1, "map_flags": 1024, "btf_key_type_id": 0, "btf_value_type_id": 25, "pin_path": ""},
+    {"name": "global_d.rodata", "type": 2, "key_size": 4, "value_size": 16, "max_entries": 1, "map_flags": 1152, "btf_key_type_id": 0, "btf_value_type_id": 26, "pin_path": ""},
+    {"name": "global_d.bss", "type": 2, "key_size": 4, "value_size": 16, "max_entries": 1, "map_flags": 1024, "btf_key_type_id": 0, "btf_value_type_id": 24, "pin_path": ""}
+  ],
+  "programs": [
+    {"name": "handle_global", "type": 2, "expected_attach_type": 0, "section": "kprobe/do_sys_openat2", "insn_cnt": 21}
+  ]
+}

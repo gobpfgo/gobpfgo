@@ -143,3 +143,15 @@ func TestMapElemAttr(t *testing.T) {
 		t.Errorf("flags = %#x, want %#x", v, attr.Flags)
 	}
 }
+
+func TestMapFreezeAttr(t *testing.T) {
+	attr := &MapFreezeAttr{MapFD: 7}
+
+	got := attr.Marshal()
+	if len(got) != MapFreezeAttrSize {
+		t.Fatalf("marshaled %d bytes, want %d", len(got), MapFreezeAttrSize)
+	}
+	if v := binary.NativeEndian.Uint32(got[0:]); v != attr.MapFD {
+		t.Errorf("map_fd = %#x, want %#x", v, attr.MapFD)
+	}
+}

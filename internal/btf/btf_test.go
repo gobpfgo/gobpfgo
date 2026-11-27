@@ -224,6 +224,54 @@ func TestFixupDatasecOffsets(t *testing.T) {
 	}
 }
 
+// TestFixupDatasecHiddenVars marks the .rodata globals of the global data
+// object as hidden and checks that only they become static, in the parsed
+// types and in a fresh parse of the raw blob.
+func TestFixupDatasecHiddenVars(t *testing.T) {
+	o, err := elf.Open("../../testdata/progs/global_data.bpf.o")
+	if err != nil {
+		t.Fatalf("open object: %v", err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	hidden := map[string]bool{"rodata_pad": true, "rodata_value": true, "data_static": true}
+	if err := spec.FixupDatasecHiddenVars(hidden); err != nil {
+		t.Fatalf("FixupDatasecHiddenVars: %v", err)
+	}
+	again, err := Parse(spec.Raw(), spec.ByteOrder)
+	if err != nil {
+		t.Fatalf("Parse patched blob: %v", err)
+	}
+
+	want := map[string]uint32{
+		"rodata_pad":   VarStatic,
+		"rodata_value": VarStatic,
+		"data_static":  VarStatic,
+		"data_magic":   VarGlobalAllocated,
+		"data_counter": VarGlobalAllocated,
+		"bss_counter":  VarGlobalAllocated,
+	}
+	for name, linkage := range want {
+		for _, s := range []*Spec{spec, again} {
+			v := s.Find(name, KindVar)
+			if v == nil || v.Var == nil {
+				t.Fatalf("VAR %s not found", name)
+			}
+			if v.Var.Linkage != linkage {
+				t.Errorf("%s linkage = %d, want %d", name, v.Var.Linkage, linkage)
+			}
+		}
+	}
+
+	ds := spec.Find(".data", KindDatasec)
+	if err := spec.SetVarLinkage(ds.ID, VarStatic); err == nil {
+		t.Fatal("SetVarLinkage accepted a DATASEC")
+	}
+}
+
 // TestSetDatasec patches a DATASEC size and variable offset and reads them
 // back from a fresh parse of the raw blob.
 func TestSetDatasec(t *testing.T) {
