@@ -2,7 +2,8 @@
 // gobpfgo-origin: original BTF type encoder
 // libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: btf_type_size, btf_field_iter_init, btf_field_iter_next
+// libbpf-source: src/btf_iter.c
+// libbpf-symbols: btf_type_size, btf_field_iter_init, btf_field_iter_next, btf_get_raw_data
 
 package btf
 
@@ -14,12 +15,8 @@ import "encoding/binary"
 // data section is the length of its slice, and Vlen is used for the other
 // kinds. Name offsets are written as stored in the NameOff fields.
 func AppendType(b []byte, t *Type, order binary.AppendByteOrder) []byte {
-	info := uint32(t.Kind)<<24 | vlenOf(t)&0xffff
-	if t.KindFlag {
-		info |= 1 << 31
-	}
 	b = order.AppendUint32(b, t.NameOff)
-	b = order.AppendUint32(b, info)
+	b = order.AppendUint32(b, infoWord(t))
 	b = order.AppendUint32(b, t.SizeOrType)
 
 	switch t.Kind {
@@ -77,19 +74,34 @@ func AppendType(b []byte, t *Type, order binary.AppendByteOrder) []byte {
 	return b
 }
 
-// appendMembers encodes struct and union members. With the kind flag set, the
-// offset word carries the bitfield size in its top byte.
+// infoWord returns the info word AppendType writes for t: the kind, the kind
+// flag and the vlen.
+func infoWord(t *Type) uint32 {
+	info := uint32(t.Kind)<<24 | vlenOf(t)&0xffff
+	if t.KindFlag {
+		info |= 1 << 31
+	}
+	return info
+}
+
+// appendMembers encodes struct and union members.
 func appendMembers(b []byte, t *Type, order binary.AppendByteOrder) []byte {
-	for _, m := range t.Members {
-		offset := m.Offset
-		if t.KindFlag {
-			offset = uint32(m.BitfieldSize)<<24 | m.Offset&0xffffff
-		}
+	for i := range t.Members {
+		m := &t.Members[i]
 		b = order.AppendUint32(b, m.NameOff)
 		b = order.AppendUint32(b, m.Type)
-		b = order.AppendUint32(b, offset)
+		b = order.AppendUint32(b, memberOffsetWord(t, m))
 	}
 	return b
+}
+
+// memberOffsetWord returns the offset word of member m of t. With the kind
+// flag set, it carries the bitfield size in its top byte.
+func memberOffsetWord(t *Type, m *Member) uint32 {
+	if t.KindFlag {
+		return uint32(m.BitfieldSize)<<24 | m.Offset&0xffffff
+	}
+	return m.Offset
 }
 
 func vlenOf(t *Type) uint32 {
@@ -109,13 +121,15 @@ func vlenOf(t *Type) uint32 {
 }
 
 // VisitTypeIDs calls fn with a pointer to every type ID field of t, in wire
-// order: the referenced type of pointers, modifiers, typedefs, functions,
-// variables and tags, the element and index types of an array, member types,
-// the return and parameter types of a function prototype, and the variables
-// of a data section. fn may rewrite the ID; the first error stops the walk.
+// order: the type field of forward declarations, pointers, modifiers,
+// typedefs, functions, variables and tags, the element and index types of an
+// array, member types, the return and parameter types of a function
+// prototype, and the variables of a data section. A forward declaration's
+// type field is 0 in valid BTF. fn may rewrite the ID; the first error stops
+// the walk.
 func (t *Type) VisitTypeIDs(fn func(id *uint32) error) error {
 	switch t.Kind {
-	case KindPtr, KindTypedef, KindVolatile, KindConst, KindRestrict,
+	case KindFwd, KindPtr, KindTypedef, KindVolatile, KindConst, KindRestrict,
 		KindFunc, KindVar, KindTypeTag, KindDeclTag:
 		return fn(&t.SizeOrType)
 	case KindArray:

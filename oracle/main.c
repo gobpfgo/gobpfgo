@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|core <object>|core-reloc <object> <target>|linfo|zip|usdt <binary>|kconfig <object>\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|dedup <object>...|core <object>|core-reloc <object> <target>|linfo|zip|usdt <binary>|kconfig <object>\n", prog);
 }
 
 int main(int argc, char **argv) {
@@ -40,6 +40,8 @@ int main(int argc, char **argv) {
 		return oracle_probe();
 	if (strcmp(argv[1], "linker") == 0 && argc >= 3)
 		return oracle_linker((const char *const *)&argv[2], argc - 2);
+	if (strcmp(argv[1], "dedup") == 0 && argc >= 2)
+		return oracle_dedup((const char *const *)&argv[2], argc - 2);
 	if (strcmp(argv[1], "core") == 0 && argc == 3)
 		return oracle_core(argv[2]);
 	if (strcmp(argv[1], "core-reloc") == 0 && argc == 4)

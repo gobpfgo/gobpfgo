@@ -10,6 +10,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -50,44 +51,92 @@ func linkObjects(t *testing.T, names ...string) string {
 
 // TestBpfLinkerMergeOracle links two objects and compares the result with
 // libbpf's linker: maps, programs, symbols, and every section's header,
-// contents and relocations. Only the .BTF size differs, because libbpf
-// deduplicates the concatenated types and this linker does not yet.
+// contents and relocations, including the deduplicated .BTF and the .BTF.ext
+// that follows its type IDs.
 func TestBpfLinkerMergeOracle(t *testing.T) {
 	fixtures := []string{"linker-merge.json", "linker-merge-reverse.json", "linker-text.json"}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
 			want := loadLinkerFixture(t, fixture)
-			compareLinked(t, want, linkObjects(t, want.Objects...), ".BTF")
+			compareLinked(t, want, linkObjects(t, want.Objects...))
 		})
 	}
 }
 
-// TestBpfLinkerMergeBTF checks the merged BTF of link_a.bpf.o and
-// link_b.bpf.o: every input type is kept, each global VAR appears once, and
-// the .maps DATASEC lists each map at its symbol's offset, with the strong
-// shared_counts from link_b.bpf.o.
+// TestBpfLinkerMergeBTF checks the deduplicated BTF of link_a.bpf.o and
+// link_b.bpf.o in both orders: every type of the inputs appears once, the
+// three map variables share one map definition struct, both programs share
+// one prototype, and the .maps DATASEC lists each map at its symbol's
+// offset, with the strong shared_counts from link_b.bpf.o.
 func TestBpfLinkerMergeBTF(t *testing.T) {
-	path := linkObjects(t, "link_a.bpf.o", "link_b.bpf.o")
-	out := parseFileBTF(t, path)
+	for _, names := range [][]string{
+		{"link_a.bpf.o", "link_b.bpf.o"},
+		{"link_b.bpf.o", "link_a.bpf.o"},
+	} {
+		t.Run(strings.Join(names, "_"), func(t *testing.T) {
+			path := linkObjects(t, names...)
+			out := parseFileBTF(t, path)
 
-	inputTypes := 0
-	for _, name := range []string{"link_a.bpf.o", "link_b.bpf.o"} {
-		inputTypes += len(parseFileBTF(t, filepath.Join(progsDir, name)).Types) - 1
+			if dups := duplicateTypes(t, out); len(dups) != 0 {
+				t.Fatalf("duplicate types: %v", dups)
+			}
+			if got := sharedTypes(t, out, btf.KindVar, "counts_a", "shared_counts", "counts_b"); len(got) != 1 {
+				t.Fatalf("map variables use %d struct types, want 1", len(got))
+			}
+			if got := sharedTypes(t, out, btf.KindFunc, "handle_a", "handle_b"); len(got) != 1 {
+				t.Fatalf("programs use %d prototypes, want 1", len(got))
+			}
+			checkMapsDatasec(t, out, symbolValues(t, path))
+		})
 	}
-	// link_b.bpf.o reuses shared_counts and LICENSE from link_a.bpf.o, and
-	// the four input DATASECs become two.
-	if got, want := len(out.Types)-1, inputTypes-4; got != want {
-		t.Fatalf("type count = %d, want %d", got, want)
-	}
+}
 
-	values := symbolValues(t, path)
-	maps := out.Find(".maps", btf.KindDatasec)
+// duplicateTypes describes every type that has the same encoding as an
+// earlier one. After dedup a linked object of C types has none.
+func duplicateTypes(t *testing.T, spec *btf.Spec) []string {
+	t.Helper()
+
+	seen := make(map[string]uint32)
+	var dups []string
+	for i := 1; i < len(spec.Types); i++ {
+		key := string(btf.AppendType(nil, &spec.Types[i], binary.LittleEndian))
+		if first, ok := seen[key]; ok {
+			dups = append(dups, fmt.Sprintf("%d duplicates %d (%v %q)", i, first, spec.Types[i].Kind, spec.Types[i].Name))
+			continue
+		}
+		seen[key] = uint32(i)
+	}
+	return dups
+}
+
+// sharedTypes returns the set of types that the named types of kind refer to.
+func sharedTypes(t *testing.T, spec *btf.Spec, kind btf.Kind, names ...string) map[uint32]bool {
+	t.Helper()
+
+	ids := make(map[uint32]bool)
+	for _, name := range names {
+		ty := spec.Find(name, kind)
+		if ty == nil {
+			t.Fatalf("no %v %s", kind, name)
+		}
+		ids[ty.SizeOrType] = true
+	}
+	return ids
+}
+
+// checkMapsDatasec checks that the .maps DATASEC lists counts_a,
+// shared_counts and counts_b, each at its symbol value with the 32-byte map
+// definition size.
+func checkMapsDatasec(t *testing.T, spec *btf.Spec, values map[string]uint64) {
+	t.Helper()
+
+	maps := spec.Find(".maps", btf.KindDatasec)
 	if maps == nil {
 		t.Fatal("no .maps DATASEC")
 	}
 	var names []string
 	for _, v := range maps.DataSec {
-		vt, err := out.TypeByID(v.Type)
+		vt, err := spec.TypeByID(v.Type)
 		if err != nil {
 			t.Fatalf("DATASEC variable: %v", err)
 		}
@@ -96,7 +145,8 @@ func TestBpfLinkerMergeBTF(t *testing.T) {
 			t.Fatalf("%s at %d size %d, want %d size 32", vt.Name, v.Offset, v.Size, values[vt.Name])
 		}
 	}
-	if want := []string{"counts_a", "shared_counts", "counts_b"}; !reflect.DeepEqual(names, want) {
+	slices.Sort(names)
+	if want := []string{"counts_a", "counts_b", "shared_counts"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf(".maps variables = %v, want %v", names, want)
 	}
 }

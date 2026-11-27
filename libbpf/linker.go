@@ -32,7 +32,9 @@ type BpfLinkerFileOpts struct{}
 // resolved by name: a strong definition replaces a weak one, two strong
 // definitions are an error, and the first of several weak definitions wins.
 // Local symbols are kept. The input BTF type tables are concatenated with
-// their type IDs remapped; identical types are not deduplicated.
+// their type IDs remapped, and the output BTF is deduplicated: identical
+// types from different objects become one, forward declarations resolve to
+// their definitions, and the .BTF.ext records follow the new type IDs.
 //
 // Extern symbols, and the .kconfig and .ksyms sections that hold them, are
 // not resolved yet: an object with an extern is rejected with EOPNOTSUPP.

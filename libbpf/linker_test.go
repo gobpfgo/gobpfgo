@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -52,9 +51,9 @@ type linkerFixtureProgram struct {
 	Section string `json:"section"`
 }
 
-// linkerFixtureSection is one section. Data is the hex contents of a code or
-// data section; the BTF sections have none. Relocations are the entries of a
-// relocation section, with each symbol named the way readelf names it.
+// linkerFixtureSection is one section. Data is the hex contents of a code,
+// data or BTF section. Relocations are the entries of a relocation section,
+// with each symbol named the way readelf names it.
 type linkerFixtureSection struct {
 	Name        string               `json:"name"`
 	Type        uint32               `json:"type"`
@@ -140,9 +139,9 @@ func TestBpfLinkerKprobe(t *testing.T) {
 }
 
 // compareLinked opens the linked object at path and compares it with the
-// oracle fixture. The sections named in sizeExempt may differ in size from
-// libbpf's, and only in size.
-func compareLinked(t *testing.T, want linkerFixture, path string, sizeExempt ...string) {
+// oracle fixture: object name, maps, programs, symbols and every section,
+// including the .BTF and .BTF.ext bytes.
+func compareLinked(t *testing.T, want linkerFixture, path string) {
 	t.Helper()
 
 	obj, err := BpfObjectOpenFile(path, nil)
@@ -165,24 +164,19 @@ func compareLinked(t *testing.T, want linkerFixture, path string, sizeExempt ...
 	if got := linkedSymbols(t, f); !reflect.DeepEqual(got, want.Symbols) {
 		t.Fatalf("symbols = %+v\nwant %+v", got, want.Symbols)
 	}
-	compareSections(t, linkedSections(t, f), want.Sections, sizeExempt)
+	compareSections(t, linkedSections(t, f), want.Sections)
 }
 
-// compareSections compares two sorted section lists, ignoring the size of the
-// sections named in sizeExempt.
-func compareSections(t *testing.T, got, want []linkerFixtureSection, sizeExempt []string) {
+// compareSections compares two sorted section lists.
+func compareSections(t *testing.T, got, want []linkerFixtureSection) {
 	t.Helper()
 
 	if len(got) != len(want) {
 		t.Fatalf("sections = %+v\nwant %+v", got, want)
 	}
 	for i := range got {
-		g, w := got[i], want[i]
-		if slices.Contains(sizeExempt, w.Name) {
-			g.Size = w.Size
-		}
-		if !reflect.DeepEqual(g, w) {
-			t.Fatalf("section %s = %+v\nwant %+v", w.Name, got[i], w)
+		if !reflect.DeepEqual(got[i], want[i]) {
+			t.Fatalf("section %s = %+v\nwant %+v", want[i].Name, got[i], want[i])
 		}
 	}
 }
@@ -240,7 +234,7 @@ func linkedSections(t *testing.T, f *elf.File) []linkerFixtureSection {
 			Align: s.Addralign,
 		}
 		switch {
-		case s.Type == elf.SHT_PROGBITS && s.Name != ".BTF" && s.Name != ".BTF.ext":
+		case s.Type == elf.SHT_PROGBITS:
 			sec.Data = hex.EncodeToString(sectionData(t, s))
 		case s.Type == elf.SHT_REL:
 			sec.Relocations = linkedRelocations(t, f, s, syms)
@@ -360,8 +354,9 @@ func TestBpfLinkerBTF(t *testing.T) {
 
 	in := parseFileBTF(t, linkerInputPath)
 	out := parseFileBTF(t, path)
-	if out.Header.HdrLen != btfHdrLen {
-		t.Fatalf("header length = %d, want %d", out.Header.HdrLen, btfHdrLen)
+	// libbpf writes the 32-byte header that ends with the layout fields.
+	if out.Header.HdrLen != 32 {
+		t.Fatalf("header length = %d, want 32", out.Header.HdrLen)
 	}
 	if len(out.Types) != len(in.Types) {
 		t.Fatalf("type count = %d, want %d", len(out.Types), len(in.Types))

@@ -3,7 +3,7 @@
 // libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
 // libbpf-source: src/libbpf.c
-// libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind, btf_fixup_datasec
+// libbpf-symbols: btf__parse, btf__type_by_id, btf__find_by_name_kind, btf_fixup_datasec, btf__new_empty, btf_ensure_modifiable, btf_get_raw_data
 
 // Package btf parses the BTF wire format used by BPF ELF objects.
 //
@@ -17,7 +17,9 @@
 // re-parsing.
 //
 // Parse keeps a private copy of the blob. FixupDatasecSizes patches the
-// DATASEC sizes to the ELF section sizes before BPF_BTF_LOAD.
+// DATASEC sizes to the ELF section sizes before BPF_BTF_LOAD. Dedup merges
+// duplicate types and rebuilds the blob; NewSpec wraps types built by a
+// caller, such as a linker, so they can be deduplicated and encoded.
 package btf
 
 import (
@@ -65,6 +67,101 @@ type Spec struct {
 
 	raw       []byte
 	typeStart int
+
+	// stringsDeduped is set when every string in Strings is unique, so
+	// Dedup keeps the string table.
+	stringsDeduped bool
+
+	// mergedSplit is set by MergeSplit: the base and module type names come
+	// from two string tables, so the spec cannot be deduplicated.
+	mergedSplit bool
+}
+
+// Header lengths: the fields up to the string section, and the full header
+// with the layout section fields, which NewSpec writes.
+const (
+	minHdrLen   = 24
+	builtHdrLen = 32
+)
+
+// NewSpec returns a spec of types and strings built by the caller rather than
+// parsed, such as a linker's output. types[0] is the void placeholder, every
+// type ID refers to an entry of types and every name offset to a string in
+// strings, whose first byte is the empty string. Each string must appear
+// once in strings: Dedup then keeps the table as it is.
+//
+// The spec keeps copies of the types and the strings; Raw returns the blob
+// with a 32-byte header and no layout section. An order that cannot append,
+// unlike the standard byte orders, is an error.
+func NewSpec(order binary.ByteOrder, types []Type, strings []byte) (*Spec, error) {
+	s := &Spec{
+		Header:         Header{Magic: 0xeb9f, Version: 1, HdrLen: builtHdrLen},
+		ByteOrder:      order,
+		Types:          make([]Type, len(types)),
+		Strings:        append([]byte(nil), strings...),
+		stringsDeduped: true,
+	}
+	for i := range types {
+		s.Types[i] = types[i].Clone()
+	}
+	if len(s.Types) == 0 {
+		s.Types = []Type{{Kind: KindVoid}}
+	}
+	if len(s.Strings) == 0 {
+		s.Strings = []byte{0}
+	}
+	if err := s.encode(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// encode rebuilds the raw blob from the header, the types and the strings:
+// the types right after the header and the strings right after the types.
+// It refreshes each type's ID, info and offset and the header lengths, so the
+// Set methods patch the new blob. Header bytes past the string section fields
+// are kept from the old blob.
+func (s *Spec) encode() error {
+	order, ok := s.ByteOrder.(binary.AppendByteOrder)
+	if !ok {
+		return fmt.Errorf("btf: byte order %v cannot encode", s.ByteOrder)
+	}
+
+	var types []byte
+	for i := 1; i < len(s.Types); i++ {
+		t := &s.Types[i]
+		t.ID = uint32(i)
+		t.Info = infoWord(t)
+		t.Vlen = vlenOf(t)
+		t.rawOff = uint32(len(types))
+		types = AppendType(types, t, order)
+	}
+
+	hdrLen := max(int(s.Header.HdrLen), minHdrLen)
+	raw := make([]byte, hdrLen, hdrLen+len(types)+len(s.Strings))
+	if len(s.raw) >= hdrLen {
+		copy(raw[minHdrLen:], s.raw[minHdrLen:hdrLen])
+	}
+	s.Header.HdrLen = uint32(hdrLen)
+	s.Header.TypeOff = 0
+	s.Header.TypeLen = uint32(len(types))
+	s.Header.StrOff = uint32(len(types))
+	s.Header.StrLen = uint32(len(s.Strings))
+
+	h, put := s.Header, s.ByteOrder
+	put.PutUint16(raw[0:], h.Magic)
+	raw[2], raw[3] = h.Version, h.Flags
+	put.PutUint32(raw[4:], h.HdrLen)
+	put.PutUint32(raw[8:], h.TypeOff)
+	put.PutUint32(raw[12:], h.TypeLen)
+	put.PutUint32(raw[16:], h.StrOff)
+	put.PutUint32(raw[20:], h.StrLen)
+
+	raw = append(append(raw, types...), s.Strings...)
+	s.raw = raw
+	s.typeStart = hdrLen
+	s.Strings = raw[hdrLen+len(types):]
+	return nil
 }
 
 // Parse validates and decodes a BTF blob. order is the byte order of the ELF
@@ -110,12 +207,13 @@ func Parse(data []byte, order binary.ByteOrder) (*Spec, error) {
 	}
 
 	s := &Spec{
-		Header:    hdr,
-		ByteOrder: order,
-		Strings:   data[int(strStart):int(strEnd)],
-		Types:     []Type{{Kind: KindVoid}},
-		raw:       data,
-		typeStart: int(typeStart),
+		Header:         hdr,
+		ByteOrder:      order,
+		Strings:        data[int(strStart):int(strEnd)],
+		Types:          []Type{{Kind: KindVoid}},
+		raw:            data,
+		typeStart:      int(typeStart),
+		stringsDeduped: hdr.StrLen <= 1,
 	}
 
 	typeData := data[int(typeStart):int(typeEnd)]

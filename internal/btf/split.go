@@ -12,7 +12,7 @@ import "fmt"
 // The module type IDs start after the base types and the module's references
 // already use those split IDs. The merged spec keeps the module string table;
 // the type names are already resolved, so target matching never needs to
-// resolve a base string through it.
+// resolve a base string through it. Dedup rejects the merged spec.
 func MergeSplit(base, module *Spec) (*Spec, error) {
 	if base == nil || module == nil {
 		return nil, fmt.Errorf("btf: nil split BTF")
@@ -30,8 +30,9 @@ func MergeSplit(base, module *Spec) (*Spec, error) {
 	}
 
 	return &Spec{
-		ByteOrder: base.ByteOrder,
-		Types:     types,
-		Strings:   module.Strings,
+		ByteOrder:   base.ByteOrder,
+		Types:       types,
+		Strings:     module.Strings,
+		mergedSplit: true,
 	}, nil
 }
