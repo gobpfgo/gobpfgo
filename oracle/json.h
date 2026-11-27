@@ -30,6 +30,7 @@ void json_bool(struct json *j, const char *key, bool value);
 void json_u32(struct json *j, const char *key, uint32_t value);
 void json_s32(struct json *j, const char *key, int32_t value);
 void json_u64(struct json *j, const char *key, uint64_t value);
+void json_s64(struct json *j, const char *key, int64_t value);
 void json_hex(struct json *j, const char *key, const uint8_t *data, size_t len);
 
 #endif

@@ -7,13 +7,13 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c linfo.c zip.c
-ORACLE_HDRS := json.h oracle.h
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c linfo.c zip.c usdt.c usdt_notes.c
+ORACLE_HDRS := json.h oracle.h usdt_notes.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
 LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 
-.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture clean
+.PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture usdt-fixture clean
 
 all: $(ORACLE)
 
@@ -26,6 +26,7 @@ $(LIBBPF_A): | $(BUILD)
 
 $(ORACLE): $(ORACLE_SRCS) $(ORACLE_HDRS) $(LIBBPF_A)
 	$(CC) $(CPPFLAGS) -I$(LIBBPF_SRC) -I$(BUILD)/libbpf/include/uapi \
+		-I$(BUILD)/libbpf/include \
 		$(CFLAGS) -o $@ $(ORACLE_SRCS) $(LIBBPF_A) \
 		$(shell pkg-config --libs libelf zlib)
 
@@ -71,6 +72,12 @@ linker-fixture: $(ORACLE)
 	$(ORACLE) linker ../testdata/progs/link_a.bpf.o ../testdata/progs/link_b.bpf.o > ../testdata/oracle/linker-merge.json
 	$(ORACLE) linker ../testdata/progs/link_b.bpf.o ../testdata/progs/link_a.bpf.o > ../testdata/oracle/linker-merge-reverse.json
 	$(ORACLE) linker ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/linker-text.json
+
+# The USDT target is a host program, built by testdata/progs; this target
+# does not rebuild it. The scenario needs an x86-64 host and no privileges.
+usdt-fixture: $(ORACLE)
+	mkdir -p ../testdata/oracle
+	$(ORACLE) usdt ../testdata/progs/usdt_target > ../testdata/oracle/usdt.json
 
 clean:
 	rm -rf $(BUILD)

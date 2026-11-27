@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-only
 
 CLANG ?= clang
+CC ?= cc
 LIBBPF ?= ../../../libbpf
 
 # Keep the debug info independent of the checkout path, so the checked-in
@@ -15,6 +16,11 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	raw_tp.bpf.o cookie.bpf.o kprobe_multi.bpf.o lsm.bpf.o dump.bpf.o \
 	ringbuf.bpf.o perfbuf.bpf.o link_a.bpf.o link_b.bpf.o \
 	link_text_a.bpf.o link_text_b.bpf.o
+
+# A host program with SystemTap SDT probes for the USDT parser. It is built
+# with the host compiler, kept unstripped so .note.stapsdt and the symbols
+# stay, and is not part of all.
+USDT_TARGET := usdt_target
 
 .PHONY: all clean
 
@@ -32,5 +38,8 @@ core_target.bpf.o: core_target.c
 		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
 		-c $< -o $@
 
+$(USDT_TARGET): usdt_target.c
+	$(CC) -O2 -Wall -Wextra -Werror -o $@ $<
+
 clean:
-	rm -f $(BPF_OBJS)
+	rm -f $(BPF_OBJS) $(USDT_TARGET)
