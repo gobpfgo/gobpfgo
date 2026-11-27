@@ -42,6 +42,7 @@ int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
 int oracle_linfo(void);
 int oracle_zip(void);
+int oracle_usdt(const char *path);
 
 void oracle_meta(struct json *j, const struct oracle_meta *meta);
 void oracle_field_block(struct json *j, const char *name, const struct oracle_field *fields, size_t count, size_t size);

@@ -149,6 +149,11 @@ void json_u64(struct json *j, const char *key, uint64_t value) {
 	fprintf(j->out, "%llu", (unsigned long long)value);
 }
 
+void json_s64(struct json *j, const char *key, int64_t value) {
+	json_begin(j, key);
+	fprintf(j->out, "%lld", (long long)value);
+}
+
 void json_hex(struct json *j, const char *key, const uint8_t *data, size_t len) {
 	size_t i;
 
