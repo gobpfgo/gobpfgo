@@ -365,7 +365,7 @@ func relocatedProgram(t *testing.T, obj *BpfObject, name string) *progCode {
 			m.fd = -1
 		}
 	})
-	codes, err := relocateObject(obj, nil, nil, argCtxTagSupported)
+	codes, err := relocateObject(obj, nil, nil, argCtxTagSupported, declTagSupported)
 	if err != nil {
 		t.Fatalf("relocateObject: %v", err)
 	}
