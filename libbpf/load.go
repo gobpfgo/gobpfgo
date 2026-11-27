@@ -10,6 +10,7 @@ package libbpf
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -385,21 +386,17 @@ func clearMapBTF(attr *sys.MapCreateAttr, m *BpfMap) {
 // .kconfig map so user space cannot change it. A per-CPU data map gets the
 // initial value on every possible CPU and stays writable.
 func populateInternalMap(m *BpfMap) error {
-	value := m.initialValue
-	if m.libbpfType == libbpfMapPercpu {
-		numCPU := libbpfNumPossibleCPUs()
-		if numCPU < 0 {
-			return &Error{
-				Op:    "libbpf_num_possible_cpus",
-				Errno: unix.Errno(-numCPU),
-				Log:   fmt.Sprintf("map '%s': failed to set initial contents", BpfMapName(m)),
-			}
-		}
-		value = percpuInitialValue(m.initialValue, numCPU)
-	}
-
 	key := make([]byte, internalMapKeySize)
-	if err := sys.MapUpdateElem(m.fd, key, value, 0); err != nil {
+
+	var err error
+	if m.libbpfType == libbpfMapPercpu {
+		err = updatePercpuMap(func(value []byte, flags uint64) error {
+			return sys.MapUpdateElem(m.fd, key, value, flags)
+		}, m.initialValue, libbpfNumPossibleCPUs())
+	} else {
+		err = sys.MapUpdateElem(m.fd, key, m.initialValue, 0)
+	}
+	if err != nil {
 		return &Error{
 			Op:    "bpf_map_update_elem",
 			Errno: errnoFromError(err),
@@ -419,11 +416,25 @@ func populateInternalMap(m *BpfMap) error {
 	return nil
 }
 
+// updatePercpuMap sets every possible CPU of a per-CPU map to image with
+// update. A kernel that takes BPF_F_ALL_CPUS gets the single value; a kernel
+// that rejects the flag with EINVAL gets one padded copy per CPU with flags 0.
+func updatePercpuMap(update func(value []byte, flags uint64) error, image []byte, numCPU int) error {
+	if err := update(image, BPF_F_ALL_CPUS); err == nil {
+		return nil
+	} else if !errors.Is(err, unix.EINVAL) {
+		return err
+	}
+	if numCPU < 0 {
+		return unix.Errno(-numCPU)
+	}
+	return update(percpuInitialValue(image, numCPU), 0)
+}
+
 // percpuInitialValue returns the element value that sets every one of numCPU
 // possible CPUs of a per-CPU map to image: one copy of image per CPU, each
-// zero-padded to the kernel's 8-byte stride. A plain update with this buffer
-// works on every kernel, unlike a single value with BPF_F_ALL_CPUS, which
-// older kernels reject.
+// zero-padded to the kernel's 8-byte stride. It is the fallback for a kernel
+// that rejects BPF_F_ALL_CPUS.
 func percpuInitialValue(image []byte, numCPU int) []byte {
 	stride := roundup(len(image), 8)
 	value := make([]byte, percpuValueSize(uint32(len(image)), numCPU))
