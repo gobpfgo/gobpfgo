@@ -10,10 +10,14 @@ import "github.com/gobpfgo/gobpfgo/internal/elf"
 // BpfProgram is a program parsed from an object. It carries the section, type,
 // attach type and instruction bytes; the load step adds the kernel descriptor.
 type BpfProgram struct {
+	// obj is the object the program belongs to. USDT attachment keeps its
+	// spec ID state there.
+	obj                *BpfObject
 	name               string
 	progType           BpfProgType
 	expectedAttachType BpfAttachType
 	progFlags          uint32
+	usdt               bool
 	sectionName        string
 	attachBTF          bool
 	attachTarget       string
@@ -47,7 +51,9 @@ func BpfProgramTypeOf(p *BpfProgram) BpfProgType {
 }
 
 // BpfProgramExpectedAttachType returns the expected attach type from the SEC
-// table, or BPF_ATTACH_TYPE_UNSPEC when the section does not need one.
+// table, or BPF_ATTACH_TYPE_UNSPEC when the section does not need one. A USDT
+// program loaded on a kernel with uprobe multi links reports
+// BPF_TRACE_UPROBE_MULTI after the load.
 func BpfProgramExpectedAttachType(p *BpfProgram) BpfAttachType {
 	if p == nil {
 		return 0

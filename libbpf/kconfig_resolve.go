@@ -54,10 +54,10 @@ func resolveError(errno syscall.Errno, format string, args ...any) error {
 // created, writing the .kconfig values into the .kconfig map's initial value.
 //
 // The LINUX_ externs are virtual. LINUX_KERNEL_VERSION is the running
-// kernel's KERNEL_VERSION code; LINUX_HAS_BPF_COOKIE and
-// LINUX_HAS_SYSCALL_WRAPPER are zero because the feature probes behind them
-// are not ported; any other weak LINUX_ extern is zero, and a strong one is
-// EINVAL. The CONFIG_ externs come from obj.kconfig first and then, while any
+// kernel's KERNEL_VERSION code; LINUX_HAS_BPF_COOKIE is 1 when the kernel
+// lets a program read a BPF cookie and 0 otherwise; LINUX_HAS_SYSCALL_WRAPPER
+// is zero because its feature probe is not ported; any other weak LINUX_
+// extern is zero, and a strong one is EINVAL. The CONFIG_ externs come from obj.kconfig first and then, while any
 // .kconfig extern is unset, from the system config; a parse error, or a
 // missing system config when it is needed, is EINVAL. A strong extern left
 // unset is ESRCH; a weak one stays zero. A .ksyms extern returns EOPNOTSUPP.
@@ -124,7 +124,12 @@ func virtualKcfgValue(ext *externDesc) (uint64, error) {
 			return 0, resolveError(unix.EINVAL, "extern (kcfg) '%s': failed to get kernel version", ext.name)
 		}
 		return uint64(version), nil
-	case "LINUX_HAS_BPF_COOKIE", "LINUX_HAS_SYSCALL_WRAPPER":
+	case "LINUX_HAS_BPF_COOKIE":
+		if featBpfCookie.supported() {
+			return 1, nil
+		}
+		return 0, nil
+	case "LINUX_HAS_SYSCALL_WRAPPER":
 		return 0, nil
 	}
 	if !strings.HasPrefix(ext.name, linuxPrefix) || !ext.isWeak {

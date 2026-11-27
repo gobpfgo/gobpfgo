@@ -16,12 +16,17 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	raw_tp.bpf.o cookie.bpf.o kprobe_multi.bpf.o lsm.bpf.o dump.bpf.o \
 	ringbuf.bpf.o perfbuf.bpf.o link_a.bpf.o link_b.bpf.o \
 	link_text_a.bpf.o link_text_b.bpf.o global_data.bpf.o \
-	kconfig.bpf.o kconfig_types.bpf.o
+	kconfig.bpf.o kconfig_types.bpf.o usdt_attach.bpf.o
 
 # A host program with SystemTap SDT probes for the USDT parser. It is built
 # with the host compiler, kept unstripped so .note.stapsdt and the symbols
 # stay, and is not part of all.
 USDT_TARGET := usdt_target
+
+# The USDT attach target runs in the tests, on every kernel tier. It is an
+# x86-64 static PIE without a C library, so it does not depend on the host's
+# C library version and still loads at a random base. It is not part of all.
+USDT_LOOP_TARGET := usdt_loop_target
 
 .PHONY: all clean
 
@@ -42,5 +47,9 @@ core_target.bpf.o: core_target.c
 $(USDT_TARGET): usdt_target.c
 	$(CC) -O2 -Wall -Wextra -Werror -o $@ $<
 
+$(USDT_LOOP_TARGET): usdt_loop_target.c
+	$(CC) -O2 -Wall -Wextra -Werror -fno-stack-protector -nostdlib \
+		-static-pie -o $@ $<
+
 clean:
-	rm -f $(BPF_OBJS) $(USDT_TARGET)
+	rm -f $(BPF_OBJS) $(USDT_TARGET) $(USDT_LOOP_TARGET)
