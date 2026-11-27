@@ -639,19 +639,21 @@ func TestBtfDeclTagProbeBTF(t *testing.T) {
 	}
 }
 
-// declTagSupported and declTagMissing stand in for the decl tag feature
-// probe.
-func declTagSupported() bool { return true }
-func declTagMissing() bool   { return false }
+// allBTFFeatures stands in for a kernel whose BTF feature probes all
+// succeed; withoutDeclTag for one that lacks only BTF_KIND_DECL_TAG.
+var (
+	allBTFFeatures = btf.KernelFeatures{DeclTag: true, TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true}
+	withoutDeclTag = btf.KernelFeatures{TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true}
+)
 
 // TestSanitizeBTF builds the BTF that the load passes to the kernel for
 // subprog_arg_ctx.bpf.o after both load fixups, the arg:ctx clones and the
-// static linkage of the subprogram marked hidden. A kernel with decl tags
-// gets the object BTF itself. Without them it gets a copy in which the
-// compiled tag and each program's copy of it are one-byte INTs under the
-// same IDs and names. Every other type, which carries the open-time DATASEC
-// fixups and both load fixups, and the string table are the object BTF's.
-// The object BTF keeps its decl tags and its bytes.
+// static linkage of the subprogram marked hidden. A kernel with every BTF
+// feature gets the object BTF itself. Without decl tags it gets a copy in
+// which the compiled tag and each program's copy of it are one-byte INTs
+// under the same IDs and names. Every other type, which carries the
+// open-time DATASEC fixups and both load fixups, and the string table are
+// the object BTF's. The object BTF keeps its decl tags and its bytes.
 func TestSanitizeBTF(t *testing.T) {
 	obj := openSubprogObject(t, "subprog_arg_ctx.bpf.o")
 	findFunction(t, obj, "subprog_arg_ctx").markBtfStatic = true
@@ -663,11 +665,11 @@ func TestSanitizeBTF(t *testing.T) {
 	}
 	fixed := bytes.Clone(obj.btf.Raw())
 
-	native, err := sanitizeBTF(obj.btf, declTagSupported)
+	native, err := sanitizeBTF(obj.btf, allBTFFeatures)
 	if err != nil || !bytes.Equal(native, fixed) {
-		t.Fatalf("BTF for a kernel with decl tags: %d bytes, error %v; want the object BTF", len(native), err)
+		t.Fatalf("BTF for a kernel with every BTF feature: %d bytes, error %v; want the object BTF", len(native), err)
 	}
-	raw, err := sanitizeBTF(obj.btf, declTagMissing)
+	raw, err := sanitizeBTF(obj.btf, withoutDeclTag)
 	if err != nil {
 		t.Fatalf("sanitize: %v", err)
 	}

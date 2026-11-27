@@ -186,21 +186,30 @@ func validateTypeID(id uint32) error {
 // that starts after a NUL and equals str is reused; otherwise str is appended
 // with its NUL.
 func (s *Spec) addString(str string) uint32 {
-	for off := 0; off < len(s.Strings); {
-		end := bytes.IndexByte(s.Strings[off:], 0)
-		if end < 0 {
-			break
-		}
-		if string(s.Strings[off:off+end]) == str {
-			return uint32(off)
-		}
-		off += end + 1
+	if off, ok := findString(s.Strings, str); ok {
+		return off
 	}
 	off := uint32(len(s.Strings))
 	strs := make([]byte, 0, len(s.Strings)+len(str)+1)
 	strs = append(append(append(strs, s.Strings...), str...), 0)
 	s.Strings = strs
 	return off
+}
+
+// findString returns the offset of the first string of the table strs, at
+// its start or right after a NUL, that equals str, and whether there is one.
+func findString(strs []byte, str string) (uint32, bool) {
+	for off := 0; off < len(strs); {
+		end := bytes.IndexByte(strs[off:], 0)
+		if end < 0 {
+			break
+		}
+		if string(strs[off:off+end]) == str {
+			return uint32(off), true
+		}
+		off += end + 1
+	}
+	return 0, false
 }
 
 // SetVarType writes typeID into the type field of the VAR type id, in both

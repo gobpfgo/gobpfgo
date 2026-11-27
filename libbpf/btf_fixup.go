@@ -100,18 +100,25 @@ func markBtfStatic(obj *BpfObject) error {
 	return nil
 }
 
+// btfNeedsSanitization reports whether the kernel with the BTF features
+// kern lacks one that the load's BTF sanitizer rewrites.
+func btfNeedsSanitization(kern btf.KernelFeatures) bool {
+	return !kern.DeclTag || !kern.TypeTag || !kern.Enum64 || !kern.QmarkDatasec || !kern.Float
+}
+
 // sanitizeBTF returns the BTF blob that the load passes to BPF_BTF_LOAD.
-// When declTag reports that the kernel does not support BTF_KIND_DECL_TAG,
-// it is a copy of spec's blob in which every decl tag is a one-byte INT, so
-// every type ID stays valid; otherwise it is spec's blob itself. Either way
-// the blob carries the fixups already applied to spec, and spec keeps its
-// decl tags: BpfObjectBTF returns the object BTF unsanitized, and the
-// descriptor of the loaded blob is the object's BTF descriptor.
-func sanitizeBTF(spec *btf.Spec, declTag func() bool) ([]byte, error) {
-	if declTag() {
+// When kern lacks a feature that btfNeedsSanitization checks, it is a copy
+// of spec's blob with the types and names that need the feature rewritten,
+// as btf.Spec.Sanitize describes, in which every type keeps its ID;
+// otherwise it is spec's blob itself. Either way the blob carries the
+// fixups already applied to spec, and spec keeps its original types:
+// BpfObjectBTF returns the object BTF unsanitized, and the descriptor of
+// the loaded blob is the object's BTF descriptor.
+func sanitizeBTF(spec *btf.Spec, kern btf.KernelFeatures) ([]byte, error) {
+	if !btfNeedsSanitization(kern) {
 		return spec.Raw(), nil
 	}
-	return spec.SanitizeDeclTags()
+	return spec.Sanitize(kern)
 }
 
 // argCtxFixup is the state of fixupFuncInfo for one main program: its

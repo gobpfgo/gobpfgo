@@ -139,7 +139,7 @@ func BpfObjectLoad(obj *BpfObject) error {
 	if err := markBtfStatic(obj); err != nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: err.Error()}
 	}
-	kernBTF, err := sanitizeBTF(obj.btf, featBtfDeclTag.supported)
+	kernBTF, err := sanitizeBTF(obj.btf, kernelBTFFeatures())
 	if err != nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: err.Error()}
 	}
