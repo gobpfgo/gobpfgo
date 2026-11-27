@@ -321,6 +321,7 @@ func runUprobeModeCase(t *testing.T, c uprobeModeCase) {
 	offset := uprobeTargetOffset(t)
 	events, fds := probeEvents(t, uprobeEventsFile), openDescriptors(t)
 
+	seq := attachSeq.Load()
 	link, err := BpfProgramAttachUprobeOpts(prog, 0, "/proc/self/exe", offset, opts)
 	if c.want != 0 {
 		if link != nil || !errors.Is(err, c.want) {
@@ -335,6 +336,7 @@ func runUprobeModeCase(t *testing.T, c uprobeModeCase) {
 	}
 	_, pmuErr := determineUprobePerfType()
 	checkProbeModeLink(t, link, c.mode, pmuErr != nil)
+	checkLegacyEventName(t, link, fmt.Sprintf("libbpf_%d_%d__exe_0x%x", os.Getpid(), seq, offset))
 	if link.legacy != nil {
 		line := fmt.Sprintf("p:%s/%s /proc/self/exe:0x%016x", link.legacy.group(), link.legacy.name, offset)
 		if got := probeEvents(t, uprobeEventsFile); !strings.Contains(got, line) {
@@ -392,6 +394,16 @@ func checkProbeModeLink(t *testing.T, link *BpfLink, mode ProbeAttachMode, noPMU
 	}
 }
 
+// checkLegacyEventName requires the tracefs event of a link that has one to
+// be called name, the name libbpf gives it.
+func checkLegacyEventName(t *testing.T, link *BpfLink, name string) {
+	t.Helper()
+
+	if link.legacy != nil && link.legacy.name != name {
+		t.Errorf("tracefs event %q, want %q", link.legacy.name, name)
+	}
+}
+
 // checkProbeModeValue requires the map the program writes to hold cookie when
 // it reads the cookie, and a nonzero count otherwise.
 func checkProbeModeValue(t *testing.T, obj *BpfObject, mapName string, readsCookie bool, cookie uint64) {
@@ -417,11 +429,10 @@ const (
 func probeEvents(t *testing.T, file string) string {
 	t.Helper()
 
-	root, err := tracefsRoot()
-	if err != nil {
+	data, err := os.ReadFile(filepath.Join(tracefsRoot(), file))
+	if errors.Is(err, os.ErrNotExist) {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(root, file))
 	if err != nil {
 		t.Fatalf("read %s: %v", file, err)
 	}

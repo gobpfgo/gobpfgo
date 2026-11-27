@@ -7,6 +7,7 @@ package libbpf
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -66,11 +67,18 @@ func fakeTracefs(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-
-	saved := tracefsRoots
-	tracefsRoots = []string{root}
-	t.Cleanup(func() { tracefsRoots = saved })
+	setTracefsDirs(t, root, root)
 	return root
+}
+
+// setTracefsDirs points the debugfs tracing directory and the tracefs mount
+// tracefsRoot chooses from at debugfs and tracefs for the rest of the test.
+func setTracefsDirs(t *testing.T, debugfs, tracefs string) {
+	t.Helper()
+
+	savedDebugfs, savedTracefs := debugfsTracingDir, tracefsDir
+	debugfsTracingDir, tracefsDir = debugfs, tracefs
+	t.Cleanup(func() { debugfsTracingDir, tracefsDir = savedDebugfs, savedTracefs })
 }
 
 // TestUprobePerfEventAttr checks the attribute of a uprobe PMU event for a
@@ -243,7 +251,7 @@ func TestProbePMUFiles(t *testing.T) {
 
 // uprobeRoute is one attach of TestBpfProgramAttachUprobeRouting: the uprobe
 // PMU files the kernel has, the options, the expected error and the tracefs
-// commands the attach must leave, "" for none.
+// group the attach must add and remove an event in, "" for none.
 type uprobeRoute struct {
 	name   string
 	pmu    map[string]string
@@ -259,10 +267,11 @@ type uprobeRoute struct {
 // PMU attach stops at the missing retprobe bit or the 32-bit counter limit and
 // leaves tracefs alone. Without the PMU type the default mode takes tracefs,
 // the perf and link modes are EOPNOTSUPP and a reference counter is EINVAL.
-// A BPF cookie is not refused before the attach.
+// A BPF cookie is not refused before the attach. The tracefs event is named
+// as libbpf names it, after the binary's last path element with its slash.
 func TestBpfProgramAttachUprobeRouting(t *testing.T) {
 	events := filepath.Join(fakeTracefs(t), uprobeEventsFile)
-	const target = "/nonexistent/usdt_sema_target"
+	const target, label = "/nonexistent/usdt_sema_target", "_usdt_sema_target"
 	pmu := map[string]string{"type": "9\n"}
 
 	tests := []uprobeRoute{
@@ -290,6 +299,7 @@ func TestBpfProgramAttachUprobeRouting(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			seq := attachSeq.Load()
 			link, err := BpfProgramAttachUprobeOpts(fakeLoadedProgram(), -1, target, 0x1024, &tt.opts)
 			if link != nil {
 				BpfLinkDestroy(link)
@@ -298,29 +308,189 @@ func TestBpfProgramAttachUprobeRouting(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("attach error = %v, want %v", err, tt.want)
 			}
-			checkProbeEventCommands(t, string(readTestFile(t, events)), tt.events, target+":0x1024")
+			name := fmt.Sprintf("libbpf_%d_%d_%s_0x1024", os.Getpid(), seq, label)
+			checkProbeEventCommands(t, string(readTestFile(t, events)), tt.events, name, target+":0x1024")
+			checkProbeEventSeq(t, seq, tt.events != "")
 		})
 	}
 }
 
-// checkProbeEventCommands requires the tracefs commands to add an event to
-// group for location and remove it again, or, when group is "", to be empty.
-func checkProbeEventCommands(t *testing.T, commands, group, location string) {
+// checkProbeEventCommands requires the tracefs commands to be the ones libbpf
+// writes to add the event name to group for location and remove it again,
+// each without a newline, or, when group is "", to be empty.
+func checkProbeEventCommands(t *testing.T, commands, group, name, location string) {
 	t.Helper()
 
-	if group == "" {
-		if commands != "" {
-			t.Fatalf("probe events got %q, want nothing", commands)
+	want := ""
+	if group != "" {
+		prefix := "p"
+		if group == "kretprobes" || group == "uretprobes" {
+			prefix = "r"
 		}
-		return
+		want = fmt.Sprintf("%s:%s/%s %s", prefix, group, name, location) + fmt.Sprintf("-:%s/%s", group, name)
 	}
-	prefix := "p:"
-	if group == "kretprobes" || group == "uretprobes" {
-		prefix = "r:"
+	if commands != want {
+		t.Fatalf("probe events got %q, want %q", commands, want)
 	}
-	lines := strings.Split(strings.TrimSuffix(commands, "\n"), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], prefix+group+"/gobpfgo_") ||
-		!strings.HasSuffix(lines[0], " "+location) || !strings.HasPrefix(lines[1], "-:"+group+"/gobpfgo_") {
-		t.Fatalf("probe events got %q, want a %s event added and removed", commands, group)
+}
+
+// checkProbeEventSeq requires the event sequence to have moved on by one from
+// seq when the attach named a tracefs event, and to be seq otherwise: like
+// libbpf, an attach refused before it names an event takes no number.
+func checkProbeEventSeq(t *testing.T, seq int32, named bool) {
+	t.Helper()
+
+	want := seq
+	if named {
+		want++
+	}
+	if got := attachSeq.Load(); got != want {
+		t.Errorf("event sequence %d, want %d", got, want)
+	}
+}
+
+// TestLegacyEventName checks tracefs probe event names against the names
+// libbpf's gen_probe_legacy_event_name prints for the same pid, sequence,
+// name and offset: the libbpf prefix, the offset in hex, every byte other
+// than an ASCII letter or digit turned into '_', including the leading slash
+// of a uprobe's path element, and the cut at 63 bytes, which happens before
+// the bytes are replaced. The sequence prints as a C int.
+func TestLegacyEventName(t *testing.T) {
+	tests := []struct {
+		pid    int
+		seq    int32
+		name   string
+		offset uint64
+		want   string
+	}{
+		{4242, 0, "do_sys_openat2", 0, "libbpf_4242_0_do_sys_openat2_0x0"},
+		{4242, 1, "do_sys_openat2", 0x10, "libbpf_4242_1_do_sys_openat2_0x10"},
+		{1, 7, "/exe", 0x1a2b, "libbpf_1_7__exe_0x1a2b"},
+		{1, 7, "libc.so.6", 0x9f, "libbpf_1_7_libc_so_6_0x9f"},
+		{1, 7, "/libc.so.6", 0x9f, "libbpf_1_7__libc_so_6_0x9f"},
+		{1, 7, "tcp_v4_rcv.cold", 0, "libbpf_1_7_tcp_v4_rcv_cold_0x0"},
+		{1, 7, "f\xc3\xa9-x", 0, "libbpf_1_7_f___x_0x0"},
+		{1, -1, "f", 0, "libbpf_1__1_f_0x0"},
+		{1, math.MinInt32, "f", 0, "libbpf_1__2147483648_f_0x0"},
+		{4194304, math.MaxInt32, "f", math.MaxUint64, "libbpf_4194304_2147483647_f_0xffffffffffffffff"},
+		{1, 0, strings.Repeat("a", 60), 0, "libbpf_1_0_" + strings.Repeat("a", 52)},
+		{1, 0, strings.Repeat("a", 52) + ".b", 0, "libbpf_1_0_" + strings.Repeat("a", 52)},
+		{1, 0, strings.Repeat("a", 51) + ".b", 0, "libbpf_1_0_" + strings.Repeat("a", 51) + "_"},
+		{1, 0, strings.Repeat("a", 46), 0xfff, "libbpf_1_0_" + strings.Repeat("a", 46) + "_0xfff"},
+		{1, 0, strings.Repeat("a", 47), 0xfff, "libbpf_1_0_" + strings.Repeat("a", 47) + "_0xff"},
+	}
+	for _, tt := range tests {
+		got := legacyEventName(tt.pid, tt.seq, tt.name, tt.offset)
+		if got != tt.want {
+			t.Errorf("legacyEventName(%d, %d, %q, %#x) = %q, want %q", tt.pid, tt.seq, tt.name, tt.offset, got, tt.want)
+		}
+		if len(got) > maxEventNameLen-1 {
+			t.Errorf("legacyEventName(%d, %d, %q, %#x) has %d bytes", tt.pid, tt.seq, tt.name, tt.offset, len(got))
+		}
+	}
+}
+
+// TestUprobeEventLabel checks the part of a binary path a tracefs uprobe
+// event is named after: from the last slash on, or the whole path without
+// one, as libbpf's strrchr(binary_path, '/') ?: binary_path gives it.
+func TestUprobeEventLabel(t *testing.T) {
+	tests := []struct{ path, want string }{
+		{"/proc/self/exe", "/exe"},
+		{"/usr/lib/libc.so.6", "/libc.so.6"},
+		{"libc.so.6", "libc.so.6"},
+		{"lib/", "/"},
+		{"/", "/"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := uprobeEventLabel(tt.path); got != tt.want {
+			t.Errorf("uprobeEventLabel(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestTracefsRoot checks the tracefs directory choice of libbpf's
+// tracefs_path: the debugfs tracing directory whenever it exists, even
+// without probe control files, and the tracefs mount when it does not, even
+// if the tracefs mount is missing too.
+func TestTracefsRoot(t *testing.T) {
+	debugfs, tracefs := t.TempDir(), t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	setTracefsDirs(t, debugfs, tracefs)
+	if got := tracefsRoot(); got != debugfs {
+		t.Errorf("both present: %q, want the debugfs directory %q", got, debugfs)
+	}
+	setTracefsDirs(t, missing, tracefs)
+	if got := tracefsRoot(); got != tracefs {
+		t.Errorf("no debugfs directory: %q, want the tracefs mount %q", got, tracefs)
+	}
+	setTracefsDirs(t, missing, missing+"2")
+	if got := tracefsRoot(); got != missing+"2" {
+		t.Errorf("neither present: %q, want the tracefs mount %q", got, missing+"2")
+	}
+}
+
+// TestTracefsRootUnsearchable checks that a debugfs tracing directory the
+// effective IDs cannot reach counts as missing, as /sys/kernel/debug, mode
+// 0700, makes it for a user without root; root reaches any directory.
+func TestTracefsRootUnsearchable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root searches every directory")
+	}
+	locked := t.TempDir()
+	debugfs := filepath.Join(locked, "tracing")
+	if err := os.Mkdir(debugfs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	tracefs := t.TempDir()
+	setTracefsDirs(t, debugfs, tracefs)
+	if got := tracefsRoot(); got != tracefs {
+		t.Errorf("unsearchable debugfs: %q, want the tracefs mount %q", got, tracefs)
+	}
+}
+
+// TestAppendTracefs checks the tracefs writes of libbpf's append_to_file:
+// each command is written as given, without a newline, so two commands run
+// together in a plain file; a command of 1024 bytes or more is EINVAL and
+// never opens the file; and a missing file is the open error.
+func TestAppendTracefs(t *testing.T) {
+	root := fakeTracefs(t)
+	events := filepath.Join(root, kprobeEventsFile)
+
+	add := "p:kprobes/libbpf_1_0_f_0x0 f+0x0"
+	if err := appendTracefs(root, kprobeEventsFile, add); err != nil {
+		t.Fatalf("append %q: %v", add, err)
+	}
+	if err := appendTracefs(root, kprobeEventsFile, "-:kprobes/libbpf_1_0_f_0x0"); err != nil {
+		t.Fatalf("append remove: %v", err)
+	}
+	if got, want := string(readTestFile(t, events)), add+"-:kprobes/libbpf_1_0_f_0x0"; got != want {
+		t.Errorf("%s = %q, want %q", kprobeEventsFile, got, want)
+	}
+
+	if err := os.Truncate(events, 0); err != nil {
+		t.Fatal(err)
+	}
+	longest := strings.Repeat("x", maxTracefsCommandLen-1)
+	if err := appendTracefs(root, kprobeEventsFile, longest); err != nil {
+		t.Fatalf("append %d bytes: %v", len(longest), err)
+	}
+	if err := appendTracefs(root, kprobeEventsFile, longest+"x"); !errors.Is(err, unix.EINVAL) {
+		t.Errorf("append %d bytes = %v, want EINVAL", len(longest)+1, err)
+	}
+	if got := string(readTestFile(t, events)); got != longest {
+		t.Errorf("%s has %d bytes, want %d", kprobeEventsFile, len(got), len(longest))
+	}
+	if err := appendTracefs(filepath.Join(root, "missing"), kprobeEventsFile, add); !errors.Is(err, unix.ENOENT) {
+		t.Errorf("append to a missing file = %v, want ENOENT", err)
+	}
+	if err := appendTracefs(filepath.Join(root, "missing"), kprobeEventsFile, longest+"x"); !errors.Is(err, unix.EINVAL) {
+		t.Errorf("long append to a missing file = %v, want EINVAL", err)
 	}
 }

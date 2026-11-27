@@ -21,12 +21,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// attachCase is one case of the attach fixture. Mode is the attach mode
+// name of a kprobe or uprobe case and "default" for the other kinds; see
+// attachModes.
 type attachCase struct {
 	Kind        string `json:"kind"`
 	Object      string `json:"object"`
 	Program     string `json:"program"`
 	Category    string `json:"category"`
 	Target      string `json:"target"`
+	Mode        string `json:"mode"`
 	Retprobe    bool   `json:"retprobe"`
 	Cookie      bool   `json:"cookie"`
 	CookieValue uint64 `json:"cookie_value"`
@@ -36,6 +40,68 @@ type attachCase struct {
 
 type attachFixture struct {
 	Cases []attachCase `json:"cases"`
+}
+
+// attachModes maps the oracle's names of libbpf's probe attach modes to the
+// port's.
+var attachModes = map[string]ProbeAttachMode{
+	"default": ProbeAttachModeDefault,
+	"legacy":  ProbeAttachModeLegacy,
+	"perf":    ProbeAttachModePerf,
+	"link":    ProbeAttachModeLink,
+}
+
+// name returns the subtest name of the case: the kind, followed for a probe
+// case by a mode other than the default and by "cookie" when it reads a
+// cookie.
+func (c attachCase) name() string {
+	if !c.probe() {
+		return c.Kind
+	}
+	name := c.Kind
+	if c.Mode != "default" {
+		name += "_" + c.Mode
+	}
+	if c.Cookie {
+		name += "_cookie"
+	}
+	return name
+}
+
+// probe reports whether the case is a kprobe or uprobe, the kinds that take
+// an attach mode.
+func (c attachCase) probe() bool {
+	return c.kprobe() || c.uprobe()
+}
+
+func (c attachCase) kprobe() bool {
+	return c.Kind == "kprobe" || c.Kind == "kretprobe"
+}
+
+func (c attachCase) uprobe() bool {
+	return c.Kind == "uprobe" || c.Kind == "uretprobe"
+}
+
+// probeModeSkip returns why the running kernel cannot attach the probe case
+// in mode, or "" when it can. The default and legacy modes work on every
+// kernel; the perf mode needs the probe's perf PMU, and the link mode also
+// BPF perf links. A case that reads a cookie needs BPF cookies.
+func probeModeSkip(c attachCase, mode ProbeAttachMode) string {
+	determineType := determineKprobePerfType
+	if c.uprobe() {
+		determineType = determineUprobePerfType
+	}
+	_, pmuErr := determineType()
+
+	switch {
+	case (mode == ProbeAttachModePerf || mode == ProbeAttachModeLink) && pmuErr != nil:
+		return fmt.Sprintf("the %s mode needs the %s perf PMU: %v", c.Mode, c.Kind, pmuErr)
+	case mode == ProbeAttachModeLink && !perfLinkSupported():
+		return "the link mode needs BPF perf links, which this kernel does not support"
+	case c.Cookie && !featBpfCookie.supported():
+		return "BPF cookies are not supported by this kernel"
+	}
+	return ""
 }
 
 func loadAttachFixture(t *testing.T) attachFixture {
@@ -61,11 +127,19 @@ func TestPerfEventAttrSize(t *testing.T) {
 	}
 }
 
+// TestBpfProgramAttachTypes replays the attach fixture: every case libbpf
+// attached and fired, the port attaches, fires and detaches the same way. A
+// kprobe or uprobe case attaches in the case's mode, with the cookie when it
+// reads one; it is skipped only on a kernel without what its mode needs, see
+// probeModeSkip, and otherwise must attach. A probe case that reads a cookie
+// retypes cookie.bpf.o's tracepoint program as a kprobe program, as the
+// oracle does. A case without a known mode, as in a fixture older than the
+// mode field, fails once the load has shown the test can attach.
 func TestBpfProgramAttachTypes(t *testing.T) {
 	f := loadAttachFixture(t)
 
 	for _, c := range f.Cases {
-		t.Run(c.Kind, func(t *testing.T) {
+		t.Run(c.name(), func(t *testing.T) {
 			if !c.Supported {
 				t.Skip("libbpf reported the attach type as unsupported")
 			}
@@ -75,17 +149,32 @@ func TestBpfProgramAttachTypes(t *testing.T) {
 			if c.Kind == "cookie" && !perfLinkSupported() {
 				t.Skip("BPF cookies and perf links are not supported by this kernel")
 			}
+			mode, known := attachModes[c.Mode]
+			if known && c.probe() {
+				if reason := probeModeSkip(c, mode); reason != "" {
+					t.Skip(reason)
+				}
+			}
 
-			obj := loadTestObject(t, "../testdata/progs/"+c.Object)
+			var obj *BpfObject
+			var prog *BpfProgram
+			if c.Cookie && c.probe() {
+				obj, prog = loadKprobeRetypedObject(t, "../testdata/progs/"+c.Object, c.Program, BPF_ATTACH_TYPE_UNSPEC)
+			} else {
+				obj = loadTestObject(t, "../testdata/progs/"+c.Object)
+				prog = BpfObjectFindProgramByName(obj, c.Program)
+			}
 			defer BpfObjectClose(obj)
 
-			prog := BpfObjectFindProgramByName(obj, c.Program)
+			if !known || mode != ProbeAttachModeDefault && !c.probe() {
+				t.Fatalf("mode %q; regenerate the attach fixture", c.Mode)
+			}
 			if prog == nil {
 				t.Fatalf("program %q not found", c.Program)
 			}
-			link, err := attachCaseProgram(t, prog, c)
+			link, err := attachCaseProgram(t, prog, c, mode)
 			if err != nil {
-				if isAttachUnsupported(err) {
+				if !c.probe() && isAttachUnsupported(err) {
 					t.Skipf("attach type is not supported by this kernel: %v", err)
 				}
 				t.Fatalf("attach: %v", err)
@@ -371,17 +460,29 @@ func executableBase(t *testing.T) uint64 {
 	return 0
 }
 
-func attachCaseProgram(t *testing.T, prog *BpfProgram, c attachCase) (*BpfLink, error) {
+// attachCaseProgram attaches prog as case c, a kprobe or uprobe in mode and
+// with the case's cookie, if it reads one.
+func attachCaseProgram(t *testing.T, prog *BpfProgram, c attachCase, mode ProbeAttachMode) (*BpfLink, error) {
 	t.Helper()
 
+	var cookie uint64
+	if c.Cookie {
+		cookie = c.CookieValue
+	}
 	switch c.Kind {
 	case "kprobe", "kretprobe":
-		return BpfProgramAttachKprobe(prog, c.Retprobe, c.Target)
+		return BpfProgramAttachKprobeOpts(prog, c.Target, &BpfKprobeOpts{
+			BpfCookie:  cookie,
+			Retprobe:   c.Retprobe,
+			AttachMode: mode,
+		})
 	case "tracepoint":
 		return BpfProgramAttachTracepoint(prog, c.Category, c.Target)
 	case "uprobe", "uretprobe":
 		return BpfProgramAttachUprobeOpts(prog, 0, "/proc/self/exe", uprobeTargetOffset(t), &BpfUprobeOpts{
-			Retprobe: c.Retprobe,
+			BpfCookie:  cookie,
+			Retprobe:   c.Retprobe,
+			AttachMode: mode,
 		})
 	case "fentry", "fexit":
 		return BpfProgramAttachTrace(prog)
@@ -406,7 +507,7 @@ func attachCaseProgram(t *testing.T, prog *BpfProgram, c attachCase) (*BpfLink, 
 func triggerAttachCase(t *testing.T, c attachCase) {
 	t.Helper()
 
-	if strings.HasPrefix(c.Kind, "uprobe") || strings.HasPrefix(c.Kind, "uretprobe") {
+	if c.uprobe() {
 		uprobeTarget()
 		return
 	}

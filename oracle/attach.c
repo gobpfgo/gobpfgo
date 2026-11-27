@@ -19,12 +19,20 @@
 #define COOKIE_MAP "cookies"
 #define COUNTS_MAP "counts"
 
+/*
+ * A case attaches program in object as kind to target. mode is the
+ * bpf_kprobe_opts or bpf_uprobe_opts attach mode of a kprobe or uprobe case
+ * and PROBE_ATTACH_MODE_DEFAULT for the other kinds. A cookie case passes
+ * BPF_COOKIE and reads it back from the cookies map; its kprobe and uprobe
+ * cases retype cookie.bpf.o's tracepoint program as a kprobe program.
+ */
 struct attach_case {
 	const char *kind;
 	const char *object;
 	const char *program;
 	const char *category;
 	const char *target;
+	enum probe_attach_mode mode;
 	bool retprobe;
 	bool cookie;
 };
@@ -42,6 +50,13 @@ static const struct attach_case attach_cases[] = {
 	{.kind = "kretprobe_multi", .object = "kprobe_multi.bpf.o", .program = "handle_open_multi", .target = "do_sys_openat2", .retprobe = true},
 	{.kind = "lsm", .object = "lsm.bpf.o", .program = "handle_lsm", .target = "file_open"},
 	{.kind = "cookie", .object = "cookie.bpf.o", .program = "handle_cookie", .category = "syscalls", .target = "sys_enter_openat", .cookie = true},
+	{.kind = "kprobe", .object = "kprobe.bpf.o", .program = "handle_open", .target = "do_sys_openat2", .mode = PROBE_ATTACH_MODE_LEGACY},
+	{.kind = "kprobe", .object = "kprobe.bpf.o", .program = "handle_open", .target = "do_sys_openat2", .mode = PROBE_ATTACH_MODE_PERF},
+	{.kind = "kprobe", .object = "kprobe.bpf.o", .program = "handle_open", .target = "do_sys_openat2", .mode = PROBE_ATTACH_MODE_LINK},
+	{.kind = "kprobe", .object = "cookie.bpf.o", .program = "handle_cookie", .target = "do_sys_openat2", .mode = PROBE_ATTACH_MODE_LINK, .cookie = true},
+	{.kind = "uprobe", .object = "uprobe.bpf.o", .program = "handle_uprobe", .target = "oracle_uprobe_target", .mode = PROBE_ATTACH_MODE_LEGACY},
+	{.kind = "uprobe", .object = "uprobe.bpf.o", .program = "handle_uprobe", .target = "oracle_uprobe_target", .mode = PROBE_ATTACH_MODE_PERF},
+	{.kind = "uprobe", .object = "uprobe.bpf.o", .program = "handle_uprobe", .target = "oracle_uprobe_target", .mode = PROBE_ATTACH_MODE_LINK},
 };
 
 struct attach_result {
@@ -54,8 +69,26 @@ __attribute__((noinline)) void oracle_uprobe_target(void) {
 	asm volatile("" ::: "memory");
 }
 
-static bool has_prefix(const char *str, const char *prefix) {
-	return strncmp(str, prefix, strlen(prefix)) == 0;
+static bool is_kprobe(const struct attach_case *c) {
+	return !strcmp(c->kind, "kprobe") || !strcmp(c->kind, "kretprobe");
+}
+
+static bool is_uprobe(const struct attach_case *c) {
+	return !strcmp(c->kind, "uprobe") || !strcmp(c->kind, "uretprobe");
+}
+
+static const char *mode_name(enum probe_attach_mode mode) {
+	switch (mode) {
+	case PROBE_ATTACH_MODE_DEFAULT:
+		return "default";
+	case PROBE_ATTACH_MODE_LEGACY:
+		return "legacy";
+	case PROBE_ATTACH_MODE_PERF:
+		return "perf";
+	case PROBE_ATTACH_MODE_LINK:
+		return "link";
+	}
+	return "unknown";
 }
 
 static bool trigger_open(void) {
@@ -68,7 +101,7 @@ static bool trigger_open(void) {
 }
 
 static bool trigger_case(const struct attach_case *c) {
-	if (has_prefix(c->kind, "uprobe") || has_prefix(c->kind, "uretprobe")) {
+	if (is_uprobe(c)) {
 		oracle_uprobe_target();
 		return true;
 	}
@@ -102,17 +135,22 @@ static bool lookup_counter(struct bpf_object *obj, const char *map_name, __u64 *
 }
 
 static struct bpf_link *attach_program(const struct attach_case *c, struct bpf_program *prog) {
-	if (!strcmp(c->kind, "kprobe") || !strcmp(c->kind, "kretprobe"))
-		return bpf_program__attach_kprobe(prog, c->retprobe, c->target);
+	__u64 cookie = c->cookie ? BPF_COOKIE : 0;
+
+	if (is_kprobe(c)) {
+		LIBBPF_OPTS(bpf_kprobe_opts, opts, .bpf_cookie = cookie, .retprobe = c->retprobe, .attach_mode = c->mode);
+
+		return bpf_program__attach_kprobe_opts(prog, c->target, &opts);
+	}
 
 	if (!strcmp(c->kind, "tracepoint") || !strcmp(c->kind, "cookie")) {
-		LIBBPF_OPTS(bpf_tracepoint_opts, opts, .bpf_cookie = c->cookie ? BPF_COOKIE : 0);
+		LIBBPF_OPTS(bpf_tracepoint_opts, opts, .bpf_cookie = cookie);
 
 		return bpf_program__attach_tracepoint_opts(prog, c->category, c->target, &opts);
 	}
 
-	if (!strcmp(c->kind, "uprobe") || !strcmp(c->kind, "uretprobe")) {
-		LIBBPF_OPTS(bpf_uprobe_opts, opts, .func_name = c->target, .retprobe = c->retprobe);
+	if (is_uprobe(c)) {
+		LIBBPF_OPTS(bpf_uprobe_opts, opts, .bpf_cookie = cookie, .retprobe = c->retprobe, .func_name = c->target, .attach_mode = c->mode);
 
 		return bpf_program__attach_uprobe_opts(prog, 0, "/proc/self/exe", 0, &opts);
 	}
@@ -152,19 +190,28 @@ static bool run_attach_case(const char *prog_dir, const struct attach_case *c, s
 	if (!obj)
 		return false;
 
-	err = bpf_object__load(obj);
-	if (err) {
-		bpf_object__close(obj);
-		if (!strcmp(c->kind, "lsm") && unsupported_errno(err))
-			return true;
-		fprintf(stderr, "load %s: %s\n", c->object, strerror((int)-err));
-		return false;
-	}
-
 	prog = bpf_object__find_program_by_name(obj, c->program);
 	if (!prog) {
 		fprintf(stderr, "program %s not found\n", c->program);
 		bpf_object__close(obj);
+		return false;
+	}
+	if (c->cookie && (is_kprobe(c) || is_uprobe(c))) {
+		err = bpf_program__set_type(prog, BPF_PROG_TYPE_KPROBE);
+		if (err) {
+			fprintf(stderr, "retype %s: %s\n", c->program, strerror((int)-err));
+			bpf_object__close(obj);
+			return false;
+		}
+	}
+
+	/* A kernel without the BPF LSM or BPF cookies refuses the program. */
+	err = bpf_object__load(obj);
+	if (err) {
+		bpf_object__close(obj);
+		if ((!strcmp(c->kind, "lsm") || c->cookie) && unsupported_errno(err))
+			return true;
+		fprintf(stderr, "load %s: %s\n", c->object, strerror((int)-err));
 		return false;
 	}
 
@@ -173,7 +220,7 @@ static bool run_attach_case(const char *prog_dir, const struct attach_case *c, s
 	if (err) {
 		bpf_object__close(obj);
 		if (!unsupported_errno(err)) {
-			fprintf(stderr, "attach %s: %s\n", c->kind, strerror((int)-err));
+			fprintf(stderr, "attach %s %s: %s\n", c->kind, mode_name(c->mode), strerror((int)-err));
 			return false;
 		}
 		return true;
@@ -181,7 +228,7 @@ static bool run_attach_case(const char *prog_dir, const struct attach_case *c, s
 	result->supported = true;
 
 	if (!trigger_case(c)) {
-		fprintf(stderr, "trigger %s failed\n", c->kind);
+		fprintf(stderr, "trigger %s %s failed\n", c->kind, mode_name(c->mode));
 		bpf_link__destroy(link);
 		bpf_object__close(obj);
 		return false;
@@ -200,7 +247,7 @@ static bool run_attach_case(const char *prog_dir, const struct attach_case *c, s
 	else
 		result->triggered = value > 0;
 	if (!result->triggered) {
-		fprintf(stderr, "%s did not trigger\n", c->kind);
+		fprintf(stderr, "%s %s did not trigger\n", c->kind, mode_name(c->mode));
 		bpf_link__destroy(link);
 		bpf_object__close(obj);
 		return false;
@@ -219,6 +266,7 @@ static void emit_case(struct json *j, const struct attach_case *c, const struct 
 	if (c->category)
 		json_str(j, "category", c->category);
 	json_str(j, "target", c->target);
+	json_str(j, "mode", mode_name(c->mode));
 	json_bool(j, "retprobe", c->retprobe);
 	json_bool(j, "cookie", c->cookie);
 	json_u64(j, "cookie_value", result->cookie);

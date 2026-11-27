@@ -11,7 +11,6 @@ package libbpf
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -217,10 +216,6 @@ func openLegacyUprobe(opts *BpfUprobeOpts, path string, offset uint64, pid int) 
 	if opts.RefCtrOffset != 0 {
 		return nil, -1, unix.EINVAL
 	}
-	root, err := tracefsRoot()
-	if err != nil {
-		return nil, -1, err
-	}
 
 	kind := probeUprobe
 	prefix := byte('p')
@@ -228,14 +223,23 @@ func openLegacyUprobe(opts *BpfUprobeOpts, path string, offset uint64, pid int) 
 		kind = probeUretprobe
 		prefix = 'r'
 	}
-	label := fmt.Sprintf("%s_0x%x", filepath.Base(path), offset)
-	event := &legacyEvent{root: root, kind: kind, name: probeEventName(label)}
-	line := fmt.Sprintf("%c:%s/%s %s:0x%x\n", prefix, event.group(), event.name, path, offset)
+	event := &legacyEvent{root: tracefsRoot(), kind: kind, name: probeEventName(uprobeEventLabel(path), offset)}
+	line := fmt.Sprintf("%c:%s/%s %s:0x%x", prefix, event.group(), event.name, path, offset)
 	pfd, err := event.open(line, pid)
 	if err != nil {
 		return nil, -1, err
 	}
 	return event, pfd, nil
+}
+
+// uprobeEventLabel returns what libbpf names a tracefs uprobe event on path
+// after: the path from its last slash on, the slash included, or the whole
+// path when it has no slash. The event name turns the slash into '_'.
+func uprobeEventLabel(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[i:]
+	}
+	return path
 }
 
 // resolveFullPath returns the path of file, a program or shared library name

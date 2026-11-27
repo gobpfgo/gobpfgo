@@ -114,20 +114,14 @@ func BpfProgramAttachKprobeOpts(prog *BpfProgram, funcName string, opts *BpfKpro
 // owns the event and the perf descriptor; on failure the event is removed
 // again.
 func openLegacyKprobe(retprobe bool, funcName string, offset uint64) (*legacyEvent, int, error) {
-	root, err := tracefsRoot()
-	if err != nil {
-		return nil, -1, err
-	}
-
 	kind := probeKprobe
 	prefix := byte('p')
 	if retprobe {
 		kind = probeKretprobe
 		prefix = 'r'
 	}
-	label := fmt.Sprintf("%s_0x%x", funcName, offset)
-	event := &legacyEvent{root: root, kind: kind, name: probeEventName(label)}
-	line := fmt.Sprintf("%c:%s/%s %s+0x%x\n", prefix, event.group(), event.name, funcName, offset)
+	event := &legacyEvent{root: tracefsRoot(), kind: kind, name: probeEventName(funcName, offset)}
+	line := fmt.Sprintf("%c:%s/%s %s+0x%x", prefix, event.group(), event.name, funcName, offset)
 	pfd, err := event.open(line, -1)
 	if err != nil {
 		return nil, -1, err
