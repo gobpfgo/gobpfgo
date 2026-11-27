@@ -45,9 +45,10 @@ func (l *Link) live() *libbpf.BpfLink {
 	return l.link
 }
 
-// FD returns the link descriptor, or -1 after Detach or Destroy. A kprobe or
-// uprobe attached through tracefs, or a uprobe with a reference counter,
-// returns its perf event descriptor.
+// FD returns the link descriptor, or -1 after Detach or Destroy. A probe
+// attached to its perf event with PERF_EVENT_IOC_SET_BPF, such as a tracefs
+// kprobe or a uprobe on a kernel without BPF perf links, returns its perf
+// event descriptor.
 func (l *Link) FD() int {
 	return libbpf.BpfLinkFD(l.live())
 }

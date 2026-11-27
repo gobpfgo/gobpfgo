@@ -177,7 +177,7 @@ func runUprobeMultiCase(t *testing.T, c uprobeMultiCase) {
 	if version := getKernelVersion(); version < c.minKernel {
 		t.Skipf("kernel version %#x predates the link type (%#x)", version, c.minKernel)
 	}
-	obj, prog := loadUprobeMultiObject(t, "../testdata/progs/"+c.object, c.program, c.attachType)
+	obj, prog := loadKprobeRetypedObject(t, "../testdata/progs/"+c.object, c.program, c.attachType)
 	defer BpfObjectClose(obj)
 
 	opts := c.opts
@@ -212,13 +212,14 @@ func runUprobeMultiCase(t *testing.T, c uprobeMultiCase) {
 	BpfLinkDestroy(link)
 }
 
-// loadUprobeMultiObject opens path, retypes the program name as a kprobe
+// loadKprobeRetypedObject opens path, retypes the program name as a kprobe
 // program with the expected attach type attachType, and loads the object. The
-// kernel creates uprobe multi links only for such programs. The section table
-// has no uprobe.multi entries and the package has no program type setters
-// yet, so the test sets the fields the way bpf_program__set_type and
+// kernel creates uprobe multi links only for kprobe programs with the multi
+// attach types, and attaches a single uprobe only to a kprobe program, while
+// the cookie fixture is a tracepoint program. The package has no program type
+// setters yet, so the test sets the fields the way bpf_program__set_type and
 // bpf_program__set_expected_attach_type would before the load.
-func loadUprobeMultiObject(t *testing.T, path, name string, attachType BpfAttachType) (*BpfObject, *BpfProgram) {
+func loadKprobeRetypedObject(t *testing.T, path, name string, attachType BpfAttachType) (*BpfObject, *BpfProgram) {
 	t.Helper()
 
 	obj, err := BpfObjectOpenFile(path, nil)

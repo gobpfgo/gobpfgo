@@ -229,7 +229,11 @@ func TestUsdtLink(t *testing.T) {
 // TestBpfProgramAttachUsdtErrors covers the failures before the kernel is
 // involved. The program descriptor is a number no process has open; the
 // manager is created from the unloaded fixture and set to the no-cookie path.
+// PATH holds only the fixture directory, so a bare target name resolves
+// there and reaches the no-cookie check.
 func TestBpfProgramAttachUsdtErrors(t *testing.T) {
+	t.Setenv("PATH", checkedInUsdtTarget(t, filepath.Dir(usdtTargetPath)))
+	fakeSearchPaths(t, nil, nil)
 	obj := openUsdtObject(t)
 	man, err := newUsdtManager(obj)
 	if err != nil {
@@ -264,6 +268,8 @@ func TestBpfProgramAttachUsdtErrors(t *testing.T) {
 		{"relocatable object", prog, -1, usdtObjectPath, usdtProvider, usdtName, unix.EBADF},
 		{"missing probe", prog, -1, usdtTargetPath, usdtProvider, "missing", unix.ENOENT},
 		{"library without PID or cookies", prog, -1, usdtTargetPath, usdtProvider, usdtName, unix.EOPNOTSUPP},
+		{"bare name without PID or cookies", prog, -1, filepath.Base(usdtTargetPath), usdtProvider, usdtName, unix.EOPNOTSUPP},
+		{"missing bare name", prog, -1, "gobpfgo-no-such-target", usdtProvider, usdtName, unix.ENOENT},
 		{"PID without the mapping", prog, os.Getpid(), usdtTargetPath, usdtProvider, usdtName, unix.ESRCH},
 	}
 	for _, tt := range tests {
@@ -303,29 +309,6 @@ func TestBpfProgramAttachUsdtRollback(t *testing.T) {
 	}
 	if !slices.Equal(man.freeSpecIDs, []int32{0}) || man.nextFreeSpecID != 1 {
 		t.Errorf("after rollback: free %v, next %d", man.freeSpecIDs, man.nextFreeSpecID)
-	}
-}
-
-// TestBpfProgramAttachUsdtCookieWithoutMulti covers a kernel with BPF cookies
-// but no uprobe multi link: the attach fails before it reads the binary or
-// allocates a spec ID.
-func TestBpfProgramAttachUsdtCookieWithoutMulti(t *testing.T) {
-	obj := openUsdtObject(t)
-	man, err := newUsdtManager(obj)
-	if err != nil {
-		t.Fatalf("newUsdtManager: %v", err)
-	}
-	man.hasBpfCookie, man.hasUprobeMulti = true, false
-	obj.usdtMan = man
-	prog := BpfObjectFindProgramByName(obj, "handle_loop")
-	prog.fd = 1 << 30
-
-	link, err := BpfProgramAttachUsdt(prog, -1, usdtTargetPath, usdtProvider, usdtName, nil)
-	if link != nil || !errors.Is(err, unix.EOPNOTSUPP) {
-		t.Fatalf("attach = %v, %v, want EOPNOTSUPP", link, err)
-	}
-	if man.nextFreeSpecID != 0 {
-		t.Errorf("the rejected attach allocated %d spec IDs", man.nextFreeSpecID)
 	}
 }
 
@@ -524,20 +507,12 @@ func loadUsdtObject(t *testing.T) (*BpfObject, *BpfProgram) {
 	return obj, BpfObjectFindProgramByName(obj, "handle_loop")
 }
 
-// attachUsdtOrSkip attaches the program to the target's gobpfgo probe name.
-// A kernel with BPF cookies but no uprobe multi link needs a cookie on each
-// single uprobe, which that path cannot carry: the attach must fail with
-// EOPNOTSUPP and the test skips.
-func attachUsdtOrSkip(t *testing.T, obj *BpfObject, prog *BpfProgram, pid int, path, name string) *BpfLink {
+// attachUsdt attaches the program to the target's gobpfgo probe name with
+// the test's USDT cookie, and destroys the link when the test ends.
+func attachUsdt(t *testing.T, prog *BpfProgram, pid int, path, name string) *BpfLink {
 	t.Helper()
 
 	link, err := BpfProgramAttachUsdt(prog, pid, path, usdtProvider, name, &BpfUsdtOpts{UsdtCookie: usdtTestCookie})
-	if man := obj.usdtMan; man != nil && man.hasBpfCookie && !man.hasUprobeMulti {
-		if link != nil || !errors.Is(err, unix.EOPNOTSUPP) {
-			t.Fatalf("attach = %v, %v, want EOPNOTSUPP on the single-uprobe cookie path", link, err)
-		}
-		t.Skip("BPF cookies without uprobe multi links need cookies on tracefs uprobes")
-	}
 	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
@@ -626,14 +601,14 @@ func lookupUsdtIP(obj *BpfObject, ip uint64) (int32, error) {
 // fires them, checks the arguments, cookie and counts the program recorded,
 // destroys the link, and attaches again with the released spec IDs. On a
 // kernel with uprobe multi links the call sites share one link and find their
-// specs by BPF cookie; without cookies each has a tracefs uprobe and the IP
-// map holds its runtime address.
+// specs by BPF cookie; without cookies each has its own uprobe and the IP map
+// holds its runtime address.
 func TestBpfProgramAttachUsdt(t *testing.T) {
 	obj, prog := loadUsdtObject(t)
 	checkUsdtLoad(t, obj, prog)
 	target := startUsdtTarget(t, checkedInUsdtTarget(t, usdtTargetPath))
 
-	link := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtName)
+	link := attachUsdt(t, prog, target.pid, target.path, usdtName)
 	man := obj.usdtMan
 	t.Logf("BPF cookie %v, uprobe multi %v", man.hasBpfCookie, man.hasUprobeMulti)
 	if fd := BpfLinkFD(link); fd != -1 {
@@ -662,7 +637,7 @@ func TestBpfProgramAttachUsdt(t *testing.T) {
 		}
 	}
 
-	again := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtName)
+	again := attachUsdt(t, prog, target.pid, target.path, usdtName)
 	slices.Reverse(ids)
 	if !slices.Equal(again.usdt.specIDs, ids) || man.nextFreeSpecID != 2 {
 		t.Errorf("second attach spec IDs = %v, next %d, want %v and 2", again.usdt.specIDs, man.nextFreeSpecID, ids)
@@ -688,7 +663,7 @@ func TestBpfProgramAttachUsdtAnyProcess(t *testing.T) {
 		return
 	}
 
-	attachUsdtOrSkip(t, obj, prog, -1, target.path, usdtName)
+	attachUsdt(t, prog, -1, target.path, usdtName)
 	target.trigger(t)
 	checkLoopRecords(t, obj, 1, 1)
 }
@@ -756,8 +731,8 @@ func usdtSemaphoreOffset(t *testing.T) uint64 {
 
 // checkUsdtSemaphoreLinks checks how the two call sites of gobpfgo:sema were
 // attached: through one uprobe multi link when the kernel has it, otherwise
-// with a tracefs uprobe for the call site without a semaphore and a uprobe
-// PMU event, which owns its perf event descriptor, for the one with it.
+// with one uprobe PMU event per call site, attached through a BPF perf link
+// when the kernel has one and with the ioctl otherwise.
 func checkUsdtSemaphoreLinks(t *testing.T, ul *usdtLink) {
 	t.Helper()
 
@@ -770,12 +745,7 @@ func checkUsdtSemaphoreLinks(t *testing.T, ul *usdtLink) {
 	if ul.multiLink != nil || len(ul.uprobes) != 2 {
 		t.Fatalf("multi link %v and %d uprobes, want 2 uprobes", ul.multiLink, len(ul.uprobes))
 	}
-	if plain := ul.uprobes[0]; plain.legacy == nil {
-		t.Errorf("call site without a semaphore: no tracefs event")
-	}
-	if sema := ul.uprobes[1]; sema.legacy != nil || sema.perfFD < 0 || sema.fd != sema.perfFD {
-		t.Errorf("call site with a semaphore: tracefs event %v, descriptors %d and %d, want a PMU event", sema.legacy, sema.fd, sema.perfFD)
-	}
+	checkUsdtSingleUprobes(t, ul)
 }
 
 // TestBpfProgramAttachUsdtSemaphore attaches handle_loop to gobpfgo:sema in
@@ -785,14 +755,14 @@ func checkUsdtSemaphoreLinks(t *testing.T, ul *usdtLink) {
 // the link exists and 0 again after the link is destroyed, and the program
 // records the arguments of both call sites only in the attached round. On a
 // kernel with uprobe multi links the call sites share one link; without
-// them, as on 5.10, the call site with the semaphore goes through the uprobe
-// PMU and the other through tracefs.
+// them, as on 5.10, each call site is a uprobe PMU event, and the one with
+// the semaphore passes its reference counter.
 func TestBpfProgramAttachUsdtSemaphore(t *testing.T) {
 	obj, prog := loadUsdtObject(t)
 	target := startUsdtTarget(t, checkedInUsdtTarget(t, usdtSemaTargetPath))
 	target.triggerSemaphore(t, 0)
 
-	link := attachUsdtOrSkip(t, obj, prog, target.pid, target.path, usdtSemaName)
+	link := attachUsdt(t, prog, target.pid, target.path, usdtSemaName)
 	man := obj.usdtMan
 	t.Logf("BPF cookie %v, uprobe multi %v", man.hasBpfCookie, man.hasUprobeMulti)
 	checkUsdtSemaphoreLinks(t, link.usdt)
