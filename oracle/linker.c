@@ -143,10 +143,6 @@ static const char *symbol_section(const struct linker_elf *le, const GElf_Sym *s
 	return section_name(le, sym->st_shndx);
 }
 
-static bool is_btf_section(const char *name) {
-	return strcmp(name, ".BTF") == 0 || strcmp(name, ".BTF.ext") == 0;
-}
-
 static void relocations_json(struct json *j, const struct linker_elf *le, Elf_Scn *scn) {
 	Elf_Data *data = elf_getdata(scn, NULL);
 	size_t count   = data ? data->d_size / sizeof(Elf64_Rel) : 0;
@@ -169,7 +165,7 @@ static void relocations_json(struct json *j, const struct linker_elf *le, Elf_Sc
 	json_arr_end(j);
 }
 
-/* section_json prints a section header, the contents of a code or data
+/* section_json prints a section header, the contents of a code, data or BTF
  * section and the entries of a relocation section.
  */
 static void section_json(struct json *j, const struct linker_elf *le, const struct linker_section *sec) {
@@ -186,7 +182,7 @@ static void section_json(struct json *j, const struct linker_elf *le, const stru
 	json_u64(j, "size", shdr.sh_size);
 	json_u64(j, "align", shdr.sh_addralign);
 
-	if (shdr.sh_type == SHT_PROGBITS && !is_btf_section(sec->name)) {
+	if (shdr.sh_type == SHT_PROGBITS) {
 		data = elf_getdata(sec->scn, NULL);
 		json_hex(j, "data", data ? data->d_buf : NULL, data ? data->d_size : 0);
 	}

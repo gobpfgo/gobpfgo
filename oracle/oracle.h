@@ -38,6 +38,7 @@ int oracle_ringbuf(const char *path);
 int oracle_perfbuf(const char *path);
 int oracle_probe(void);
 int oracle_linker(const char *const *paths, int count);
+int oracle_dedup(const char *const *paths, int count);
 int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
 int oracle_linfo(void);

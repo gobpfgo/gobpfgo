@@ -2,7 +2,7 @@
 // libbpf-source: src/linker.c
 // libbpf-source: src/btf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: linker_append_btf, add_btf_ext_rec, linker_append_btf_ext, complete_extern_btf_info, finalize_btf, emit_elf_data_sec, emit_btf_ext_data, finalize_btf_ext, btf__new_empty, btf__add_str, btf__add_type, btf__add_datasec, btf__add_datasec_var_info, btf_get_raw_data
+// libbpf-symbols: linker_append_btf, add_btf_ext_rec, linker_append_btf_ext, complete_extern_btf_info, finalize_btf, emit_elf_data_sec, emit_btf_ext_data, finalize_btf_ext, btf__new_empty, btf__add_str, btf__add_type, btf__add_datasec, btf__add_datasec_var_info
 
 package libbpf
 
@@ -17,20 +17,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// BTF header and .BTF.ext layout written by the linker. btfHdrLen is
-// sizeof(struct btf_header) in the pinned libbpf, which ends with the kind
-// layout offset and length; btfExtHdrLen is sizeof(struct btf_ext_header).
+// .BTF.ext layout written by the linker. btfExtHdrLen is
+// sizeof(struct btf_ext_header).
 const (
 	btfMagic      = 0xeb9f
 	btfVersion    = 1
-	btfHdrLen     = 32
 	btfExtHdrLen  = 32
 	btfFuncGlobal = 1
 )
 
-// linkerBTF is the output BTF. spec holds the types in output ID order with
-// their names resolved; every name offset points into strs, which keeps one
-// copy of each string in the order it was first added.
+// linkerBTF is the output BTF before dedup. spec holds the types in output ID
+// order with their names resolved; every name offset points into strs, which
+// keeps one copy of each string in the order it was first added.
 type linkerBTF struct {
 	spec    *btf.Spec
 	strs    []byte
@@ -101,29 +99,6 @@ func (b *linkerBTF) addDatasec(name string, size uint64, vars []btf.VarSecInfo) 
 		SizeOrType: uint32(size),
 		DataSec:    slices.Clone(vars),
 	})
-}
-
-// raw lays the BTF out the way libbpf writes a BTF it built: the 32-byte
-// header with no kind layout section, the types, then the strings.
-func (b *linkerBTF) raw() []byte {
-	le := binary.LittleEndian
-	var types []byte
-	for i := 1; i < len(b.spec.Types); i++ {
-		types = btf.AppendType(types, &b.spec.Types[i], le)
-	}
-
-	out := make([]byte, 0, btfHdrLen+len(types)+len(b.strs))
-	out = le.AppendUint16(out, btfMagic)
-	out = append(out, btfVersion, 0)
-	out = le.AppendUint32(out, btfHdrLen)
-	out = le.AppendUint32(out, 0)                  // type_off
-	out = le.AppendUint32(out, uint32(len(types))) // type_len
-	out = le.AppendUint32(out, uint32(len(types))) // str_off
-	out = le.AppendUint32(out, uint32(len(b.strs)))
-	out = le.AppendUint32(out, 0) // layout_off
-	out = le.AppendUint32(out, 0) // layout_len
-	out = append(out, types...)
-	return append(out, b.strs...)
 }
 
 // completeExternInfo marks the output VAR or FUNC dstID as a definition after
@@ -390,7 +365,8 @@ func (out *linkerOutput) moveExtString(in *linkerInput, rec []byte, off int) {
 // finalizeBTF returns the .BTF and .BTF.ext sections, 8-byte aligned, or none
 // when no input had BTF types. It works on a copy of the output BTF: it adds
 // one DATASEC per output section that had one, in section order, and the
-// .BTF.ext section names.
+// .BTF.ext section names, then deduplicates the types, which rewrites the
+// type IDs of the .BTF.ext records. The string table is kept as built.
 func (out *linkerOutput) finalizeBTF() ([]objelf.OutputSection, error) {
 	if out.btf.typeCnt() == 1 {
 		return nil, nil
@@ -408,7 +384,15 @@ func (out *linkerOutput) finalizeBTF() ([]objelf.OutputSection, error) {
 		return nil, err
 	}
 
-	secs := []objelf.OutputSection{{Name: btfSecName, Type: elf.SHT_PROGBITS, Addralign: 8, Data: b.raw()}}
+	spec, err := btf.NewSpec(binary.LittleEndian, b.spec.Types, b.strs)
+	if err != nil {
+		return nil, linkerErrorf(unix.EINVAL, "%v", err)
+	}
+	if _, err := spec.Dedup(&btf.DedupOpts{Ext: ext}); err != nil {
+		return nil, linkerErrorf(errnoFromError(err), "BTF dedup failed: %v", err)
+	}
+
+	secs := []objelf.OutputSection{{Name: btfSecName, Type: elf.SHT_PROGBITS, Addralign: 8, Data: spec.Raw()}}
 	if ext != nil {
 		secs = append(secs, objelf.OutputSection{Name: btfExtSecName, Type: elf.SHT_PROGBITS, Addralign: 8, Data: ext})
 	}

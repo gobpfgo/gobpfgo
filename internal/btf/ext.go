@@ -2,7 +2,7 @@
 // libbpf-source: src/btf.c
 // libbpf-source: src/libbpf_internal.h
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: btf_ext_header, btf_ext_info_sec, bpf_func_info, bpf_line_info, bpf_core_relo
+// libbpf-symbols: btf_ext_header, btf_ext_info_sec, bpf_func_info, bpf_line_info, bpf_core_relo, btf_ext_visit_type_ids, btf_ext_visit_str_offs
 
 package btf
 
@@ -183,6 +183,12 @@ func extHeaderLen(data []byte, spec *Spec, order binary.ByteOrder) (int, error) 
 	if spec == nil {
 		return 0, fmt.Errorf("btf: nil spec")
 	}
+	return extHeader(data, order)
+}
+
+// extHeader validates the .BTF.ext header without a spec and returns its
+// length.
+func extHeader(data []byte, order binary.ByteOrder) (int, error) {
 	if len(data) < extHeaderSize {
 		return 0, fmt.Errorf("btf: .BTF.ext header out of bounds")
 	}
@@ -201,9 +207,42 @@ func extHeaderLen(data []byte, spec *Spec, order binary.ByteOrder) (int, error) 
 }
 
 // parseExtRecords decodes one .BTF.ext subsection at the given header field
+// offset and resolves each section name through spec.
+func parseExtRecords(data []byte, spec *Spec, order binary.ByteOrder, hdrLen, fieldOff, minRec int, what string) ([]extRecordSection, error) {
+	secs, err := extInfoSecs(data, order, hdrLen, fieldOff, minRec, what)
+	if err != nil {
+		return nil, err
+	}
+
+	sections := make([]extRecordSection, 0, len(secs))
+	for _, sec := range secs {
+		name, err := spec.String(order.Uint32(data[sec.nameOff:]))
+		if err != nil {
+			return nil, fmt.Errorf("btf: .BTF.ext %s section name: %w", what, err)
+		}
+		if name == "" {
+			return nil, fmt.Errorf("btf: .BTF.ext %s section has an empty name", what)
+		}
+		records := data[sec.recOff : sec.recOff+sec.count*sec.recSize]
+		sections = append(sections, extRecordSection{name: name, recSize: sec.recSize, records: records})
+	}
+	return sections, nil
+}
+
+// extInfoSec locates one section block of a .BTF.ext subsection in the
+// section data: the position of its name offset and of its first record, the
+// record size and the record count.
+type extInfoSec struct {
+	nameOff int
+	recOff  int
+	recSize int
+	count   int
+}
+
+// extInfoSecs walks one .BTF.ext subsection at the given header field
 // offset. A subsection starts with its record size, followed by section
 // blocks of a name offset, a record count and the records.
-func parseExtRecords(data []byte, spec *Spec, order binary.ByteOrder, hdrLen, fieldOff, minRec int, what string) ([]extRecordSection, error) {
+func extInfoSecs(data []byte, order binary.ByteOrder, hdrLen, fieldOff, minRec int, what string) ([]extInfoSec, error) {
 	off := int(order.Uint32(data[fieldOff:]))
 	length := int(order.Uint32(data[fieldOff+4:]))
 	if length == 0 {
@@ -216,46 +255,121 @@ func parseExtRecords(data []byte, spec *Spec, order binary.ByteOrder, hdrLen, fi
 		return nil, fmt.Errorf("btf: .BTF.ext %s section is not 4-byte aligned", what)
 	}
 
-	block := data[hdrLen+off : hdrLen+off+length]
-	if len(block) < 4 {
+	pos, end := hdrLen+off, hdrLen+off+length
+	if end-pos < 4 {
 		return nil, fmt.Errorf("btf: .BTF.ext %s section has no record size", what)
 	}
-	recSize := int(order.Uint32(block))
+	recSize := int(order.Uint32(data[pos:]))
 	if recSize < minRec || recSize%4 != 0 {
 		return nil, fmt.Errorf("btf: .BTF.ext %s record size %d is invalid", what, recSize)
 	}
-	block = block[4:]
+	pos += 4
 
-	var sections []extRecordSection
-	for len(block) > 0 {
-		if len(block) < 8 {
+	var secs []extInfoSec
+	for pos < end {
+		if end-pos < 8 {
 			return nil, fmt.Errorf("btf: .BTF.ext %s section header is truncated", what)
 		}
-		nameOff := order.Uint32(block)
-		numInfo := int(order.Uint32(block[4:]))
-		block = block[8:]
-
+		numInfo := int(order.Uint32(data[pos+4:]))
 		if numInfo <= 0 {
 			return nil, fmt.Errorf("btf: .BTF.ext %s section has no records", what)
 		}
 		recordsLen := numInfo * recSize
-		if recordsLen/recSize != numInfo || recordsLen > len(block) {
+		if recordsLen/recSize != numInfo || recordsLen > end-pos-8 {
 			return nil, fmt.Errorf("btf: .BTF.ext %s records are truncated", what)
 		}
 
-		name, err := spec.String(nameOff)
-		if err != nil {
-			return nil, fmt.Errorf("btf: .BTF.ext %s section name: %w", what, err)
-		}
-		if name == "" {
-			return nil, fmt.Errorf("btf: .BTF.ext %s section has an empty name", what)
-		}
+		secs = append(secs, extInfoSec{nameOff: pos, recOff: pos + 8, recSize: recSize, count: numInfo})
+		pos += 8 + recordsLen
+	}
+	return secs, nil
+}
 
-		sections = append(sections, extRecordSection{name: name, recSize: recSize, records: block[:recordsLen]})
-		block = block[recordsLen:]
+// Field offsets inside the .BTF.ext records: the type ID of a function or
+// CO-RE record, the file name and line string offsets of a line record, and
+// the access string offset of a CO-RE record.
+const (
+	extRecTypeID    = 4
+	extRecFileName  = 4
+	extRecLine      = 8
+	extRecAccessStr = 8
+)
+
+// visitExtTypeIDs calls fn with the type ID of every function record, then
+// of every CO-RE record, of the .BTF.ext section data, and stores the value
+// fn leaves back into data. The first error stops the walk.
+func visitExtTypeIDs(data []byte, order binary.ByteOrder, fn func(id *uint32) error) error {
+	recFields := map[int][]int{
+		extFuncInfoField: {extRecTypeID},
+		extCoreReloField: {extRecTypeID},
+	}
+	return visitExt(data, order, false, recFields, fn)
+}
+
+// visitExtStrOffs calls fn with every string offset of the .BTF.ext section
+// data, and stores the value fn leaves back into data: the name of each
+// function section; the name of each line section and the file name and
+// line of each of its records; and the name of each CO-RE section and the
+// access string of each of its records. The first error stops the walk.
+func visitExtStrOffs(data []byte, order binary.ByteOrder, fn func(off *uint32) error) error {
+	recFields := map[int][]int{
+		extLineInfoField: {extRecFileName, extRecLine},
+		extCoreReloField: {extRecAccessStr},
+	}
+	return visitExt(data, order, true, recFields, fn)
+}
+
+// visitExt walks the function, line and CO-RE subsections of the .BTF.ext
+// section data in that order. For each section block it visits the name
+// offset when names is set, then the record fields that recFields lists for
+// the subsection, record by record.
+func visitExt(data []byte, order binary.ByteOrder, names bool, recFields map[int][]int, fn func(v *uint32) error) error {
+	hdrLen, err := extHeader(data, order)
+	if err != nil {
+		return err
 	}
 
-	return sections, nil
+	subsections := []struct {
+		field, minRec int
+		what          string
+	}{
+		{extFuncInfoField, FuncInfoMinSize, "func"},
+		{extLineInfoField, LineInfoMinSize, "line"},
+		{extCoreReloField, CoreReloMinSize, "core"},
+	}
+	for _, sub := range subsections {
+		secs, err := extInfoSecs(data, order, hdrLen, sub.field, sub.minRec, sub.what)
+		if err != nil {
+			return err
+		}
+		for _, sec := range secs {
+			if names {
+				if err := visitWord(data, sec.nameOff, order, fn); err != nil {
+					return err
+				}
+			}
+			for i := 0; i < sec.count; i++ {
+				rec := sec.recOff + i*sec.recSize
+				for _, f := range recFields[sub.field] {
+					if err := visitWord(data, rec+f, order, fn); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// visitWord calls fn with the 32-bit word at data[off] and stores the value
+// fn leaves back.
+func visitWord(data []byte, off int, order binary.ByteOrder, fn func(v *uint32) error) error {
+	v := order.Uint32(data[off:])
+	if err := fn(&v); err != nil {
+		return err
+	}
+	order.PutUint32(data[off:], v)
+	return nil
 }
 
 func decodeFuncInfos(order binary.ByteOrder, section extRecordSection) []FuncInfo {

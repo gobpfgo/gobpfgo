@@ -74,6 +74,7 @@ func TestVisitTypeIDs(t *testing.T) {
 		want []uint32
 	}{
 		{"ptr", Type{Kind: KindPtr, SizeOrType: 3}, []uint32{3}},
+		{"fwd", Type{Kind: KindFwd}, []uint32{0}},
 		{"int", Type{Kind: KindInt, SizeOrType: 4, Int: &Int{}}, nil},
 		{"array", Type{Kind: KindArray, Array: &Array{Type: 5, IndexType: 6, Nelems: 2}}, []uint32{5, 6}},
 		{"struct", Type{Kind: KindStruct, Members: []Member{{Type: 7}, {Type: 8}}}, []uint32{7, 8}},

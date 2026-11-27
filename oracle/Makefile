@@ -7,11 +7,14 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c dedup.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c
 ORACLE_HDRS := json.h oracle.h usdt_notes.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
 LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
+
+# The objects whose .BTF and .BTF.ext the dedup scenario deduplicates.
+DEDUP_OBJECTS := $(addprefix ../testdata/progs/,kprobe.bpf.o dump.bpf.o core.bpf.o core_kernel.bpf.o global_data.bpf.o kconfig_types.bpf.o link_a.bpf.o link_b.bpf.o link_text_a.bpf.o link_text_b.bpf.o ringbuf.bpf.o usdt_attach.bpf.o)
 
 .PHONY: all fixtures load-fixture attach-fixture ringbuf-fixture perfbuf-fixture probe-fixture linker-fixture usdt-fixture clean
 
@@ -49,6 +52,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) core-reloc ../testdata/progs/core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc.json
 	$(ORACLE) linfo > ../testdata/oracle/linfo.json
 	$(ORACLE) zip > ../testdata/oracle/zip.json
+	$(ORACLE) dedup $(DEDUP_OBJECTS) > ../testdata/oracle/dedup.json
 
 load-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle
