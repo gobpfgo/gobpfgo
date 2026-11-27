@@ -159,6 +159,7 @@ func TestGlobalDataOpen(t *testing.T) {
 		t.Fatalf("program = %s %s type %d insns %d, want %+v", BpfProgramName(p),
 			BpfProgramSectionName(p), BpfProgramTypeOf(p), BpfProgramInsnCnt(p), want)
 	}
+	checkOpenBTF(t, obj, f)
 }
 
 // TestGlobalDataFindBySection finds each internal map by its section name and

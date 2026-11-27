@@ -2,7 +2,7 @@
 // libbpf-source: src/btf.c
 // libbpf-source: src/strset.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: btf__add_var, btf__add_str, strset__add_str, strset__new
+// libbpf-symbols: btf__add_var, btf__add_str, strset__add_str, strset__new, btf__add_ptr, btf__add_struct, btf__add_func, btf__add_func_proto, btf__add_func_param, btf__add_decl_tag, btf_add_ref_kind, btf_add_composite, btf_add_decl_tag, validate_type_id
 
 package btf
 
@@ -19,8 +19,8 @@ import (
 // An empty name, a linkage other than VarStatic, VarGlobalAllocated or
 // VarGlobalExtern, or a split spec is an error.
 func (s *Spec) AddVar(name string, linkage, typeID uint32) (uint32, error) {
-	if s.base != nil || s.mergedSplit {
-		return 0, fmt.Errorf("btf: cannot add a type to split BTF")
+	if err := s.checkModifiable(); err != nil {
+		return 0, err
 	}
 	if name == "" {
 		return 0, fmt.Errorf("btf: VAR without a name")
@@ -29,20 +29,157 @@ func (s *Spec) AddVar(name string, linkage, typeID uint32) (uint32, error) {
 		return 0, fmt.Errorf("btf: VAR %s: invalid linkage %d", name, linkage)
 	}
 
-	nameOff := s.addString(name)
-	id := uint32(len(s.Types))
-	s.Types = append(s.Types, Type{
-		ID:         id,
-		NameOff:    nameOff,
+	return s.addType(Type{
+		NameOff:    s.addString(name),
 		Name:       name,
 		Kind:       KindVar,
 		SizeOrType: typeID,
 		Var:        &Var{Linkage: linkage},
 	})
-	if err := s.encode(); err != nil {
+}
+
+// AddPtr appends a PTR type to refID and returns its ID. An out-of-range
+// type ID or a split spec is an error.
+func (s *Spec) AddPtr(refID uint32) (uint32, error) {
+	return s.addRefKind(KindPtr, "", refID)
+}
+
+// AddStruct appends a STRUCT type named name, of size bytes and without
+// members, and returns its ID. An empty name makes an anonymous struct. The
+// name reuses a string of the table like AddVar. A split spec is an error.
+func (s *Spec) AddStruct(name string, size uint32) (uint32, error) {
+	if err := s.checkModifiable(); err != nil {
+		return 0, err
+	}
+	var nameOff uint32
+	if name != "" {
+		nameOff = s.addString(name)
+	}
+	return s.addType(Type{NameOff: nameOff, Name: name, Kind: KindStruct, SizeOrType: size})
+}
+
+// AddFuncProto appends a FUNC_PROTO type returning retID, without
+// parameters, and returns its ID. AddFuncParam adds the parameters. An
+// out-of-range type ID or a split spec is an error.
+func (s *Spec) AddFuncProto(retID uint32) (uint32, error) {
+	if err := s.checkModifiable(); err != nil {
+		return 0, err
+	}
+	if err := validateTypeID(retID); err != nil {
+		return 0, err
+	}
+	return s.addType(Type{Kind: KindFuncProto, SizeOrType: retID})
+}
+
+// AddFuncParam appends a parameter named name of type typeID to the last
+// type, which must be a FUNC_PROTO. An empty name makes an unnamed
+// parameter. An out-of-range type ID or a split spec is an error.
+func (s *Spec) AddFuncParam(name string, typeID uint32) error {
+	if err := validateTypeID(typeID); err != nil {
+		return err
+	}
+	if len(s.Types) < 2 || s.Types[len(s.Types)-1].Kind != KindFuncProto {
+		return fmt.Errorf("btf: last type is not a FUNC_PROTO")
+	}
+	if err := s.checkModifiable(); err != nil {
+		return err
+	}
+
+	var nameOff uint32
+	if name != "" {
+		nameOff = s.addString(name)
+	}
+	proto := &s.Types[len(s.Types)-1]
+	proto.Params = append(proto.Params, Param{NameOff: nameOff, Name: name, Type: typeID})
+	return s.encode()
+}
+
+// AddFunc appends a FUNC type named name with linkage and prototype protoID,
+// and returns its ID. An empty name, a linkage other than FuncStatic,
+// FuncGlobal or FuncExtern, an out-of-range type ID or a split spec is an
+// error.
+func (s *Spec) AddFunc(name string, linkage, protoID uint32) (uint32, error) {
+	if name == "" {
+		return 0, fmt.Errorf("btf: FUNC without a name")
+	}
+	if linkage != FuncStatic && linkage != FuncGlobal && linkage != FuncExtern {
+		return 0, fmt.Errorf("btf: FUNC %s: invalid linkage %d", name, linkage)
+	}
+	id, err := s.addRefKind(KindFunc, name, protoID)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.SetFuncLinkage(id, linkage); err != nil {
 		return 0, err
 	}
 	return id, nil
+}
+
+// AddDeclTag appends a DECL_TAG type with value, tagging refID, and returns
+// its ID. componentIdx is the member or parameter the tag applies to, or -1
+// for refID itself. An empty value, a componentIdx below -1, an out-of-range
+// type ID or a split spec is an error.
+func (s *Spec) AddDeclTag(value string, refID uint32, componentIdx int32) (uint32, error) {
+	if value == "" || componentIdx < -1 {
+		return 0, fmt.Errorf("btf: invalid DECL_TAG %q on component %d", value, componentIdx)
+	}
+	if err := validateTypeID(refID); err != nil {
+		return 0, err
+	}
+	if err := s.checkModifiable(); err != nil {
+		return 0, err
+	}
+	return s.addType(Type{
+		NameOff:    s.addString(value),
+		Name:       value,
+		Kind:       KindDeclTag,
+		SizeOrType: refID,
+		DeclTag:    &DeclTag{ComponentIdx: componentIdx},
+	})
+}
+
+// addRefKind appends a type of kind that refers to refID, with an optional
+// name, and returns its ID.
+func (s *Spec) addRefKind(kind Kind, name string, refID uint32) (uint32, error) {
+	if err := validateTypeID(refID); err != nil {
+		return 0, err
+	}
+	if err := s.checkModifiable(); err != nil {
+		return 0, err
+	}
+	var nameOff uint32
+	if name != "" {
+		nameOff = s.addString(name)
+	}
+	return s.addType(Type{NameOff: nameOff, Name: name, Kind: kind, SizeOrType: refID})
+}
+
+// addType appends t with the next type ID, rebuilds the blob and returns the
+// ID.
+func (s *Spec) addType(t Type) (uint32, error) {
+	t.ID = uint32(len(s.Types))
+	s.Types = append(s.Types, t)
+	if err := s.encode(); err != nil {
+		return 0, err
+	}
+	return t.ID, nil
+}
+
+// checkModifiable rejects adding types to a split spec, whose types and
+// strings continue a base spec's.
+func (s *Spec) checkModifiable() error {
+	if s.base != nil || s.mergedSplit {
+		return fmt.Errorf("btf: cannot add a type to split BTF")
+	}
+	return nil
+}
+
+// validateTypeID rejects a type ID past the largest one BTF can hold.
+func validateTypeID(id uint32) error {
+	if id > maxNrTypes {
+		return fmt.Errorf("btf: type id %d out of range", id)
+	}
+	return nil
 }
 
 // addString returns the offset of str in the string table. The first string
@@ -130,6 +267,47 @@ func (s *Spec) SetParamNameOff(id uint32, j int, nameOff uint32) error {
 	return nil
 }
 
+// SetParamType writes typeID into the type of parameter j of the FUNC_PROTO
+// type id, in both the raw blob and the parsed type. It returns an error when
+// id is not a FUNC_PROTO or j is not one of its parameters.
+func (s *Spec) SetParamType(id uint32, j int, typeID uint32) error {
+	t, err := s.TypeByID(id)
+	if err != nil {
+		return err
+	}
+	if t.Kind != KindFuncProto {
+		return fmt.Errorf("btf: type %d is %v, not a FUNC_PROTO", id, t.Kind)
+	}
+	if j < 0 || j >= len(t.Params) {
+		return fmt.Errorf("btf: func_proto %d: parameter %d out of range", id, j)
+	}
+	if err := s.patchWord(t, 12+j*8+4, typeID); err != nil {
+		return err
+	}
+	t.Params[j].Type = typeID
+	return nil
+}
+
+// SetNameOff writes nameOff into the name of type id, in both the raw blob
+// and the parsed type. It returns an error when nameOff is not a string of
+// the table.
+func (s *Spec) SetNameOff(id, nameOff uint32) error {
+	t, err := s.TypeByID(id)
+	if err != nil {
+		return err
+	}
+	name, err := s.String(nameOff)
+	if err != nil {
+		return err
+	}
+	if err := s.patchWord(t, 0, nameOff); err != nil {
+		return err
+	}
+	t.NameOff = nameOff
+	t.Name = name
+	return nil
+}
+
 // SetDatasecVar writes vsi into member j of the DATASEC type id, in both the
 // raw blob and the parsed type. It returns an error when id is not a DATASEC
 // or j is not one of its members.
@@ -153,13 +331,19 @@ func (s *Spec) SetDatasecVar(id uint32, j int, vsi VarSecInfo) error {
 
 // patchWord writes word at byte off of t's record in the raw blob.
 func (s *Spec) patchWord(t *Type, off int, word uint32) error {
-	if s.base != nil || s.raw == nil {
+	return s.putRecordWord(s.raw, t, off, word)
+}
+
+// putRecordWord writes word at byte off of t's record in raw, which is the
+// spec's blob or a copy of it with the same layout.
+func (s *Spec) putRecordWord(raw []byte, t *Type, off int, word uint32) error {
+	if s.base != nil || raw == nil {
 		return fmt.Errorf("btf: type %d has no raw record", t.ID)
 	}
 	pos := s.typeStart + int(t.rawOff) + off
-	if pos < 0 || pos+4 > len(s.raw) {
+	if pos < 0 || pos+4 > len(raw) {
 		return fmt.Errorf("btf: type %d: field at %d out of bounds", t.ID, off)
 	}
-	s.ByteOrder.PutUint32(s.raw[pos:], word)
+	s.ByteOrder.PutUint32(raw[pos:], word)
 	return nil
 }

@@ -49,12 +49,15 @@ func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
 	return relocateData(&progCode{prog: p, insns: insns, relocs: relocs})
 }
 
-// subprogFixture is the output of the subprog oracle: libbpf's final code of
-// every main program after a load through a generated loader, and the map
-// names in map index order.
+// subprogFixture is the output of the subprog oracle: libbpf's object BTF
+// and final code of every main program after a load through a generated
+// loader, and the map names in map index order. The generated loader
+// assumes the latest kernel, so the BTF shows the static linkage of hidden
+// subprograms but no arg:ctx rewrite.
 type subprogFixture struct {
 	Objects  []string                `json:"objects"`
 	Errno    int32                   `json:"errno"`
+	BTF      string                  `json:"btf"`
 	Maps     []string                `json:"maps"`
 	Programs []subprogFixtureProgram `json:"programs"`
 }
@@ -113,11 +116,24 @@ func openSubprogObject(t *testing.T, names ...string) *BpfObject {
 	return obj
 }
 
+// argCtxTagSupported and argCtxTagMissing stand in for the kernel's arg:ctx
+// feature probe. The first skips the arg:ctx fixup, as libbpf's generated
+// loader does; the second forces it, as on a kernel without the feature.
+func argCtxTagSupported() bool { return true }
+func argCtxTagMissing() bool   { return false }
+
 // relocateWithoutKernel relocates obj with each map's index standing in for
-// its descriptor, as libbpf's generated loader does, and no CO-RE target. The
-// stand-in descriptors are cleared before it returns, so closing the object
-// does not close them.
+// its descriptor, as libbpf's generated loader does, no CO-RE target and no
+// arg:ctx fixup. The stand-in descriptors are cleared before it returns, so
+// closing the object does not close them.
 func relocateWithoutKernel(t *testing.T, obj *BpfObject, ext *btf.ExtSpec) ([]*progCode, error) {
+	t.Helper()
+	return relocateWithoutKernelArgCtx(t, obj, ext, argCtxTagSupported)
+}
+
+// relocateWithoutKernelArgCtx is relocateWithoutKernel with argCtxTag
+// standing in for the arg:ctx feature probe.
+func relocateWithoutKernelArgCtx(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtxTag func() bool) ([]*progCode, error) {
 	t.Helper()
 
 	for i, m := range obj.maps {
@@ -128,7 +144,14 @@ func relocateWithoutKernel(t *testing.T, obj *BpfObject, ext *btf.ExtSpec) ([]*p
 			m.fd = -1
 		}
 	}()
-	return relocateObject(obj, ext, nil)
+	codes, err := relocateObject(obj, ext, nil, argCtxTag)
+	if err != nil {
+		return nil, err
+	}
+	if err := relocateObjectData(codes); err != nil {
+		return nil, err
+	}
+	return codes, nil
 }
 
 func objectExt(t *testing.T, obj *BpfObject) *btf.ExtSpec {
@@ -210,14 +233,18 @@ func TestSubprogOpen(t *testing.T) {
 // TestSubprogOracle relocates each object without a kernel and compares every
 // main program's code, function records and line records with libbpf's: the
 // subprograms appended in libbpf's order, the call and callback offsets, and
-// the .BTF.ext records moved to each copy. The link-text cases link
-// link_text_a.bpf.o and link_text_b.bpf.o first, in both orders, so each
-// program calls its own static bump in the merged .text.
+// the .BTF.ext records moved to each copy. It then applies the load's BTF
+// fixups, with the kernel taken to read arg:ctx tags as libbpf's generated
+// loader assumes, and compares the whole object BTF. The link-text cases
+// link link_text_a.bpf.o and link_text_b.bpf.o first, in both orders, so each
+// program calls its own static bump in the merged .text. In the hidden case
+// only the hidden .text subprogram's FUNC becomes static.
 func TestSubprogOracle(t *testing.T) {
 	fixtures := []string{
 		"subprog.json", "subprog-callback.json",
 		"subprog-link-text.json", "subprog-link-text-reverse.json",
 		"subprog-link-extern.json", "subprog-link-extern-reverse.json",
+		"subprog-hidden.json", "subprog-arg-ctx.json",
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
@@ -231,7 +258,7 @@ func TestSubprogOracle(t *testing.T) {
 			for _, m := range obj.maps {
 				maps = append(maps, BpfMapName(m))
 			}
-			if !reflect.DeepEqual(maps, want.Maps) {
+			if !slices.Equal(maps, want.Maps) {
 				t.Fatalf("maps = %v, want %v", maps, want.Maps)
 			}
 
@@ -244,6 +271,13 @@ func TestSubprogOracle(t *testing.T) {
 			}
 			for i, w := range want.Programs {
 				compareSubprogCode(t, codes[i], w)
+			}
+
+			if err := markBtfStatic(obj); err != nil {
+				t.Fatalf("markBtfStatic: %v", err)
+			}
+			if got := hex.EncodeToString(obj.btf.Raw()); got != want.BTF {
+				t.Errorf("BTF after load:\n got %s\nwant %s", got, want.BTF)
 			}
 		})
 	}

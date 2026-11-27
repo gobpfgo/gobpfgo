@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data, poison_kfunc_call
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object_prepare, bpf_object__load_progs, bpf_object_load_prog, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data, poison_kfunc_call
 
 //go:build linux && (amd64 || arm64)
 
@@ -73,21 +73,36 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // module BTF. Program references to them become constants, BPF_PSEUDO_BTF_ID
 // loads and kfunc calls; a call to a missing weak kernel function is
 // replaced with one the verifier rejects only when it is reachable. The
-// kernel and module BTFs are released when the load returns. It then
-// validates and loads the BTF, creates the maps with their BTF type ids,
-// writes the initial contents of the internal maps and relocates each
-// program. A program gets a copy of every .text subprogram it calls,
-// directly or through another subprogram, appended to its own code, with
-// the calls, the function and line records and the map, global variable and
-// extern references relocated. Only the programs are loaded; a subprogram is
-// loaded only as part of the programs that call it and has no descriptor.
-// The .rodata and .kconfig maps are frozen after their contents are
-// written, so user space can read but not change them.
+// kernel and module BTFs are released when the load returns.
+//
+// It then relocates each program. A program gets a copy of every .text
+// subprogram it calls, directly or through another subprogram, appended to
+// its own code, with the calls and the function and line records
+// relocated. Two fixups then change the object BTF, which BpfObjectBTF
+// returns. On a kernel whose verifier does not read the arg:ctx decl tag,
+// a global subprogram argument tagged __arg_ctx gets a copy of its
+// function's BTF in which the argument points to the program type's
+// context struct, and the calling program's function record names that
+// copy. A .text subprogram whose symbol is global or weak with hidden or
+// internal visibility gets static linkage in its BTF FUNC, so the verifier
+// checks it in its caller's context.
+//
+// It then loads the BTF. On a kernel without BTF_KIND_DECL_TAG the kernel
+// gets a copy in which every decl tag is a one-byte integer type, so the
+// type ids do not change; the object BTF keeps its decl tags. It then
+// creates the maps with their BTF type ids, writes the initial contents of
+// the internal maps, patches the map, global variable and extern
+// references and loads the programs. A subprogram is loaded only as part
+// of the programs that call it and has no descriptor. The .rodata and
+// .kconfig maps are frozen after their contents are written, so user space
+// can read but not change them. After the load, BpfProgramInsns returns
+// each program's final code.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
-// BpfObjectOpenMem. A second load returns EINVAL. On failure the object is left
-// unloaded and the error carries the verifier log when the kernel produced one.
+// BpfObjectOpenMem. A second load returns EINVAL. On failure the object is
+// left unloaded and the error carries the verifier log when the kernel
+// produced one; the BTF fixups already applied stay in the object BTF.
 func BpfObjectLoad(obj *BpfObject) error {
 	if obj == nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL}
@@ -109,8 +124,28 @@ func BpfObjectLoad(obj *BpfObject) error {
 		return err
 	}
 
+	ext, kernelBTFs, err := objectCoreRelocations(obj)
+	if err != nil {
+		return &Error{
+			Op:    "bpf_object__relocate_core",
+			Errno: errnoFromError(err),
+			Log:   err.Error(),
+		}
+	}
+	codes, err := relocateObject(obj, ext, kernelBTFs, featArgCtxTag.supported)
+	if err != nil {
+		return err
+	}
+	if err := markBtfStatic(obj); err != nil {
+		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: err.Error()}
+	}
+	kernBTF, err := sanitizeBTF(obj.btf, featBtfDeclTag.supported)
+	if err != nil {
+		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: err.Error()}
+	}
+
 	logBuf := make([]byte, 64*1024)
-	btfFD, err := sys.BtfLoad(obj.btf.Raw(), logBuf, 1)
+	btfFD, err := sys.BtfLoad(kernBTF, logBuf, 1)
 	if err != nil {
 		return &Error{
 			Op:    "bpf_btf_load",
@@ -120,25 +155,13 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 	obj.btfFD = btfFD
 
-	ext, kernelBTFs, err := objectCoreRelocations(obj)
-	if err != nil {
-		obj.closeLoadFDs()
-		return &Error{
-			Op:    "bpf_object__relocate_core",
-			Errno: errnoFromError(err),
-			Log:   err.Error(),
-		}
-	}
-
 	for _, m := range obj.maps {
 		if err := createMap(m, btfFD); err != nil {
 			obj.closeLoadFDs()
 			return err
 		}
 	}
-
-	codes, err := relocateObject(obj, ext, kernelBTFs)
-	if err != nil {
+	if err := relocateObjectData(codes); err != nil {
 		obj.closeLoadFDs()
 		return err
 	}
@@ -151,8 +174,18 @@ func BpfObjectLoad(obj *BpfObject) error {
 		}
 	}
 
+	setFinalInsns(codes)
 	obj.loaded = true
 	return nil
+}
+
+// setFinalInsns makes each main program's code, as loaded, the instructions
+// that BpfProgramInsns returns. The code is the load's own copy, so the
+// object file's section data stays unchanged.
+func setFinalInsns(codes []*progCode) {
+	for _, code := range codes {
+		code.prog.insns = code.insns
+	}
 }
 
 // loadProgram loads the relocated code of one main program and records its

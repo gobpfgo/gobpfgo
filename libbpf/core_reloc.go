@@ -26,6 +26,7 @@ const (
 	bpfSTX        = 0x03
 	bpfJMP        = 0x05
 	bpfCall       = 0x80
+	bpfExit       = 0x90
 	bpfImm        = 0x00
 	bpfSourceK    = 0x00
 	bpfSourceX    = 0x08

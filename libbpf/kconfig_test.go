@@ -76,8 +76,9 @@ func kconfigMap(t *testing.T, obj *BpfObject) *BpfMap {
 	return m
 }
 
-// checkOpenFixture compares the maps, the programs and the .kconfig DATASEC
-// layout of obj with what libbpf reports after opening the same object.
+// checkOpenFixture compares the maps, the programs, the .kconfig DATASEC
+// layout and the object BTF of obj with what libbpf reports after opening the
+// same object.
 func checkOpenFixture(t *testing.T, obj *BpfObject, f openFixture) {
 	t.Helper()
 
@@ -126,6 +127,7 @@ func checkOpenFixture(t *testing.T, obj *BpfObject, f openFixture) {
 	if f.Kconfig != nil {
 		checkKconfigDatasec(t, obj.btf, f.Kconfig)
 	}
+	checkOpenBTF(t, obj, f)
 }
 
 // checkKconfigDatasec compares the .kconfig DATASEC size and its variables,

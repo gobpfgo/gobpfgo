@@ -35,13 +35,17 @@ type BpfProgram struct {
 	jitedLen           uint32
 	// secIdx is the index of the section that holds the program's
 	// function, and secInsnOff and secInsnCnt are the function's first
-	// instruction and length in it. insns and relocs cover only that
-	// function, with relocation offsets from its first instruction.
-	// symGlobal is set for a global or weak function.
-	secIdx     int
-	secInsnOff int
-	secInsnCnt int
-	symGlobal  bool
+	// instruction and length in it. relocs cover only that function, with
+	// relocation offsets from its first instruction, and so does insns
+	// until a load replaces a main program's insns with its final code.
+	// symGlobal is set for a global or weak function, and markBtfStatic
+	// when that function also has hidden or internal visibility, so the
+	// load gives a subprogram's BTF FUNC static linkage.
+	secIdx        int
+	secInsnOff    int
+	secInsnCnt    int
+	symGlobal     bool
+	markBtfStatic bool
 }
 
 // BpfProgramName returns the function name of the program.
@@ -83,9 +87,10 @@ func BpfProgramSectionName(p *BpfProgram) string {
 	return p.sectionName
 }
 
-// BpfProgramInsnCnt returns the number of 8-byte BPF instructions of the
-// program's own function. The subprograms that the load appends are not
-// counted.
+// BpfProgramInsnCnt returns the number of 8-byte BPF instructions that
+// BpfProgramInsns returns: the program's own function before BpfObjectLoad,
+// and after a successful load the final code, which includes the appended
+// subprograms.
 func BpfProgramInsnCnt(p *BpfProgram) int {
 	if p == nil {
 		return 0
@@ -93,12 +98,18 @@ func BpfProgramInsnCnt(p *BpfProgram) int {
 	return len(p.insns) / 8
 }
 
-// BpfProgramInsns returns the raw instruction bytes of the program's own
-// function, as the object file holds them. The load relocates and appends
-// subprograms on a copy, so the bytes do not change.
+// BpfProgramInsns returns the program's instruction bytes. Before
+// BpfObjectLoad they are the program's own function as the object file holds
+// it. A successful load replaces them with a copy of the final code the
+// kernel received: CO-RE relocated, with a copy of every .text subprogram
+// the program reaches appended in the order the load first reaches each, the
+// calls pointing at those copies, and the map descriptors, global variable
+// offsets and extern values patched in. A failed load leaves them as they
+// were. A subprogram, which the program iteration skips, keeps its own
+// function. The object file's section data is never changed.
 //
-// The slice aliases the object. Do not modify it and do not use it after
-// BpfObjectClose.
+// The slice belongs to the program. Do not modify it and do not use it
+// after BpfObjectClose.
 func BpfProgramInsns(p *BpfProgram) []byte {
 	if p == nil {
 		return nil

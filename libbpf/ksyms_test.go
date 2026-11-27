@@ -7,7 +7,6 @@ package libbpf
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"reflect"
 	"strings"
@@ -40,12 +39,6 @@ func TestKsymsOpenOracle(t *testing.T) {
 			obj := openProg(t, prog)
 			f := loadOpenFixture(t, fixture)
 			checkOpenFixture(t, obj, f)
-			if f.KsymsBTF == "" {
-				t.Fatal("fixture has no .ksyms BTF")
-			}
-			if got := hex.EncodeToString(obj.btf.Raw()); got != f.KsymsBTF {
-				t.Fatalf("BTF after open:\n got %s\nwant %s", got, f.KsymsBTF)
-			}
 		})
 	}
 }
