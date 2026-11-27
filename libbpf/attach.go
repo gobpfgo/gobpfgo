@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_program__attach_kprobe_opts, bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_uprobe_multi, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
+// libbpf-symbols: bpf_program__attach_tracepoint_opts, bpf_program__attach_perf_event_opts, bpf_program__attach_raw_tracepoint_opts, bpf_program__attach_kprobe_multi_opts, bpf_program__attach_uprobe_multi, bpf_program__attach_trace_opts, bpf_program__attach_lsm, bpf_program__attach
 
 //go:build linux && (amd64 || arm64)
 
@@ -10,7 +10,6 @@ package libbpf
 import (
 	"debug/elf"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -22,15 +21,6 @@ import (
 // BPF_F_KPROBE_MULTI_RETURN makes a kprobe multi link call the program when
 // the probed functions return.
 const BPF_F_KPROBE_MULTI_RETURN uint32 = 1
-
-// BpfKprobeOpts are the optional settings of BpfProgramAttachKprobeOpts.
-// BpfCookie requires the perf link path, which the tracefs kprobe path does
-// not provide.
-type BpfKprobeOpts struct {
-	Retprobe  bool
-	Offset    uint64
-	BpfCookie uint64
-}
 
 // BpfTracepointOpts are the optional settings of
 // BpfProgramAttachTracepointOpts.
@@ -80,75 +70,6 @@ type BpfUprobeMultiOpts struct {
 // BpfTraceOpts are the optional settings of BpfProgramAttachTraceOpts.
 type BpfTraceOpts struct {
 	BpfCookie uint64
-}
-
-// BpfProgramAttachKprobe attaches a loaded program to funcName on every CPU.
-// retprobe selects a kretprobe instead of a kprobe.
-//
-// The call creates a tracefs event under the kprobes or kretprobes group and
-// one perf event, then attaches the program with PERF_EVENT_IOC_SET_BPF. The
-// caller must release the link with BpfLinkDestroy. Root or CAP_BPF plus write
-// access to tracefs is required.
-func BpfProgramAttachKprobe(prog *BpfProgram, retprobe bool, funcName string) (*BpfLink, error) {
-	return BpfProgramAttachKprobeOpts(prog, funcName, &BpfKprobeOpts{Retprobe: retprobe})
-}
-
-// BpfProgramAttachKprobeOpts attaches a loaded program to funcName with the
-// given options. Offset is the byte offset into the function. A nonzero
-// BpfCookie returns EOPNOTSUPP on the tracefs path.
-func BpfProgramAttachKprobeOpts(prog *BpfProgram, funcName string, opts *BpfKprobeOpts) (*BpfLink, error) {
-	const op = "bpf_program__attach_kprobe"
-	if err := checkAttachProgram(prog, op); err != nil {
-		return nil, err
-	}
-	if funcName == "" {
-		return nil, attachErr(op, unix.EINVAL)
-	}
-	if opts == nil {
-		opts = &BpfKprobeOpts{}
-	}
-	if opts.BpfCookie != 0 {
-		return nil, attachErr(op, unix.EOPNOTSUPP)
-	}
-
-	root, err := tracefsRoot()
-	if err != nil {
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	kind := probeKprobe
-	prefix := byte('p')
-	if opts.Retprobe {
-		kind = probeKretprobe
-		prefix = 'r'
-	}
-	event := &legacyEvent{
-		root: root,
-		kind: kind,
-		name: probeEventName(fmt.Sprintf("%s_0x%x", funcName, opts.Offset)),
-	}
-	line := fmt.Sprintf("%c:%s/%s %s+0x%x\n", prefix, event.group(), event.name, funcName, opts.Offset)
-	if err := event.add(line); err != nil {
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	id, err := event.id()
-	if err != nil {
-		_ = event.remove()
-		return nil, attachErr(op, errnoFromError(err))
-	}
-	perfFD, err := openTracepointPerf(id, -1, 0)
-	if err != nil {
-		_ = event.remove()
-		return nil, attachErr(op, errnoFromError(err))
-	}
-
-	link := &BpfLink{fd: perfFD, perfFD: perfFD, legacy: event}
-	if err := attachPerfEvent(perfFD, prog.fd); err != nil {
-		BpfLinkDestroy(link)
-		return nil, attachErr(op, errnoFromError(err))
-	}
-	return link, nil
 }
 
 // BpfProgramAttachTracepoint attaches a loaded program to a tracepoint named
@@ -249,6 +170,22 @@ func BpfProgramAttachPerfEventOpts(prog *BpfProgram, pfd int, opts *BpfPerfEvent
 			return nil, attachErr(op, errnoFromError(err))
 		}
 	}
+	return link, nil
+}
+
+// attachProbePerfEvent attaches prog to pfd, the perf event of a kprobe or
+// uprobe, with opts. On success the link owns pfd and event, the probe's
+// tracefs event or nil. On failure the call closes pfd and removes event.
+func attachProbePerfEvent(prog *BpfProgram, pfd int, event *legacyEvent, opts *BpfPerfEventOpts) (*BpfLink, error) {
+	link, err := BpfProgramAttachPerfEventOpts(prog, pfd, opts)
+	if err != nil {
+		unix.Close(pfd)
+		if event != nil {
+			_ = event.remove()
+		}
+		return nil, err
+	}
+	link.legacy = event
 	return link, nil
 }
 
@@ -521,7 +458,7 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 	switch def.prefix {
 	case "kprobe/", "kretprobe/":
 		funcName, offset := splitFuncOffset(target)
-		if def.prefix == "kretprobe/" && offset != 0 {
+		if funcName == "" || def.prefix == "kretprobe/" && offset != 0 {
 			return nil, attachErr(op, unix.EINVAL)
 		}
 		return BpfProgramAttachKprobeOpts(prog, funcName, &BpfKprobeOpts{Retprobe: def.prefix == "kretprobe/", Offset: offset})
@@ -588,13 +525,4 @@ func splitFuncOffset(spec string) (string, uint64) {
 // attachErr wraps a syscall error for an attach operation.
 func attachErr(op string, err error) error {
 	return &Error{Op: op, Errno: errnoFromError(err)}
-}
-
-// attachPerfEvent attaches the program with the ioctl path and enables the
-// perf event.
-func attachPerfEvent(perfFD, progFD int) error {
-	if err := unix.IoctlSetInt(perfFD, unix.PERF_EVENT_IOC_SET_BPF, progFD); err != nil {
-		return err
-	}
-	return unix.IoctlSetInt(perfFD, unix.PERF_EVENT_IOC_ENABLE, 0)
 }

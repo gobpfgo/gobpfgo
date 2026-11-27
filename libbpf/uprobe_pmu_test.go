@@ -24,15 +24,15 @@ func fakeLoadedProgram() *BpfProgram {
 	return &BpfProgram{fd: 1 << 30}
 }
 
-// fakeUprobePMU points the uprobe PMU directory at a temporary directory
-// holding files, a map from path inside the directory to its contents, for
-// the rest of the test.
-func fakeUprobePMU(t *testing.T, files map[string]string) {
+// fakeProbePMU points *dir, the sysfs directory of a probe PMU, at a
+// temporary directory holding files, a map from path inside the directory to
+// its contents, for the rest of the test.
+func fakeProbePMU(t *testing.T, dir *string, files map[string]string) {
 	t.Helper()
 
-	dir := t.TempDir()
+	fake := t.TempDir()
 	for name, data := range files {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(fake, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -41,15 +41,22 @@ func fakeUprobePMU(t *testing.T, files map[string]string) {
 		}
 	}
 
-	saved := uprobePMUDir
-	uprobePMUDir = dir
-	t.Cleanup(func() { uprobePMUDir = saved })
+	saved := *dir
+	*dir = fake
+	t.Cleanup(func() { *dir = saved })
+}
+
+// fakeUprobePMU fakes the uprobe PMU directory with files; see fakeProbePMU.
+func fakeUprobePMU(t *testing.T, files map[string]string) {
+	t.Helper()
+	fakeProbePMU(t, &uprobePMUDir, files)
 }
 
 // fakeTracefs points the tracefs root at a temporary directory with empty
-// probe control files for the rest of the test, and returns the path of its
-// uprobe_events file. The tracefs uprobe path appends its commands there and
-// then fails with ENOENT, because the directory has no event IDs.
+// probe control files for the rest of the test, and returns the directory.
+// A tracefs probe attach appends its commands to kprobe_events or
+// uprobe_events there and then fails with ENOENT, because the directory has
+// no event IDs.
 func fakeTracefs(t *testing.T) string {
 	t.Helper()
 
@@ -63,7 +70,7 @@ func fakeTracefs(t *testing.T) string {
 	saved := tracefsRoots
 	tracefsRoots = []string{root}
 	t.Cleanup(func() { tracefsRoots = saved })
-	return filepath.Join(root, "uprobe_events")
+	return root
 }
 
 // TestUprobePerfEventAttr checks the attribute of a uprobe PMU event for a
@@ -90,7 +97,7 @@ func TestUprobePerfEventAttr(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := uprobePerfEventAttr(tt.perfType, tt.retprobe, tt.retprobeBit, tt.offset, tt.refCtrOffset)
+			got := probePerfEventAttr(tt.perfType, tt.retprobe, tt.retprobeBit, tt.offset, tt.refCtrOffset)
 			want := unix.PerfEventAttr{
 				Type:   tt.perfType,
 				Size:   perfEventAttrSize,
@@ -119,7 +126,7 @@ func TestPerfEventOpenUprobeRefCtrLimit(t *testing.T) {
 		{math.MaxUint64, unix.EINVAL},
 	}
 	for _, tt := range tests {
-		fd, err := perfEventOpenUprobe(false, "/bin/true", 0x1000, -1, tt.refCtrOffset)
+		fd, err := perfEventOpenProbe(true, false, "/bin/true", 0x1000, -1, tt.refCtrOffset)
 		if fd != -1 || !errors.Is(err, tt.want) {
 			t.Errorf("refCtrOffset %#x: %d, %v, want %v", tt.refCtrOffset, fd, err, tt.want)
 		}
@@ -136,7 +143,7 @@ func TestPerfEventOpenUprobeNoPMU(t *testing.T) {
 		if _, err := determineUprobePerfType(); !errors.Is(err, unix.ENOENT) {
 			t.Errorf("perf type: %v, want ENOENT", err)
 		}
-		fd, err := perfEventOpenUprobe(false, "/bin/true", 0x1000, -1, 0x3000)
+		fd, err := perfEventOpenProbe(true, false, "/bin/true", 0x1000, -1, 0x3000)
 		if fd != -1 || !errors.Is(err, unix.ENOENT) {
 			t.Errorf("open: %d, %v, want ENOENT", fd, err)
 		}
@@ -147,14 +154,14 @@ func TestPerfEventOpenUprobeNoPMU(t *testing.T) {
 		if _, err := determineUprobeRetprobeBit(); !errors.Is(err, unix.ENOENT) {
 			t.Errorf("retprobe bit: %v, want ENOENT", err)
 		}
-		fd, err := perfEventOpenUprobe(true, "/bin/true", 0x1000, -1, 0x3000)
+		fd, err := perfEventOpenProbe(true, true, "/bin/true", 0x1000, -1, 0x3000)
 		if fd != -1 || !errors.Is(err, unix.ENOENT) {
 			t.Errorf("open: %d, %v, want ENOENT", fd, err)
 		}
 	})
 }
 
-// TestProbePidCPU checks the perf_event_open pid and cpu of a uprobe: every
+// TestProbePidCPU checks the perf_event_open pid and cpu of a probe: every
 // process on CPU 0, or one process on every CPU.
 func TestProbePidCPU(t *testing.T) {
 	tests := []struct {
@@ -172,14 +179,25 @@ func TestProbePidCPU(t *testing.T) {
 	}
 }
 
-// TestUprobePMUFiles reads the PMU type and the retprobe bit in the kernel's
-// sysfs formats. Like the C library's scanf, the number may follow white
-// space and ends at the first other byte; a file without one is EIO.
-func TestUprobePMUFiles(t *testing.T) {
+// TestProbePMUFiles reads the PMU type and the retprobe bit of the kprobe and
+// uprobe PMUs in the kernel's sysfs formats. Like the C library's scanf, the
+// number may follow white space and ends at the first other byte; a file
+// without one is EIO.
+func TestProbePMUFiles(t *testing.T) {
 	const typeFile, bitFile = "type", "format/retprobe"
-	readers := map[string]func() (uint32, error){
-		typeFile: determineUprobePerfType,
-		bitFile:  determineUprobeRetprobeBit,
+	pmus := []struct {
+		name    string
+		dir     *string
+		readers map[string]func() (uint32, error)
+	}{
+		{"kprobe", &kprobePMUDir, map[string]func() (uint32, error){
+			typeFile: determineKprobePerfType,
+			bitFile:  determineKprobeRetprobeBit,
+		}},
+		{"uprobe", &uprobePMUDir, map[string]func() (uint32, error){
+			typeFile: determineUprobePerfType,
+			bitFile:  determineUprobeRetprobeBit,
+		}},
 	}
 
 	tests := []struct {
@@ -204,20 +222,22 @@ func TestUprobePMUFiles(t *testing.T) {
 		{"bit of another field", bitFile, "config1:0\n", 0, unix.EIO},
 		{"bit negative", bitFile, "config:-1\n", 0, unix.EIO},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fakeUprobePMU(t, map[string]string{tt.file: tt.data})
-			got, err := readers[tt.file]()
-			if tt.err != 0 {
-				if !errors.Is(err, tt.err) {
-					t.Fatalf("read %s %q = %d, %v, want %v", tt.file, tt.data, got, err, tt.err)
+	for _, pmu := range pmus {
+		for _, tt := range tests {
+			t.Run(pmu.name+" "+tt.name, func(t *testing.T) {
+				fakeProbePMU(t, pmu.dir, map[string]string{tt.file: tt.data})
+				got, err := pmu.readers[tt.file]()
+				if tt.err != 0 {
+					if !errors.Is(err, tt.err) {
+						t.Fatalf("read %s %q = %d, %v, want %v", tt.file, tt.data, got, err, tt.err)
+					}
+					return
 				}
-				return
-			}
-			if err != nil || got != tt.want {
-				t.Fatalf("read %s %q = %d, %v, want %d", tt.file, tt.data, got, err, tt.want)
-			}
-		})
+				if err != nil || got != tt.want {
+					t.Fatalf("read %s %q = %d, %v, want %d", tt.file, tt.data, got, err, tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -241,7 +261,7 @@ type uprobeRoute struct {
 // the perf and link modes are EOPNOTSUPP and a reference counter is EINVAL.
 // A BPF cookie is not refused before the attach.
 func TestBpfProgramAttachUprobeRouting(t *testing.T) {
-	events := fakeTracefs(t)
+	events := filepath.Join(fakeTracefs(t), uprobeEventsFile)
 	const target = "/nonexistent/usdt_sema_target"
 	pmu := map[string]string{"type": "9\n"}
 
@@ -278,29 +298,29 @@ func TestBpfProgramAttachUprobeRouting(t *testing.T) {
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("attach error = %v, want %v", err, tt.want)
 			}
-			checkUprobeEventCommands(t, string(readTestFile(t, events)), tt.events, target+":0x1024")
+			checkProbeEventCommands(t, string(readTestFile(t, events)), tt.events, target+":0x1024")
 		})
 	}
 }
 
-// checkUprobeEventCommands requires the tracefs commands to add an event to
+// checkProbeEventCommands requires the tracefs commands to add an event to
 // group for location and remove it again, or, when group is "", to be empty.
-func checkUprobeEventCommands(t *testing.T, commands, group, location string) {
+func checkProbeEventCommands(t *testing.T, commands, group, location string) {
 	t.Helper()
 
 	if group == "" {
 		if commands != "" {
-			t.Fatalf("uprobe_events got %q, want nothing", commands)
+			t.Fatalf("probe events got %q, want nothing", commands)
 		}
 		return
 	}
 	prefix := "p:"
-	if group == "uretprobes" {
+	if group == "kretprobes" || group == "uretprobes" {
 		prefix = "r:"
 	}
 	lines := strings.Split(strings.TrimSuffix(commands, "\n"), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], prefix+group+"/gobpfgo_") ||
 		!strings.HasSuffix(lines[0], " "+location) || !strings.HasPrefix(lines[1], "-:"+group+"/gobpfgo_") {
-		t.Fatalf("uprobe_events got %q, want a %s event added and removed", commands, group)
+		t.Fatalf("probe events got %q, want a %s event added and removed", commands, group)
 	}
 }

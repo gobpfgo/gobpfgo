@@ -23,12 +23,12 @@ import (
 // read.
 const uprobeModeCookie = 0x0bad_cafe_f00d_0001
 
-// TestUprobeAttachMode checks the mode table on every combination of the two
-// kernel capabilities: the default mode follows the kernel, the legacy mode
-// always uses tracefs and the ioctl, the perf mode needs the PMU and forces
-// the ioctl, and the link mode needs the PMU and perf links. Only the link
-// mode asks for perf link support.
-func TestUprobeAttachMode(t *testing.T) {
+// TestProbeAttachMode checks the kprobe and uprobe mode table on every
+// combination of the two kernel capabilities: the default mode follows the
+// kernel, the legacy mode always uses tracefs and the ioctl, the perf mode
+// needs the PMU and forces the ioctl, and the link mode needs the PMU and perf
+// links. Only the link mode asks for perf link support.
+func TestProbeAttachMode(t *testing.T) {
 	tests := []struct {
 		mode           ProbeAttachMode
 		noPMU          bool
@@ -61,7 +61,7 @@ func TestUprobeAttachMode(t *testing.T) {
 				return tt.perfLink
 			}
 
-			legacy, forceIoctl, err := uprobeAttachMode(tt.mode, tt.noPMU, perfLink)
+			legacy, forceIoctl, err := probeAttachMode(tt.mode, tt.noPMU, perfLink)
 			if tt.want != 0 && !errors.Is(err, tt.want) || tt.want == 0 && err != nil {
 				t.Fatalf("error = %v, want %v", err, tt.want)
 			}
@@ -311,7 +311,7 @@ func TestBpfProgramAttachUprobeModes(t *testing.T) {
 // and only checks the attach error.
 func runUprobeModeCase(t *testing.T, c uprobeModeCase) {
 	readsCookie := c.cookie && featBpfCookie.supported()
-	obj, prog, mapName := loadUprobeModeProgram(t, readsCookie)
+	obj, prog, mapName := loadProbeModeProgram(t, readsCookie, "../testdata/progs/uprobe.bpf.o", "handle_uprobe")
 	defer BpfObjectClose(obj)
 
 	opts := &BpfUprobeOpts{AttachMode: c.mode, RefCtrOffset: c.refCtr}
@@ -319,7 +319,7 @@ func runUprobeModeCase(t *testing.T, c uprobeModeCase) {
 		opts.BpfCookie = uprobeModeCookie
 	}
 	offset := uprobeTargetOffset(t)
-	events, fds := uprobeEvents(t), openDescriptors(t)
+	events, fds := probeEvents(t, uprobeEventsFile), openDescriptors(t)
 
 	link, err := BpfProgramAttachUprobeOpts(prog, 0, "/proc/self/exe", offset, opts)
 	if c.want != 0 {
@@ -327,63 +327,58 @@ func runUprobeModeCase(t *testing.T, c uprobeModeCase) {
 			BpfLinkDestroy(link)
 			t.Fatalf("attach = %v, %v, want %v", link, err, c.want)
 		}
-		checkNothingLeft(t, events, fds)
+		checkNothingLeft(t, uprobeEventsFile, events, fds)
 		return
 	}
 	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	checkUprobeModeLink(t, link, c.mode)
+	_, pmuErr := determineUprobePerfType()
+	checkProbeModeLink(t, link, c.mode, pmuErr != nil)
 	if link.legacy != nil {
 		line := fmt.Sprintf("p:%s/%s /proc/self/exe:0x%016x", link.legacy.group(), link.legacy.name, offset)
-		if got := uprobeEvents(t); !strings.Contains(got, line) {
+		if got := probeEvents(t, uprobeEventsFile); !strings.Contains(got, line) {
 			t.Errorf("uprobe_events has no %q:\n%s", line, got)
 		}
-	} else if got := uprobeEvents(t); got != events {
+	} else if got := probeEvents(t, uprobeEventsFile); got != events {
 		t.Errorf("a PMU attach changed uprobe_events:\n%s", got)
 	}
 
 	uprobeTarget()
-	got := mapValue(t, obj, mapName)
-	if readsCookie && got != uprobeModeCookie {
-		t.Errorf("cookie = %#x, want %#x", got, uprobeModeCookie)
-	}
-	if !readsCookie && got == 0 {
-		t.Error("count = 0, want the uprobe to fire")
-	}
+	checkProbeModeValue(t, obj, mapName, readsCookie, uprobeModeCookie)
 
 	BpfLinkDestroy(link)
-	checkNothingLeft(t, events, fds)
+	checkNothingLeft(t, uprobeEventsFile, events, fds)
 }
 
-// loadUprobeModeProgram loads the counting uprobe program, or the cookie
-// program retyped as a kprobe program, which a uprobe needs, and returns the
-// object, the program and the map it writes.
-func loadUprobeModeProgram(t *testing.T, readsCookie bool) (*BpfObject, *BpfProgram, string) {
+// loadProbeModeProgram loads the counting program name in the object at path,
+// or the cookie program retyped as a kprobe program, which a kprobe and a
+// uprobe need, and returns the object, the program and the map it writes.
+func loadProbeModeProgram(t *testing.T, readsCookie bool, path, name string) (*BpfObject, *BpfProgram, string) {
 	t.Helper()
 
 	if readsCookie {
 		obj, prog := loadKprobeRetypedObject(t, "../testdata/progs/cookie.bpf.o", "handle_cookie", BPF_ATTACH_TYPE_UNSPEC)
 		return obj, prog, "cookies"
 	}
-	obj := loadTestObject(t, "../testdata/progs/uprobe.bpf.o")
-	prog := BpfObjectFindProgramByName(obj, "handle_uprobe")
+	obj := loadTestObject(t, path)
+	prog := BpfObjectFindProgramByName(obj, name)
 	if prog == nil {
 		BpfObjectClose(obj)
-		t.Fatal("program handle_uprobe not found")
+		t.Fatalf("program %s not found", name)
 	}
 	return obj, prog, "counts"
 }
 
-// checkUprobeModeLink checks what the attach created: a tracefs event only
-// in the legacy mode or, in the default mode, without the uprobe PMU; and a
-// BPF perf link, whose descriptor differs from the perf event's, in the link
-// mode and, when the kernel has perf links, in the default mode.
-func checkUprobeModeLink(t *testing.T, link *BpfLink, mode ProbeAttachMode) {
+// checkProbeModeLink checks what a kprobe or uprobe attach created: a tracefs
+// event only in the legacy mode or, in the default mode, on a kernel without
+// the probe's PMU (noPMU); and a BPF perf link, whose descriptor differs from
+// the perf event's, in the link mode and, when the kernel has perf links, in
+// the default mode.
+func checkProbeModeLink(t *testing.T, link *BpfLink, mode ProbeAttachMode, noPMU bool) {
 	t.Helper()
 
-	_, pmuErr := determineUprobePerfType()
-	wantLegacy := mode == ProbeAttachModeLegacy || mode == ProbeAttachModeDefault && pmuErr != nil
+	wantLegacy := mode == ProbeAttachModeLegacy || mode == ProbeAttachModeDefault && noPMU
 	wantPerfLink := mode == ProbeAttachModeLink || mode == ProbeAttachModeDefault && perfLinkSupported()
 
 	if fd := BpfLinkFD(link); fd < 0 || link.perfFD < 0 {
@@ -397,17 +392,38 @@ func checkUprobeModeLink(t *testing.T, link *BpfLink, mode ProbeAttachMode) {
 	}
 }
 
-// uprobeEvents returns the tracefs uprobe_events file, or "" without tracefs.
-func uprobeEvents(t *testing.T) string {
+// checkProbeModeValue requires the map the program writes to hold cookie when
+// it reads the cookie, and a nonzero count otherwise.
+func checkProbeModeValue(t *testing.T, obj *BpfObject, mapName string, readsCookie bool, cookie uint64) {
+	t.Helper()
+
+	got := mapValue(t, obj, mapName)
+	if readsCookie && got != cookie {
+		t.Errorf("cookie = %#x, want %#x", got, cookie)
+	}
+	if !readsCookie && got == 0 {
+		t.Error("count = 0, want the probe to fire")
+	}
+}
+
+// The tracefs probe control files.
+const (
+	kprobeEventsFile = "kprobe_events"
+	uprobeEventsFile = "uprobe_events"
+)
+
+// probeEvents returns the tracefs probe control file, kprobe_events or
+// uprobe_events, or "" without tracefs.
+func probeEvents(t *testing.T, file string) string {
 	t.Helper()
 
 	root, err := tracefsRoot()
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(root, "uprobe_events"))
+	data, err := os.ReadFile(filepath.Join(root, file))
 	if err != nil {
-		t.Fatalf("read uprobe_events: %v", err)
+		t.Fatalf("read %s: %v", file, err)
 	}
 	return string(data)
 }
@@ -423,13 +439,13 @@ func openDescriptors(t *testing.T) int {
 	return len(entries)
 }
 
-// checkNothingLeft requires the tracefs uprobe events and the number of open
-// descriptors to be what they were before the attach.
-func checkNothingLeft(t *testing.T, events string, fds int) {
+// checkNothingLeft requires the tracefs probe control file and the number of
+// open descriptors to be what they were before the attach.
+func checkNothingLeft(t *testing.T, file, events string, fds int) {
 	t.Helper()
 
-	if got := uprobeEvents(t); got != events {
-		t.Errorf("uprobe_events changed:\n%s\nwas:\n%s", got, events)
+	if got := probeEvents(t, file); got != events {
+		t.Errorf("%s changed:\n%s\nwas:\n%s", file, got, events)
 	}
 	if got := openDescriptors(t); got != fds {
 		t.Errorf("%d descriptors open, want %d", got, fds)

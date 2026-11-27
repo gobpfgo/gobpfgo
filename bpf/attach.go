@@ -23,7 +23,8 @@ func (p *Program) AttachKprobe(retprobe bool, funcName string) (*Link, error) {
 }
 
 // AttachKprobeOpts attaches the program to the kernel function funcName with
-// opts. See libbpf.BpfProgramAttachKprobeOpts.
+// opts, or to the raw kernel address in opts.Offset when funcName is empty.
+// See libbpf.BpfProgramAttachKprobeOpts.
 func (p *Program) AttachKprobeOpts(funcName string, opts *libbpf.BpfKprobeOpts) (*Link, error) {
 	if p.isClosed() {
 		return nil, ErrClosed

@@ -33,9 +33,9 @@ type BpfLink struct {
 
 // BpfLinkFD returns the link descriptor, or -1 when the link has been detached
 // or destroyed. For a perf event attached with PERF_EVENT_IOC_SET_BPF, such as
-// a tracefs kprobe or a uprobe on a kernel without BPF perf links, this is the
-// perf event descriptor. A USDT link has no descriptor of its own and returns
-// -1.
+// a kprobe or uprobe in the legacy or perf mode or on a kernel without BPF
+// perf links, this is the perf event descriptor. A USDT link has no descriptor
+// of its own and returns -1.
 func BpfLinkFD(link *BpfLink) int {
 	if link == nil || link.detached || link.destroyed || link.usdt != nil {
 		return -1
