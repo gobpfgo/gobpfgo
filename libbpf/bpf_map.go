@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_map__name, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path, bpf_map__fd, bpf_map__lookup_elem
+// libbpf-symbols: bpf_map__name, bpf_map__is_internal, bpf_map__type, bpf_map__key_size, bpf_map__value_size, bpf_map__max_entries, bpf_map__map_flags, bpf_map__btf_key_type_id, bpf_map__btf_value_type_id, bpf_map__pin_path, bpf_map__fd, bpf_map__lookup_elem
 
 package libbpf
 
@@ -13,8 +13,16 @@ import (
 // BpfMap is a map parsed from an object. It carries the definition metadata
 // from the ELF and BTF sections; the load step adds the kernel descriptor.
 type BpfMap struct {
-	name           string
-	symbolName     string
+	name       string
+	symbolName string
+
+	// A global data map records its ELF section name and index, and the
+	// section image written into the map after creation.
+	realName     string
+	libbpfType   libbpfMapType
+	secIdx       int
+	initialValue []byte
+
 	mapType        BpfMapType
 	keySize        uint32
 	valueSize      uint32
@@ -31,11 +39,29 @@ type BpfMap struct {
 
 // BpfMapName returns the name declared in the map definition, or an empty
 // string when the map is unnamed.
+//
+// A global data map is named after its object and section, such as
+// "my_objec.data", which is also its kernel name. A custom data section such
+// as ".data.custom" uses the section name, because the kernel name may be cut
+// to 15 characters.
 func BpfMapName(m *BpfMap) string {
 	if m == nil {
 		return ""
 	}
+	if mapUsesRealName(m) {
+		return m.realName
+	}
 	return m.name
+}
+
+// BpfMapIsInternal reports whether m is a global data map that the object
+// created for a .data, .rodata or .bss section, rather than a map defined in
+// the .maps section.
+func BpfMapIsInternal(m *BpfMap) bool {
+	if m == nil {
+		return false
+	}
+	return m.libbpfType != libbpfMapUnspec
 }
 
 // BpfMapTypeOf returns the map type declared in the definition.

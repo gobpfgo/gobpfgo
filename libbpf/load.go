@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.c
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info
+// libbpf-symbols: bpf_object__load, bpf_object_load, bpf_object__create_map, bpf_object__populate_internal_map, bpf_map_create, bpf_prog_load, adjust_prog_btf_ext_info, bpf_program__record_reloc, bpf_object__relocate_data
 
 //go:build linux && (amd64 || arm64)
 
@@ -19,7 +19,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const bpfPseudoMapFD = 1
+// Source register values of a relocated ld_imm64 instruction.
+const (
+	bpfPseudoMapFD    = 1
+	bpfPseudoMapValue = 2
+)
 
 // mapTakesBTF reports whether BPF_MAP_CREATE accepts the object BTF and the
 // key and value type ids for a map type. The kernel rejects them for maps that
@@ -46,8 +50,10 @@ func mapTakesBTF(mapType BpfMapType) bool {
 }
 
 // BpfObjectLoad loads the object into the kernel. It validates and loads the
-// BTF, creates the maps with their BTF type ids, relocates the map references
-// in each program and loads the programs.
+// BTF, creates the maps with their BTF type ids, writes the initial contents
+// of the global data maps, relocates the map and global variable references
+// in each program and loads the programs. The .rodata maps are frozen after
+// their contents are written, so user space can read but not change them.
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
@@ -89,60 +95,10 @@ func BpfObjectLoad(obj *BpfObject) error {
 	}
 
 	for _, m := range obj.maps {
-		if m.reused {
-			info, err := sys.MapInfoByFD(m.fd)
-			if err != nil {
-				obj.closeLoadFDs()
-				return &Error{
-					Op:    "bpf_obj_get_info_by_fd",
-					Errno: errnoFromError(err),
-					Log:   m.name,
-				}
-			}
-			m.id = info.ID
-			continue
-		}
-
-		attr := &sys.MapCreateAttr{
-			MapType:        uint32(m.mapType),
-			KeySize:        m.keySize,
-			ValueSize:      m.valueSize,
-			MaxEntries:     m.maxEntries,
-			MapFlags:       m.mapFlags,
-			BtfFD:          uint32(btfFD),
-			BtfKeyTypeID:   m.btfKeyTypeID,
-			BtfValueTypeID: m.btfValueTypeID,
-		}
-		if !mapTakesBTF(m.mapType) {
-			attr.BtfFD = 0
-			attr.BtfKeyTypeID = 0
-			attr.BtfValueTypeID = 0
-			m.btfKeyTypeID = 0
-			m.btfValueTypeID = 0
-		}
-		attr.SetMapName(m.name)
-
-		fd, err := sys.MapCreate(attr, nil)
-		if err != nil {
+		if err := createMap(m, btfFD); err != nil {
 			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_map_create",
-				Errno: errnoFromError(err),
-				Log:   m.name,
-			}
+			return err
 		}
-		m.fd = fd
-
-		info, err := sys.MapInfoByFD(fd)
-		if err != nil {
-			obj.closeLoadFDs()
-			return &Error{
-				Op:    "bpf_obj_get_info_by_fd",
-				Errno: errnoFromError(err),
-				Log:   m.name,
-			}
-		}
-		m.id = info.ID
 	}
 
 	license := append([]byte(obj.license), 0)
@@ -228,6 +184,76 @@ func BpfObjectLoad(obj *BpfObject) error {
 	return nil
 }
 
+// createMap creates m with the object BTF and records its descriptor and id.
+// A reused map keeps its descriptor and only gets the id. A global data map
+// gets its initial contents after creation.
+func createMap(m *BpfMap, btfFD int) error {
+	if !m.reused {
+		attr := &sys.MapCreateAttr{
+			MapType:        uint32(m.mapType),
+			KeySize:        m.keySize,
+			ValueSize:      m.valueSize,
+			MaxEntries:     m.maxEntries,
+			MapFlags:       m.mapFlags,
+			BtfFD:          uint32(btfFD),
+			BtfKeyTypeID:   m.btfKeyTypeID,
+			BtfValueTypeID: m.btfValueTypeID,
+		}
+		if !mapTakesBTF(m.mapType) {
+			attr.BtfFD = 0
+			attr.BtfKeyTypeID = 0
+			attr.BtfValueTypeID = 0
+			m.btfKeyTypeID = 0
+			m.btfValueTypeID = 0
+		}
+		attr.SetMapName(m.name)
+
+		fd, err := sys.MapCreate(attr, nil)
+		if err != nil {
+			return &Error{Op: "bpf_map_create", Errno: errnoFromError(err), Log: m.name}
+		}
+		m.fd = fd
+
+		if m.libbpfType != libbpfMapUnspec {
+			if err := populateInternalMap(m); err != nil {
+				return err
+			}
+		}
+	}
+
+	info, err := sys.MapInfoByFD(m.fd)
+	if err != nil {
+		return &Error{Op: "bpf_obj_get_info_by_fd", Errno: errnoFromError(err), Log: m.name}
+	}
+	m.id = info.ID
+	return nil
+}
+
+// populateInternalMap writes the section image into the only element of a
+// global data map with one BPF_MAP_UPDATE_ELEM, then freezes a read-only data
+// map so user space cannot change it.
+func populateInternalMap(m *BpfMap) error {
+	key := make([]byte, internalMapKeySize)
+	if err := sys.MapUpdateElem(m.fd, key, m.initialValue, 0); err != nil {
+		return &Error{
+			Op:    "bpf_map_update_elem",
+			Errno: errnoFromError(err),
+			Log:   fmt.Sprintf("map '%s': failed to set initial contents", BpfMapName(m)),
+		}
+	}
+
+	if m.libbpfType == libbpfMapRodata {
+		if err := sys.MapFreeze(m.fd); err != nil {
+			return &Error{
+				Op:    "bpf_map_freeze",
+				Errno: errnoFromError(err),
+				Log:   fmt.Sprintf("map '%s': failed to freeze as read-only", BpfMapName(m)),
+			}
+		}
+	}
+	return nil
+}
+
 // programFuncInfo encodes the .BTF.ext function records of p's section in the
 // struct bpf_func_info layout BPF_PROG_LOAD expects. Records past the program's
 // instructions are ignored.
@@ -289,31 +315,112 @@ func programLineInfo(ext *btf.ExtSpec, p *BpfProgram) []byte {
 	return nil
 }
 
-// relocateProgram patches the map references in a private copy of the program
-// instructions. The map descriptor is written into the 64-bit immediate of the
-// ld_imm64 pair and src_reg is set to BPF_PSEUDO_MAP_FD.
+// relocateProgram patches the map and global variable references in a private
+// copy of the program instructions. A map reference becomes a
+// BPF_PSEUDO_MAP_FD load of the map descriptor. A global variable reference
+// becomes a BPF_PSEUDO_MAP_VALUE load: the first immediate holds the map
+// descriptor and the second the variable's offset in the map value.
 func relocateProgram(obj *BpfObject, p *BpfProgram, insns []byte) error {
 	for _, rel := range p.relocs {
 		if rel.Type != elf.R_BPF_64_64 {
 			return fmt.Errorf("unsupported relocation type %d for %s", rel.Type, rel.Symbol)
 		}
 
-		m := findMapBySymbol(obj, rel.Symbol)
-		if m == nil {
-			return fmt.Errorf("map %s not found", rel.Symbol)
+		r, err := recordReloc(obj, p, rel, insns)
+		if err != nil {
+			return err
 		}
-		if m.fd < 0 {
-			return fmt.Errorf("map %s has no descriptor", rel.Symbol)
+		if r.m.fd < 0 {
+			return fmt.Errorf("map %s has no descriptor", BpfMapName(r.m))
 		}
-
-		off := int(rel.Offset)
-		if off < 0 || off+16 > len(insns) {
-			return fmt.Errorf("relocation for %s at %d is out of range", rel.Symbol, off)
-		}
-
-		insns[off+1] = (insns[off+1] & 0x0f) | (bpfPseudoMapFD << 4)
-		binary.NativeEndian.PutUint32(insns[off+4:], uint32(m.fd))
-		binary.NativeEndian.PutUint32(insns[off+12:], 0)
+		patchReloc(insns, r)
 	}
 	return nil
+}
+
+// patchReloc rewrites the ld_imm64 pair at r.insnOff. The source register is
+// the high nibble of the second byte on the little-endian targets.
+func patchReloc(insns []byte, r progReloc) {
+	insn := insns[r.insnOff:]
+	switch r.kind {
+	case relocLD64:
+		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapFD << 4)
+		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
+		binary.NativeEndian.PutUint32(insn[12:], 0)
+	case relocData:
+		imm := binary.NativeEndian.Uint32(insn[4:])
+		binary.NativeEndian.PutUint32(insn[12:], imm+r.symOff)
+		insn[1] = (insn[1] & 0x0f) | (bpfPseudoMapValue << 4)
+		binary.NativeEndian.PutUint32(insn[4:], uint32(r.m.fd))
+	}
+}
+
+// relocKind is what a program relocation patches.
+type relocKind int
+
+const (
+	// relocLD64 loads a map descriptor.
+	relocLD64 relocKind = iota
+	// relocData loads the address of a global variable inside its map.
+	relocData
+)
+
+// progReloc is one resolved program relocation. insnOff is the byte offset of
+// the ld_imm64 instruction; symOff is the symbol value added to the
+// instruction's own immediate for a global data relocation.
+type progReloc struct {
+	kind    relocKind
+	insnOff int
+	m       *BpfMap
+	symOff  uint32
+}
+
+// recordReloc resolves one ELF relocation of program p against obj's maps.
+//
+// A symbol in .maps names a map. A symbol in a data section refers to that
+// section's internal map; the symbol value, zero for a section symbol, is the
+// variable offset, and the instruction immediate carries any extra offset.
+func recordReloc(obj *BpfObject, p *BpfProgram, rel elf.Reloc, insns []byte) (progReloc, error) {
+	off := int(rel.Offset)
+	if off < 0 || off%bpfInsnLength != 0 || off+2*bpfInsnLength > len(insns) {
+		return progReloc{}, fmt.Errorf("prog '%s': relocation at %d is out of range", p.name, off)
+	}
+	if insns[off] != bpfLD|bpfImm|bpfSizeDW {
+		return progReloc{}, fmt.Errorf("prog '%s': invalid relo against '%s' for insns[%d].code 0x%x",
+			p.name, rel.Symbol, off/bpfInsnLength, insns[off])
+	}
+	if obj.elf == nil || int(rel.SymbolIndex) >= len(obj.elf.Symbols) {
+		return progReloc{}, fmt.Errorf("prog '%s': symbol #%d not found", p.name, rel.SymbolIndex)
+	}
+
+	sym := obj.elf.Symbols[rel.SymbolIndex]
+	symName := sym.Name
+	if sym.Type == elf.STT_SECTION && symName == "" {
+		symName = sym.Section
+	}
+	shndx := int(sym.SectionIndex)
+	if shndx == 0 || sym.SectionIndex >= elf.SHN_LORESERVE || shndx >= len(obj.elf.Sections) {
+		return progReloc{}, fmt.Errorf("prog '%s': invalid relo against '%s' in special section 0x%x; forgot to initialize global var?..",
+			p.name, symName, shndx)
+	}
+
+	sec := &obj.elf.Sections[shndx]
+	typ := dataSectionType(sec)
+	if typ == libbpfMapUnspec {
+		if sec.Name != mapsSec {
+			return progReloc{}, fmt.Errorf("prog '%s': bad map relo against '%s' in section '%s'", p.name, symName, sec.Name)
+		}
+		m := findMapBySymbol(obj, rel.Symbol)
+		if m == nil {
+			return progReloc{}, fmt.Errorf("map %s not found", rel.Symbol)
+		}
+		return progReloc{kind: relocLD64, insnOff: off, m: m}, nil
+	}
+
+	for _, m := range obj.maps {
+		if m.libbpfType == typ && m.secIdx == shndx {
+			return progReloc{kind: relocData, insnOff: off, m: m, symOff: uint32(sym.Value)}, nil
+		}
+	}
+	return progReloc{}, fmt.Errorf("prog '%s': data relo failed to find map for section '%s'", p.name, sec.Name)
 }

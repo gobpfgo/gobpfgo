@@ -38,19 +38,23 @@ const SHT_LLVM_ADDRSIG elf.SectionType = 0x6fff4c03
 
 // Re-exported so callers do not need to import debug/elf as well.
 const (
-	EM_BPF   = elf.EM_BPF
-	STT_FUNC = elf.STT_FUNC
+	EM_BPF        = elf.EM_BPF
+	STT_FUNC      = elf.STT_FUNC
+	STT_SECTION   = elf.STT_SECTION
+	SHN_LORESERVE = elf.SHN_LORESERVE
 )
 
 // Reloc is one relocation entry. Section is the target section name, Symbol
-// the referenced symbol, Type the ELF relocation type and Addend the RELA
-// addend.
+// the referenced symbol name, SymbolIndex its index in Object.Symbols, Type the
+// ELF relocation type and Addend the RELA addend. A section symbol has an empty
+// name; SymbolIndex still identifies it.
 type Reloc struct {
-	Section string
-	Offset  uint64
-	Symbol  string
-	Type    uint32
-	Addend  int64
+	Section     string
+	Offset      uint64
+	Symbol      string
+	SymbolIndex uint32
+	Type        uint32
+	Addend      int64
 }
 
 // Symbol type and binding values used by the object loader.
@@ -265,9 +269,10 @@ func parseRelocs(s *elf.Section, target string, symbols []Symbol, order binary.B
 		info := order.Uint64(data[off+8:])
 		symIndex := info >> 32
 		reloc := Reloc{
-			Section: target,
-			Offset:  order.Uint64(data[off:]),
-			Type:    uint32(info & 0xffffffff),
+			Section:     target,
+			Offset:      order.Uint64(data[off:]),
+			SymbolIndex: uint32(symIndex),
+			Type:        uint32(info & 0xffffffff),
 		}
 		if symIndex < uint64(len(symbols)) {
 			reloc.Symbol = symbols[symIndex].Name

@@ -16,20 +16,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// openFixtureMap is one map of an open scenario fixture.
+type openFixtureMap struct {
+	Name           string `json:"name"`
+	Type           uint32 `json:"type"`
+	KeySize        uint32 `json:"key_size"`
+	ValueSize      uint32 `json:"value_size"`
+	MaxEntries     uint32 `json:"max_entries"`
+	MapFlags       uint32 `json:"map_flags"`
+	BtfKeyTypeID   uint32 `json:"btf_key_type_id"`
+	BtfValueTypeID uint32 `json:"btf_value_type_id"`
+	PinPath        string `json:"pin_path"`
+}
+
 type openFixture struct {
-	ObjectName string `json:"object_name"`
-	Maps       []struct {
-		Name           string `json:"name"`
-		Type           uint32 `json:"type"`
-		KeySize        uint32 `json:"key_size"`
-		ValueSize      uint32 `json:"value_size"`
-		MaxEntries     uint32 `json:"max_entries"`
-		MapFlags       uint32 `json:"map_flags"`
-		BtfKeyTypeID   uint32 `json:"btf_key_type_id"`
-		BtfValueTypeID uint32 `json:"btf_value_type_id"`
-		PinPath        string `json:"pin_path"`
-	} `json:"maps"`
-	Programs []struct {
+	ObjectName string           `json:"object_name"`
+	Maps       []openFixtureMap `json:"maps"`
+	Programs   []struct {
 		Name               string `json:"name"`
 		Type               uint32 `json:"type"`
 		ExpectedAttachType uint32 `json:"expected_attach_type"`
@@ -38,10 +41,11 @@ type openFixture struct {
 	} `json:"programs"`
 }
 
-func loadOpenFixture(t *testing.T) openFixture {
+// loadOpenFixture reads an open scenario fixture from testdata/oracle.
+func loadOpenFixture(t *testing.T, name string) openFixture {
 	t.Helper()
 
-	data, err := os.ReadFile("../testdata/oracle/open.json")
+	data, err := os.ReadFile("../testdata/oracle/" + name)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -105,7 +109,7 @@ func loadLoadFixture(t *testing.T) loadFixture {
 }
 
 func TestBpfObjectOpenKprobe(t *testing.T) {
-	f := loadOpenFixture(t)
+	f := loadOpenFixture(t, "open.json")
 
 	obj, err := BpfObjectOpenFile("../testdata/progs/kprobe.bpf.o", nil)
 	if err != nil {

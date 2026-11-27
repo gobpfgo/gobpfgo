@@ -2,7 +2,7 @@
 // gobpfgo-origin: original bpf() wrapper
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: sys_bpf, bpf_map_create
+// libbpf-symbols: sys_bpf, bpf_map_create, bpf_map_freeze
 
 //go:build linux && (amd64 || arm64)
 
@@ -119,6 +119,17 @@ func MapUpdateElem(fd int, key, value []byte, flags uint64) error {
 	runtime.KeepAlive(key)
 	runtime.KeepAlive(value)
 	return err
+}
+
+// MapFreeze calls BPF_MAP_FREEZE. After it succeeds, user space can no longer
+// update or delete the map's elements; programs keep the access the map flags
+// give them.
+func MapFreeze(fd int) error {
+	if fd < 0 {
+		return unix.EINVAL
+	}
+	attr := &MapFreezeAttr{MapFD: uint32(fd)}
+	return BPF(BPF_MAP_FREEZE, attr.Marshal())
 }
 
 // MapDeleteElem calls BPF_MAP_DELETE_ELEM and removes key from the map.

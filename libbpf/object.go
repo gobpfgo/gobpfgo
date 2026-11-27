@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object__init_maps, bpf_object_init_progs
+// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object__init_maps, bpf_object_init_progs, bpf_object_fixup_btf
 
 package libbpf
 
@@ -162,19 +162,14 @@ func openBytes(path string, data []byte, name string) (*BpfObject, error) {
 	if err != nil {
 		return nil, openError(path, err)
 	}
-	if err := spec.FixupDatasecSizes(sectionSizes(e)); err != nil {
-		return nil, openError(path, err)
-	}
-	if err := spec.FixupDatasecOffsets(variableOffsets(e)); err != nil {
-		return nil, openError(path, err)
-	}
-	if err := spec.SortDatasecVars(); err != nil {
+	if err := fixupObjectBTF(e, spec); err != nil {
 		return nil, openError(path, err)
 	}
 	maps, err := parseMaps(spec)
 	if err != nil {
 		return nil, openError(path, err)
 	}
+	maps = append(maps, initGlobalDataMaps(e, spec, name)...)
 	programs, err := parsePrograms(e)
 	if err != nil {
 		return nil, openError(path, err)
@@ -203,6 +198,24 @@ func openError(path string, err error) error {
 	}
 }
 
+// fixupObjectBTF fills in what the compiler leaves out of the DATASECs: the
+// section sizes and the global variable offsets from the ELF. Global variables
+// with hidden or internal visibility become static, and each DATASEC's
+// variables are sorted by offset.
+func fixupObjectBTF(e *elf.Object, spec *btf.Spec) error {
+	syms := varSymbols(e)
+	if err := spec.FixupDatasecSizes(sectionSizes(e)); err != nil {
+		return err
+	}
+	if err := spec.FixupDatasecOffsets(variableOffsets(syms)); err != nil {
+		return err
+	}
+	if err := spec.FixupDatasecHiddenVars(hiddenVariables(syms)); err != nil {
+		return err
+	}
+	return spec.SortDatasecVars()
+}
+
 // sectionSizes maps ELF section names to their sizes for the BTF DATASEC
 // fixup.
 func sectionSizes(e *elf.Object) map[string]uint32 {
@@ -215,19 +228,10 @@ func sectionSizes(e *elf.Object) map[string]uint32 {
 
 // variableOffsets maps the global and weak object symbol names to their
 // offsets in the object, for the BTF DATASEC fixup.
-func variableOffsets(e *elf.Object) map[string]uint32 {
-	offsets := make(map[string]uint32)
-	for _, sym := range e.Symbols {
-		if sym.Name == "" || sym.Type != elf.SymObject {
-			continue
-		}
-		if sym.Bind != elf.BindGlobal && sym.Bind != elf.BindWeak {
-			continue
-		}
-		if _, ok := offsets[sym.Name]; ok {
-			continue
-		}
-		offsets[sym.Name] = uint32(sym.Value)
+func variableOffsets(syms map[string]elf.Symbol) map[string]uint32 {
+	offsets := make(map[string]uint32, len(syms))
+	for name, sym := range syms {
+		offsets[name] = uint32(sym.Value)
 	}
 	return offsets
 }
@@ -478,9 +482,10 @@ func BpfObjectName(obj *BpfObject) string {
 	return obj.name
 }
 
-// BpfObjectNextMap returns the next map in the order of the .maps BTF data
-// section. Pass nil to start; it returns nil after the last map. The order is
-// stable for the lifetime of the object.
+// BpfObjectNextMap returns the next map. The maps defined in the .maps BTF
+// data section come first, in their declaration order, followed by the global
+// data maps in ELF section order. Pass nil to start; it returns nil after the
+// last map. The order is stable for the lifetime of the object.
 func BpfObjectNextMap(obj *BpfObject, prev *BpfMap) *BpfMap {
 	if obj == nil {
 		return nil
@@ -526,12 +531,23 @@ func BpfObjectNextProgram(obj *BpfObject, prev *BpfProgram) *BpfProgram {
 }
 
 // BpfObjectFindMapByName returns the map with the given name, or nil.
+//
+// A name that starts with a dot is a section name: it finds the global data
+// map of that section, such as ".data" or ".rodata". Any other name must match
+// the name BpfMapName returns, for example "counts" or the kernel name of a
+// global data map such as "my_objec.data".
 func BpfObjectFindMapByName(obj *BpfObject, name string) *BpfMap {
 	if obj == nil {
 		return nil
 	}
 	for _, m := range obj.maps {
-		if m.name == name {
+		if strings.HasPrefix(name, ".") {
+			if m.realName == name {
+				return m
+			}
+			continue
+		}
+		if BpfMapName(m) == name {
 			return m
 		}
 	}

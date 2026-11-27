@@ -16,7 +16,8 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/dump.bpf.c testdata/progs/ringbuf.bpf.c \
 	testdata/progs/perfbuf.bpf.c testdata/progs/link_a.bpf.c \
 	testdata/progs/link_b.bpf.c testdata/progs/link_text_a.bpf.c \
-	testdata/progs/link_text_b.bpf.c testdata/progs/usdt_target.c
+	testdata/progs/link_text_b.bpf.c testdata/progs/global_data.bpf.c \
+	testdata/progs/usdt_target.c
 C_HDRS := oracle/json.h oracle/oracle.h oracle/usdt_notes.h
 
 .PHONY: format format-check

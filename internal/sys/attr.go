@@ -130,6 +130,23 @@ func (a *MapElemAttr) Marshal() []byte {
 	return buf
 }
 
+// MapFreezeAttrSize is offsetofend(union bpf_attr, map_fd) on 64-bit Linux. It
+// is the size libbpf passes to BPF_MAP_FREEZE, which reads only the map fd of
+// the BPF_MAP_*_ELEM view.
+const MapFreezeAttrSize = 4
+
+// MapFreezeAttr is the BPF_MAP_FREEZE view of union bpf_attr.
+type MapFreezeAttr struct {
+	MapFD uint32
+}
+
+// Marshal returns the bytes passed to bpf(BPF_MAP_FREEZE, ...).
+func (a *MapFreezeAttr) Marshal() []byte {
+	buf := make([]byte, MapFreezeAttrSize)
+	binary.NativeEndian.PutUint32(buf[mapElemOffMapFD:], a.MapFD)
+	return buf
+}
+
 // ObjPinAttrSize is offsetofend(union bpf_attr, path_fd) on 64-bit Linux. It
 // is the size libbpf passes to BPF_OBJ_PIN and BPF_OBJ_GET.
 const ObjPinAttrSize = 20
