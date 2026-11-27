@@ -137,6 +137,12 @@ func BpfObjectLoad(obj *BpfObject) error {
 			}
 		}
 
+		// A USDT program is loaded for the uprobe multi link when the
+		// kernel has one, so its attach can use the link.
+		if p.usdt && featUprobeMultiLink.supported() {
+			p.expectedAttachType = BPF_TRACE_UPROBE_MULTI
+		}
+
 		funcInfo := programFuncInfo(ext, p)
 		lineInfo := programLineInfo(ext, p)
 		attr := &sys.ProgLoadAttr{

@@ -32,11 +32,17 @@
 //
 // A zero Semaphore means the probe has none.
 //
+// File.Address, File.LocationOffset and File.SemaphoreOffset apply these
+// rules. A process maps the file at a load base: ProcessSegments reads the
+// executable mappings from /proc/<pid>/maps, and the runtime address of a
+// file offset is the mapping start minus the mapping offset plus the file
+// offset.
+//
 // # Scope
 //
-// This package is the note and argument parser of libbpf's USDT support. The
-// address conversion above, the BPF-side spec and IP maps, the USDT manager
-// and the attach path are not ported yet.
+// This package is the note, argument and address part of libbpf's USDT
+// support, plus the bytes of the BPF-side spec (MarshalSpec). The USDT
+// manager, the spec and IP maps and the attach path are in package libbpf.
 package usdt
 
 import (
@@ -126,6 +132,8 @@ type File struct {
 	// BaseAddr is the address of the .stapsdt.base section, or 0 when the
 	// file has none.
 	BaseAddr uint64
+	// Segments are the PT_LOAD program headers, sorted by address.
+	Segments []Segment
 
 	notes []Note
 	// noteErr is the error of the first malformed record. notes holds the
@@ -176,7 +184,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 		return nil, err
 	}
 
-	f := &File{Machine: ef.Machine, Type: ef.Type}
+	f := &File{Machine: ef.Machine, Type: ef.Type, Segments: loadSegments(ef)}
 	if base := ef.Section(baseSection); base != nil {
 		f.BaseAddr = base.Addr
 	}

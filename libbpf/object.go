@@ -40,6 +40,12 @@ type BpfObject struct {
 	externs    []externDesc
 	kconfigMap *BpfMap
 	kconfig    *string
+
+	// usdtMan is the USDT spec ID state, created by the first
+	// BpfProgramAttachUsdt; usdtManErr is the error of that creation, which
+	// later attaches return as well.
+	usdtMan    *usdtManager
+	usdtManErr error
 }
 
 // BpfObjectOpenOpts controls how an object is opened. Zero is the default.
@@ -206,6 +212,9 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 		btfFD:      -1,
 		externs:    externs,
 		kconfigMap: kconfigMap,
+	}
+	for _, p := range programs {
+		p.obj = obj
 	}
 	if opts != nil && opts.Kconfig != nil {
 		kconfig := *opts.Kconfig
@@ -433,12 +442,13 @@ func parsePrograms(e *elf.Object) ([]*BpfProgram, error) {
 			progType:           def.progType,
 			expectedAttachType: def.attachType,
 			progFlags:          def.progFlags,
+			usdt:               def.flags&secUSDT != 0,
 			sectionName:        p.Name,
 			insns:              p.Insns,
 			relocs:             p.Relocs,
 			fd:                 -1,
 		}
-		if def.attachBTF {
+		if def.flags&secAttachBTF != 0 {
 			prog.attachBTF = true
 			prog.attachTarget = strings.TrimPrefix(p.Name, def.prefix)
 		}
@@ -490,6 +500,8 @@ func BpfObjectClose(obj *BpfObject) {
 	obj.elf = nil
 	obj.externs = nil
 	obj.kconfigMap = nil
+	obj.usdtMan = nil
+	obj.usdtManErr = nil
 }
 
 // closeLoadFDs closes the BTF, map and program descriptors created by

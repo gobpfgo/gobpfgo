@@ -17,11 +17,13 @@ import (
 
 // BpfLink is an attached program. It owns either a BPF link descriptor or,
 // for the tracefs probe path, a perf event descriptor and the tracefs event.
-// BpfLinkDestroy releases both.
+// A USDT link owns the links of its call sites instead and has no descriptor.
+// BpfLinkDestroy releases them.
 type BpfLink struct {
 	fd           int
 	perfFD       int
 	legacy       *legacyEvent
+	usdt         *usdtLink
 	pinPath      string
 	disconnected bool
 	detached     bool
@@ -30,9 +32,10 @@ type BpfLink struct {
 
 // BpfLinkFD returns the link descriptor, or -1 when the link has been detached
 // or destroyed. For a link created through the tracefs probe path, this is the
-// perf event descriptor, matching the path that created it.
+// perf event descriptor, matching the path that created it. A USDT link has no
+// descriptor of its own and returns -1.
 func BpfLinkFD(link *BpfLink) int {
-	if link == nil || link.detached || link.destroyed {
+	if link == nil || link.detached || link.destroyed || link.usdt != nil {
 		return -1
 	}
 	return link.fd
@@ -58,6 +61,8 @@ func BpfLinkDetach(link *BpfLink) error {
 
 	var firstErr error
 	switch {
+	case link.usdt != nil:
+		link.usdt.detach()
 	case link.legacy != nil:
 		if err := unix.IoctlSetInt(link.fd, unix.PERF_EVENT_IOC_DISABLE, 0); err != nil {
 			firstErr = err
@@ -117,8 +122,12 @@ func BpfLinkDestroy(link *BpfLink) {
 //
 // A link that is already pinned returns EBUSY. The parent directory must
 // exist on a BPF filesystem. The caller can drop the link and reopen it with
-// BpfLinkOpen; destroy does not unpin it.
+// BpfLinkOpen; destroy does not unpin it. A USDT link has no descriptor to
+// pin and returns EOPNOTSUPP.
 func BpfLinkPin(link *BpfLink, path string) error {
+	if link != nil && link.usdt != nil {
+		return &Error{Op: "bpf_link__pin", Errno: unix.EOPNOTSUPP}
+	}
 	if link == nil || link.destroyed || link.detached || link.fd < 0 || path == "" {
 		return &Error{Op: "bpf_link__pin", Errno: unix.EINVAL}
 	}

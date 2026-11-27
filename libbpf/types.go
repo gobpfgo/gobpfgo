@@ -132,3 +132,11 @@ const BPF_F_SLEEPABLE uint32 = 1 << 4
 // BPF_F_UPROBE_MULTI_RETURN makes a uprobe multi link call the program when
 // the probed functions return.
 const BPF_F_UPROBE_MULTI_RETURN uint32 = 1 << 0
+
+// Map element update flags: BPF_ANY creates or replaces the element,
+// BPF_NOEXIST only creates it and BPF_EXIST only replaces it.
+const (
+	BPF_ANY     uint64 = 0
+	BPF_NOEXIST uint64 = 1
+	BPF_EXIST   uint64 = 2
+)
