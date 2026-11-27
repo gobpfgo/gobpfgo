@@ -36,7 +36,10 @@ struct linker_section {
 	Elf_Scn *scn;
 };
 
-static int link_objects(const char *const *inputs, int count, const char *output) {
+/* oracle_link_objects links the inputs, in order, into output with libbpf's
+ * linker. It returns 0 on success and -1 after printing the failure.
+ */
+int oracle_link_objects(const char *const *inputs, int count, const char *output) {
 	struct bpf_linker *linker;
 	int err = 0;
 	int i;
@@ -348,7 +351,7 @@ int oracle_linker(const char *const *paths, int count) {
 
 	snprintf(output, sizeof(output), "%s/%s", dir, LINKER_OUTPUT_NAME);
 
-	if (link_objects(paths, count, output) == 0)
+	if (oracle_link_objects(paths, count, output) == 0)
 		ret = report_linked(paths, count, output);
 
 	unlink(output);

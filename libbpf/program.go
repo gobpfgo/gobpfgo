@@ -9,6 +9,10 @@ import "github.com/gobpfgo/gobpfgo/internal/elf"
 
 // BpfProgram is a program parsed from an object. It carries the section, type,
 // attach type and instruction bytes; the load step adds the kernel descriptor.
+//
+// A program is one function of an executable section. A function in .text is
+// a subprogram: the load appends it to every program that calls it and never
+// loads it on its own.
 type BpfProgram struct {
 	// obj is the object the program belongs to. USDT attachment keeps its
 	// spec ID state there.
@@ -29,6 +33,15 @@ type BpfProgram struct {
 	id                 uint32
 	xlatedInsnCnt      int
 	jitedLen           uint32
+	// secIdx is the index of the section that holds the program's
+	// function, and secInsnOff and secInsnCnt are the function's first
+	// instruction and length in it. insns and relocs cover only that
+	// function, with relocation offsets from its first instruction.
+	// symGlobal is set for a global or weak function.
+	secIdx     int
+	secInsnOff int
+	secInsnCnt int
+	symGlobal  bool
 }
 
 // BpfProgramName returns the function name of the program.
@@ -70,7 +83,9 @@ func BpfProgramSectionName(p *BpfProgram) string {
 	return p.sectionName
 }
 
-// BpfProgramInsnCnt returns the number of 8-byte BPF instructions.
+// BpfProgramInsnCnt returns the number of 8-byte BPF instructions of the
+// program's own function. The subprograms that the load appends are not
+// counted.
 func BpfProgramInsnCnt(p *BpfProgram) int {
 	if p == nil {
 		return 0
@@ -78,7 +93,9 @@ func BpfProgramInsnCnt(p *BpfProgram) int {
 	return len(p.insns) / 8
 }
 
-// BpfProgramInsns returns the raw instruction bytes.
+// BpfProgramInsns returns the raw instruction bytes of the program's own
+// function, as the object file holds them. The load relocates and appends
+// subprograms on a copy, so the bytes do not change.
 //
 // The slice aliases the object. Do not modify it and do not use it after
 // BpfObjectClose.
@@ -90,7 +107,8 @@ func BpfProgramInsns(p *BpfProgram) []byte {
 }
 
 // BpfProgramFD returns the loaded program descriptor, or -1 before
-// BpfObjectLoad and after BpfObjectClose.
+// BpfObjectLoad and after BpfObjectClose. A subprogram is never loaded on its
+// own, so it always returns -1.
 func BpfProgramFD(p *BpfProgram) int {
 	if p == nil {
 		return -1

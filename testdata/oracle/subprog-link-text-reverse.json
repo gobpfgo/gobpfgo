@@ -1,0 +1,57 @@
+{
+  "case": "subprog",
+  "libbpf_commit": "4f05fb027a08a8a66d03916cf6a68a91e2c720ea",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "link_text_b.bpf.o",
+    "link_text_a.bpf.o"
+  ],
+  "errno": 0,
+  "maps": [
+    "text_counts_b",
+    "text_counts_a"
+  ],
+  "programs": [
+    {
+      "name": "handle_text_b",
+      "section": "kprobe/do_sys_open",
+      "insn_cnt": 14,
+      "insns": "8510000002000000b7000000000000009500000000000000b701000000000000631afcff00000000bfa200000000000007020000fcffffff1851000000000000000000000000000085000000010000001500020000000000b701000001000000db100000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 17},
+        {"insn_off": 3, "type_id": 19}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 146, "line_off": 0, "line_col": 30729},
+        {"insn_off": 1, "file_name_off": 146, "line_off": 0, "line_col": 30722},
+        {"insn_off": 3, "file_name_off": 146, "line_off": 0, "line_col": 18432},
+        {"insn_off": 4, "file_name_off": 146, "line_off": 0, "line_col": 19464},
+        {"insn_off": 7, "file_name_off": 146, "line_off": 0, "line_col": 20497},
+        {"insn_off": 10, "file_name_off": 146, "line_off": 0, "line_col": 22534},
+        {"insn_off": 11, "file_name_off": 146, "line_off": 0, "line_col": 23555},
+        {"insn_off": 13, "file_name_off": 146, "line_off": 0, "line_col": 25602}
+      ]
+    },
+    {
+      "name": "handle_text_a",
+      "section": "kprobe/do_sys_openat2",
+      "insn_cnt": 14,
+      "insns": "8510000002000000b7000000000000009500000000000000b701000000000000631afcff00000000bfa200000000000007020000fcffffff1851000001000000000000000000000085000000010000001500020000000000b701000001000000db100000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 24},
+        {"insn_off": 3, "type_id": 19}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 222, "line_off": 0, "line_col": 30729},
+        {"insn_off": 1, "file_name_off": 222, "line_off": 0, "line_col": 30722},
+        {"insn_off": 3, "file_name_off": 222, "line_off": 0, "line_col": 18432},
+        {"insn_off": 4, "file_name_off": 222, "line_off": 0, "line_col": 19464},
+        {"insn_off": 7, "file_name_off": 222, "line_off": 0, "line_col": 20497},
+        {"insn_off": 10, "file_name_off": 222, "line_off": 0, "line_col": 22534},
+        {"insn_off": 11, "file_name_off": 222, "line_off": 0, "line_col": 23555},
+        {"insn_off": 13, "file_name_off": 222, "line_off": 0, "line_col": 25602}
+      ]
+    }
+  ]
+}

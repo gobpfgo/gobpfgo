@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|dedup <object>...|core <object>|core-reloc <object> <target>|linfo|zip|usdt <binary>|kconfig <object>\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|dedup <object>...|core <object>|core-reloc <object> <target>|linfo|zip|usdt <binary>|kconfig <object>|subprog <object>...\n", prog);
 }
 
 int main(int argc, char **argv) {
@@ -54,6 +54,8 @@ int main(int argc, char **argv) {
 		return oracle_usdt(argv[2]);
 	if (strcmp(argv[1], "kconfig") == 0 && argc == 3)
 		return oracle_kconfig(argv[2]);
+	if (strcmp(argv[1], "subprog") == 0 && argc >= 3)
+		return oracle_subprog((const char *const *)&argv[2], argc - 2);
 
 	usage(argv[0]);
 	return 2;

@@ -27,6 +27,7 @@ const (
 	bpfJMP        = 0x05
 	bpfCall       = 0x80
 	bpfImm        = 0x00
+	bpfSourceK    = 0x00
 	bpfSourceX    = 0x08
 	bpfSizeMask   = 0x18
 	bpfSizeW      = 0x00

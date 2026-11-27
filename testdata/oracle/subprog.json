@@ -1,0 +1,63 @@
+{
+  "case": "subprog",
+  "libbpf_commit": "4f05fb027a08a8a66d03916cf6a68a91e2c720ea",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "objects": [
+    "subprog.bpf.o"
+  ],
+  "errno": 0,
+  "maps": [
+    "subprog_counts"
+  ],
+  "programs": [
+    {
+      "name": "handle_subprog",
+      "section": "kprobe/do_sys_openat2",
+      "insn_cnt": 23,
+      "insns": "8510000005000000b701000001000000b7020000020000008510000010000000b7000000000000009500000000000000b701000000000000b70200000100000085100000010000009500000000000000bf26000000000000631afcff00000000bfa200000000000007020000fcffffff1851000000000000000000000000000085000000010000001500010000000000db60000000000000950000000000000085100000f5ffffffb7000000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 21},
+        {"insn_off": 6, "type_id": 23},
+        {"insn_off": 10, "type_id": 18},
+        {"insn_off": 20, "type_id": 16}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 140, "line_off": 0, "line_col": 47106},
+        {"insn_off": 1, "file_name_off": 140, "line_off": 0, "line_col": 48130},
+        {"insn_off": 4, "file_name_off": 140, "line_off": 0, "line_col": 49154},
+        {"insn_off": 6, "file_name_off": 140, "line_off": 0, "line_col": 41993},
+        {"insn_off": 9, "file_name_off": 140, "line_off": 0, "line_col": 41986},
+        {"insn_off": 10, "file_name_off": 140, "line_off": 0, "line_col": 21504},
+        {"insn_off": 14, "file_name_off": 140, "line_off": 0, "line_col": 22545},
+        {"insn_off": 17, "file_name_off": 140, "line_off": 0, "line_col": 24582},
+        {"insn_off": 18, "file_name_off": 140, "line_off": 0, "line_col": 25603},
+        {"insn_off": 19, "file_name_off": 140, "line_off": 0, "line_col": 27650},
+        {"insn_off": 20, "file_name_off": 140, "line_off": 0, "line_col": 34825},
+        {"insn_off": 21, "file_name_off": 140, "line_off": 0, "line_col": 34818}
+      ]
+    },
+    {
+      "name": "handle_subprog_shared",
+      "section": "kprobe/do_sys_openat2",
+      "insn_cnt": 18,
+      "insns": "b701000002000000b7020000030000008510000002000000b70000000000000095000000000000008510000002000000b7000000000000009500000000000000bf26000000000000631afcff00000000bfa200000000000007020000fcffffff1851000000000000000000000000000085000000010000001500010000000000db600000000000009500000000000000",
+      "func_info": [
+        {"insn_off": 0, "type_id": 25},
+        {"insn_off": 5, "type_id": 16},
+        {"insn_off": 8, "type_id": 18}
+      ],
+      "line_info": [
+        {"insn_off": 0, "file_name_off": 140, "line_off": 0, "line_col": 57353},
+        {"insn_off": 3, "file_name_off": 140, "line_off": 0, "line_col": 57346},
+        {"insn_off": 5, "file_name_off": 140, "line_off": 0, "line_col": 34825},
+        {"insn_off": 6, "file_name_off": 140, "line_off": 0, "line_col": 34818},
+        {"insn_off": 8, "file_name_off": 140, "line_off": 0, "line_col": 21504},
+        {"insn_off": 12, "file_name_off": 140, "line_off": 0, "line_col": 22545},
+        {"insn_off": 15, "file_name_off": 140, "line_off": 0, "line_col": 24582},
+        {"insn_off": 16, "file_name_off": 140, "line_off": 0, "line_col": 25603},
+        {"insn_off": 17, "file_name_off": 140, "line_off": 0, "line_col": 27650}
+      ]
+    }
+  ]
+}

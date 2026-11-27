@@ -112,10 +112,13 @@ type coreCandidate struct {
 	id   uint32
 }
 
-// relocateCore applies the CO-RE records of p's section to a private copy of
-// its instructions. Field, type and enum values are matched across the
-// vmlinux and module BTFs; a value that cannot be resolved is poisoned, which
-// the verifier rejects only if the instruction is reachable.
+// relocateCore applies the CO-RE records of p's own instructions to insns,
+// a private copy of them. Clang records byte offsets from the section start;
+// a record of another function in the section, or of a weak function that
+// another object overrode, is skipped. Field, type and enum values are
+// matched across the vmlinux and module BTFs; a value that cannot be resolved
+// is poisoned, which the verifier rejects only if the instruction is
+// reachable.
 func relocateCore(p *BpfProgram, insns []byte, ext *btf.ExtSpec, local *btf.Spec, kernels []*btf.Spec) error {
 	if ext == nil || local == nil || len(kernels) == 0 {
 		return nil
@@ -127,14 +130,24 @@ func relocateCore(p *BpfProgram, insns []byte, ext *btf.ExtSpec, local *btf.Spec
 		}
 
 		for _, relo := range section.Relos {
+			if relo.InsnOff%bpfInsnLength != 0 {
+				return fmt.Errorf("core relocation at insn %d is not aligned", relo.InsnOff)
+			}
+			insnIdx := int(relo.InsnOff / bpfInsnLength)
+			if !progContainsInsn(p, insnIdx) {
+				continue
+			}
+
+			off := (insnIdx - p.secInsnOff) * bpfInsnLength
+			if off+bpfInsnLength > len(insns) {
+				return fmt.Errorf("core relocation at insn %d is out of bounds", relo.InsnOff)
+			}
+			if insns[off] == bpfLD|bpfImm|bpfSizeDW && off+2*bpfInsnLength > len(insns) {
+				return fmt.Errorf("core relocation at insn %d: LDIMM64 is truncated", relo.InsnOff)
+			}
 			res, err := coreReloResult(local, relo, kernels)
 			if err != nil {
 				return fmt.Errorf("core relocation at insn %d: %w", relo.InsnOff, err)
-			}
-
-			off := int(relo.InsnOff)
-			if off < 0 || off+bpfInsnLength > len(insns) {
-				return fmt.Errorf("core relocation at insn %d is out of bounds", relo.InsnOff)
 			}
 			if err := patchCoreInsn(insns[off:], res); err != nil {
 				return fmt.Errorf("core relocation at insn %d: %w", relo.InsnOff, err)
