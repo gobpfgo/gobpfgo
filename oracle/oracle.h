@@ -42,6 +42,7 @@ int oracle_linker_kconfig(const char *kconfig, const char *const *paths, int cou
 int oracle_dedup(const char *const *paths, int count);
 int oracle_core(const char *path);
 int oracle_core_reloc(const char *path, const char *target_path);
+int oracle_core_match(const char *path, const char *target_path);
 int oracle_linfo(void);
 int oracle_zip(void);
 int oracle_usdt(const char *path);

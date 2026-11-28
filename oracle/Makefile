@@ -62,6 +62,12 @@ fixtures: $(ORACLE)
 	$(ORACLE) core ../testdata/progs/core.bpf.o > ../testdata/oracle/core.json
 	$(ORACLE) core-reloc ../testdata/progs/core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc.json
 	$(ORACLE) core-reloc ../testdata/progs/subprog_core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc-subprog.json
+	$(ORACLE) core ../testdata/progs/core_match.bpf.o > ../testdata/oracle/core-match.json
+	$(ORACLE) core-match ../testdata/progs/core_match.bpf.o ../testdata/progs/core_match_target.bpf.o > ../testdata/oracle/core-match-reloc.json
+	$(ORACLE) core-match ../testdata/progs/core_local.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-local-reloc.json
+	$(ORACLE) core-match ../testdata/progs/core_amb.bpf.o ../testdata/progs/core_cands_target.bpf.o > ../testdata/oracle/core-amb-reloc.json
+	$(ORACLE) core-match ../testdata/progs/core_amb.bpf.o ../testdata/progs/core_amb_single.bpf.o > ../testdata/oracle/core-amb-single-reloc.json
+	$(ORACLE) core-match ../testdata/progs/core_cands.bpf.o ../testdata/progs/core_cands_target.bpf.o > ../testdata/oracle/core-cands-reloc.json
 	$(ORACLE) linfo > ../testdata/oracle/linfo.json
 	$(ORACLE) zip > ../testdata/oracle/zip.json
 	$(ORACLE) dedup $(DEDUP_OBJECTS) > ../testdata/oracle/dedup.json

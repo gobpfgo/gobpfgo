@@ -15,6 +15,7 @@
 
 #define RINGBUF_MAP "events"
 #define RINGBUF_MAP2 "events2"
+#define RINGBUF_DATA ".data"
 #define RINGBUF_PROG "handle_ringbuf"
 #define RINGBUF_SAMPLE 0x12345678
 #define RINGBUF_MAX 8
@@ -36,6 +37,15 @@ static int sample_cb(void *ctx, void *data, size_t size) {
 	return 0;
 }
 
+/* set_target_tgid makes the program record only the opens of this process,
+ * through its target_tgid global, so other processes add no samples.
+ */
+static int set_target_tgid(struct bpf_map *data) {
+	__u32 key = 0, tgid = (__u32)getpid();
+
+	return bpf_map__update_elem(data, &key, sizeof(key), &tgid, sizeof(tgid), BPF_ANY);
+}
+
 static bool trigger_open(void) {
 	int fd = open("/dev/null", O_RDONLY);
 
@@ -51,7 +61,7 @@ int oracle_ringbuf(const char *path) {
 	struct sample_ctx samples2 = {};
 	struct bpf_object *obj;
 	struct bpf_program *prog;
-	struct bpf_map *map, *map2;
+	struct bpf_map *map, *map2, *data;
 	struct bpf_link *link;
 	struct ring_buffer *rb;
 	struct json j;
@@ -75,8 +85,15 @@ int oracle_ringbuf(const char *path) {
 	prog = bpf_object__find_program_by_name(obj, RINGBUF_PROG);
 	map  = bpf_object__find_map_by_name(obj, RINGBUF_MAP);
 	map2 = bpf_object__find_map_by_name(obj, RINGBUF_MAP2);
-	if (!prog || !map || !map2) {
+	data = bpf_object__find_map_by_name(obj, RINGBUF_DATA);
+	if (!prog || !map || !map2 || !data) {
 		fprintf(stderr, "program or map not found\n");
+		bpf_object__close(obj);
+		return 1;
+	}
+	ret = set_target_tgid(data);
+	if (ret) {
+		fprintf(stderr, "set target_tgid: %s\n", strerror(-ret));
 		bpf_object__close(obj);
 		return 1;
 	}

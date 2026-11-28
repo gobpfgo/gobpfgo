@@ -116,6 +116,14 @@
       {"name": "flags", "offset": 24, "size": 8}
     ]
   },
+  "map_next_key": {
+    "attr_size": 24,
+    "fields": [
+      {"name": "map_fd", "offset": 0, "size": 4},
+      {"name": "key", "offset": 8, "size": 8},
+      {"name": "next_key", "offset": 16, "size": 8}
+    ]
+  },
   "obj_pin": {
     "attr_size": 20,
     "fields": [

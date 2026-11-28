@@ -14,22 +14,24 @@ package sys
 
 // UAPI values from linux/bpf.h used by the first slices.
 const (
-	BPF_MAP_CREATE          = 0
-	BPF_MAP_LOOKUP_ELEM     = 1
-	BPF_MAP_UPDATE_ELEM     = 2
-	BPF_MAP_DELETE_ELEM     = 3
-	BPF_PROG_LOAD           = 5
-	BPF_OBJ_PIN             = 6
-	BPF_OBJ_GET             = 7
-	BPF_OBJ_GET_INFO_BY_FD  = 15
-	BPF_RAW_TRACEPOINT_OPEN = 17
-	BPF_BTF_LOAD            = 18
-	BPF_BTF_GET_FD_BY_ID    = 19
-	BPF_MAP_FREEZE          = 22
-	BPF_BTF_GET_NEXT_ID     = 23
-	BPF_LINK_CREATE         = 28
-	BPF_LINK_UPDATE         = 29
-	BPF_LINK_DETACH         = 34
-	BPF_MAP_TYPE_ARRAY      = 2
-	BPF_OBJ_NAME_LEN        = 16
+	BPF_MAP_CREATE                 = 0
+	BPF_MAP_LOOKUP_ELEM            = 1
+	BPF_MAP_UPDATE_ELEM            = 2
+	BPF_MAP_DELETE_ELEM            = 3
+	BPF_MAP_GET_NEXT_KEY           = 4
+	BPF_PROG_LOAD                  = 5
+	BPF_OBJ_PIN                    = 6
+	BPF_OBJ_GET                    = 7
+	BPF_OBJ_GET_INFO_BY_FD         = 15
+	BPF_RAW_TRACEPOINT_OPEN        = 17
+	BPF_BTF_LOAD                   = 18
+	BPF_BTF_GET_FD_BY_ID           = 19
+	BPF_MAP_LOOKUP_AND_DELETE_ELEM = 21
+	BPF_MAP_FREEZE                 = 22
+	BPF_BTF_GET_NEXT_ID            = 23
+	BPF_LINK_CREATE                = 28
+	BPF_LINK_UPDATE                = 29
+	BPF_LINK_DETACH                = 34
+	BPF_MAP_TYPE_ARRAY             = 2
+	BPF_OBJ_NAME_LEN               = 16
 )

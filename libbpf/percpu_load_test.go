@@ -183,9 +183,11 @@ func checkPercpuDataRun(t *testing.T, obj *BpfObject) {
 // TestPercpuUnusedDataLoad loads percpu_unused.bpf.o, whose program uses a
 // .bss variable and none of the .percpu ones. The object loads on every
 // kernel and the .bss map is created. On a kernel without global per-CPU
-// data the .percpu map is not created and keeps descriptor -1; with the
-// feature it is created and every possible CPU holds the section image. It
-// needs root or CAP_BPF and skips with EPERM or EACCES.
+// data the .percpu map is not created and keeps descriptor -1, yet counts as
+// created after the load: its element operations fail with EINVAL and its
+// initial value can no longer be set. With the feature it is created and
+// every possible CPU holds the section image. It needs root or CAP_BPF and
+// skips with EPERM or EACCES.
 func TestPercpuUnusedDataLoad(t *testing.T) {
 	obj := loadTestObject(t, percpuUnusedObject)
 	defer BpfObjectClose(obj)
@@ -199,12 +201,12 @@ func TestPercpuUnusedDataLoad(t *testing.T) {
 
 	percpu := BpfObjectFindMapByName(obj, ".percpu")
 	if !featPercpuData.supported() {
-		if fd := BpfMapFD(percpu); fd != -1 {
-			t.Errorf(".percpu fd = %d, want -1 without global per-CPU data", fd)
-		}
+		checkMapWithoutFD(t, percpu)
 		return
 	}
 	checkPercpuSlots(t, ".percpu", lookupPercpu(t, percpu), percpuUnusedImage())
+	checkMapOpError(t, ".percpu set initial value", BpfMapSetInitialValue(percpu, percpuUnusedImage()),
+		"bpf_map__set_initial_value", unix.EBUSY)
 }
 
 // TestPercpuUnusedPinMaps pins the maps of a loaded percpu_unused.bpf.o under
@@ -288,6 +290,7 @@ func TestCreateMapRetryWithoutBTF(t *testing.T) {
 	if BpfMapBtfKeyTypeID(m) != 0 || valueID == 0 {
 		t.Fatalf(".percpu BTF ids = %d/%d, want no key and a DATASEC value", BpfMapBtfKeyTypeID(m), valueID)
 	}
+	obj.attempted = true // as BpfObjectLoad marks the object before it creates the maps
 	if err := createMap(m, btfFD); err != nil {
 		t.Fatalf("create .percpu: %v", err)
 	}

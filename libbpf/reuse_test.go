@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/sys"
@@ -94,5 +95,66 @@ func TestBpfMapReuseFD(t *testing.T) {
 	}
 	if binary.NativeEndian.Uint64(value) == 0 {
 		t.Fatal("program did not increment the reused map")
+	}
+}
+
+// TestBpfMapReuseFDBadFD reuses descriptor -1 for kprobe.bpf.o's counts map.
+// The kernel rejects it before anything is duplicated, with EBADFD, and the
+// map keeps its name and has no descriptor. It needs no privileges and skips
+// where the kernel refuses unprivileged bpf() outright.
+func TestBpfMapReuseFDBadFD(t *testing.T) {
+	obj := openProg(t, "kprobe.bpf.o")
+	m := BpfObjectFindMapByName(obj, "counts")
+	if m == nil {
+		t.Fatal("map counts not found")
+	}
+
+	err := BpfMapReuseFD(m, -1)
+	skipIfNotPermitted(t, err)
+	checkMapOpError(t, "reuse of descriptor -1", err, "bpf_map__reuse_fd", unix.EBADFD)
+	if got := BpfMapName(m); got != "counts" || m.fd != -1 || m.reused {
+		t.Errorf("map after the failed reuse: name %q, fd %d, reused %v, want counts, -1, false", got, m.fd, m.reused)
+	}
+}
+
+// TestBpfMapReuseFailedLoad gives kconfig.bpf.o's values map an existing
+// array, then loads the object with a CONFIG_TEST value that is not an
+// integer, so the load fails while it resolves the externs, before it
+// creates any map. The reused map counts as created from the reuse on: it
+// reads through the duplicate before the load, and after the failed load the
+// duplicate is closed, so the element operations fail with EINVAL. Reusing
+// the array again then fails with EBADF, as there is no descriptor left to
+// replace, and changes nothing. The caller's descriptor stays open. It needs
+// root or CAP_BPF and skips otherwise.
+func TestBpfMapReuseFailedLoad(t *testing.T) {
+	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "gobpfgo_reuse", 4, 8, 4, nil)
+	skipIfNotPermitted(t, err)
+	if err != nil {
+		t.Fatalf("BpfMapCreate: %v", err)
+	}
+	defer unix.Close(fd)
+
+	kconfig := "CONFIG_TEST=gobpfgo\n"
+	obj := openProgOpts(t, "kconfig.bpf.o", &BpfObjectOpenOpts{Kconfig: &kconfig})
+	m := BpfObjectFindMapByName(obj, "values")
+	if err := BpfMapReuseFD(m, fd); err != nil {
+		t.Fatalf("BpfMapReuseFD: %v", err)
+	}
+	if err := BpfMapLookupElem(m, u32Key(0), make([]byte, 8), 0); err != nil {
+		t.Fatalf("lookup through the reused map before the load: %v", err)
+	}
+	checkMapOpError(t, "set initial value of the reused map", BpfMapSetInitialValue(m, make([]byte, 8)),
+		"bpf_map__set_initial_value", unix.EBUSY)
+
+	err = BpfObjectLoad(obj)
+	if err == nil || !strings.Contains(err.Error(), "isn't a valid integer") {
+		t.Fatalf("load: %v, want the CONFIG_TEST parse error", err)
+	}
+	checkMapWithoutFD(t, m)
+
+	checkMapOpError(t, "reuse after the failed load", BpfMapReuseFD(m, fd), "bpf_map__reuse_fd", unix.EBADF)
+	checkMapWithoutFD(t, m)
+	if _, err := sys.MapInfoByFD(fd); err != nil {
+		t.Errorf("the caller's descriptor after the failed load: %v", err)
 	}
 }

@@ -1,0 +1,18 @@
+{
+  "case": "core-match",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core_amb.bpf.o",
+  "target": "core_cands_target.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 0, "type_id": 5, "kind": 2, "access": "0:0", "name": "cc_amb", "cands": [
+        {"type_id": 1, "name": "cc_amb", "match": 1, "compat": 1},
+        {"type_id": 4, "name": "cc_amb___v2", "match": 1, "compat": 1}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 32, "type_id": 5, "kind": 0, "access": "0:0", "name": "cc_amb", "cands": [
+        {"type_id": 1, "name": "cc_amb", "match": 1, "compat": 1},
+        {"type_id": 4, "name": "cc_amb___v2", "match": 1, "compat": 1}
+      ], "err": -22}
+  ]
+}

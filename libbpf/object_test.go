@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -351,4 +353,64 @@ func TestBpfObjectOpenInvalid(t *testing.T) {
 	if !errors.Is(err, unix.EINVAL) {
 		t.Fatalf("got %v, want EINVAL for bad opts", err)
 	}
+}
+
+// TestOpenMapsPointAtObject opens every BPF object in testdata/progs, from
+// the file and from memory, and checks that each of its maps, the .maps
+// definitions as well as the internal data and .kconfig maps, points at the
+// object that opened it, so its created state follows that object's load.
+// No map counts as created after the open, and the maps keep their object
+// and have no descriptor after the close. An object that fails to open is
+// logged and skipped.
+func TestOpenMapsPointAtObject(t *testing.T) {
+	paths, err := filepath.Glob(progsDir + "/*.bpf.o")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no objects in %s: %v", progsDir, err)
+	}
+
+	maps := 0
+	for _, path := range paths {
+		name := filepath.Base(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		fileObj, err := BpfObjectOpenFile(path, nil)
+		if err != nil {
+			t.Logf("%s does not open: %v", name, err)
+			continue
+		}
+		memObj, err := BpfObjectOpenMem(data, nil)
+		if err != nil {
+			t.Fatalf("%s opens from the file but not from memory: %v", name, err)
+		}
+		maps += checkMapsPointAtObject(t, name+" file", fileObj)
+		maps += checkMapsPointAtObject(t, name+" memory", memObj)
+	}
+	if maps == 0 {
+		t.Fatal("no object had a map")
+	}
+}
+
+// checkMapsPointAtObject checks the maps of the opened obj before and after
+// closing it, and returns how many it checked.
+func checkMapsPointAtObject(t *testing.T, what string, obj *BpfObject) int {
+	t.Helper()
+
+	maps := slices.Clone(obj.maps)
+	for _, m := range maps {
+		if m.obj != obj {
+			t.Errorf("%s: map %s points at %p, want its object %p", what, BpfMapName(m), m.obj, obj)
+		}
+		if mapIsCreated(m) {
+			t.Errorf("%s: map %s is created before the load", what, BpfMapName(m))
+		}
+	}
+	BpfObjectClose(obj)
+	for _, m := range maps {
+		if m.obj != obj || BpfMapFD(m) != -1 {
+			t.Errorf("%s: map %s after close: object %p, fd %d, want %p and -1", what, BpfMapName(m), m.obj, BpfMapFD(m), obj)
+		}
+	}
+	return len(maps)
 }

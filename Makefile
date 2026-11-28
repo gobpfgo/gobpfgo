@@ -32,7 +32,11 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/sanitize_float.bpf.c testdata/progs/percpu.bpf.c \
 	testdata/progs/percpu_unused.bpf.c testdata/progs/callx.bpf.c \
 	testdata/progs/exception_cb.bpf.c testdata/progs/exception_cb_direct.bpf.c \
-	testdata/progs/subprog_core.bpf.c testdata/progs/kfunc_missing.bpf.c
+	testdata/progs/subprog_core.bpf.c testdata/progs/kfunc_missing.bpf.c \
+	testdata/progs/core_failed.bpf.c testdata/progs/core_match.bpf.c \
+	testdata/progs/core_match_target.c testdata/progs/core_local.bpf.c \
+	testdata/progs/core_amb.bpf.c testdata/progs/core_amb_single.c \
+	testdata/progs/core_cands.bpf.c testdata/progs/core_cands_target.c
 C_HDRS := oracle/json.h oracle/oracle.h oracle/usdt_notes.h
 
 .PHONY: format format-check

@@ -140,9 +140,15 @@ func mapTakesBTF(mapType BpfMapType) bool {
 //
 // The descriptors stay in the object and are closed by BpfObjectClose. The
 // caller must have opened the object with BpfObjectOpenFile or
-// BpfObjectOpenMem. A second load returns EINVAL. On failure the object is
-// left unloaded and the error carries the verifier log when the kernel
-// produced one; the BTF fixups already applied stay in the object BTF.
+// BpfObjectOpenMem. An object can be loaded only once: a second
+// BpfObjectLoad returns EINVAL with "load can't be attempted twice" in the
+// log, whether the first one succeeded or failed. On failure the object is
+// left unloaded, with every map and program descriptor closed, including the
+// duplicates BpfMapReuseFD made, and the error carries the verifier log when
+// the kernel produced one; the BTF fixups already applied stay in the object
+// BTF. Its maps still count as created, so BpfMapSetInitialValue returns
+// EBUSY and the element operations return EINVAL. The failed object can
+// still be closed with BpfObjectClose.
 func BpfObjectLoad(obj *BpfObject) error {
 	if obj == nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL}
@@ -150,12 +156,28 @@ func BpfObjectLoad(obj *BpfObject) error {
 	if obj.closed {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: "object is closed"}
 	}
-	if obj.loaded {
-		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: "object already loaded"}
+	if obj.attempted {
+		return &Error{
+			Op:    "bpf_object__load",
+			Errno: unix.EINVAL,
+			Log:   fmt.Sprintf("object '%s': load can't be attempted twice", obj.name),
+		}
 	}
 	if obj.btf == nil {
 		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: "object has no BTF"}
 	}
+	obj.attempted = true
+	if err := loadObject(obj); err != nil {
+		obj.closeLoadFDs()
+		return err
+	}
+	obj.loaded = true
+	return nil
+}
+
+// loadObject does the work of BpfObjectLoad on an object whose load was not
+// attempted before. On failure the caller closes the descriptors it created.
+func loadObject(obj *BpfObject) error {
 	defer obj.closeModuleBTFs()
 	if err := loadVmlinuxBTF(obj); err != nil {
 		return err
@@ -196,24 +218,20 @@ func BpfObjectLoad(obj *BpfObject) error {
 	obj.btfFD = btfFD
 
 	if err := createMaps(obj, btfFD, featPercpuData.supported); err != nil {
-		obj.closeLoadFDs()
 		return err
 	}
 	if err := relocateObjectData(codes, createFuncPtrMap); err != nil {
-		obj.closeLoadFDs()
 		return err
 	}
 
 	license := append([]byte(obj.license), 0)
 	for _, code := range codes {
 		if err := loadProgram(obj, code, license, logBuf); err != nil {
-			obj.closeLoadFDs()
 			return err
 		}
 	}
 
 	setFinalInsns(codes, subprogInsns)
-	obj.loaded = true
 	return nil
 }
 
@@ -252,7 +270,7 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 	attr := progLoadAttr(obj, code)
 	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
 	if err != nil {
-		fixupVerifierLog(obj, logBuf)
+		fixupVerifierLog(obj, code, logBuf)
 		return &Error{
 			Op:    "bpf_prog_load",
 			Errno: errnoFromError(err),

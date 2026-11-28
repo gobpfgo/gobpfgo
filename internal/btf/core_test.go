@@ -26,6 +26,7 @@ type coreFixtureRelo struct {
 	Access     string                `json:"access"`
 	RootTypeID uint32                `json:"root_type_id"`
 	BitOffset  uint32                `json:"bit_offset"`
+	Spec       string                `json:"spec"`
 	Accessors  []coreFixtureAccessor `json:"accessors"`
 }
 
@@ -33,8 +34,38 @@ type coreFixture struct {
 	Relos []coreFixtureRelo `json:"relos"`
 }
 
+// TestParseCoreSpec parses the local spec of every CO-RE relocation in
+// core.bpf.o and in core_match.bpf.o, whose relocations are all type-based,
+// type_matches among them, formats it, and compares both with what libbpf's
+// bpf_core_parse_spec and bpf_core_format_spec produce.
 func TestParseCoreSpec(t *testing.T) {
-	o, err := elf.Open("../../testdata/progs/core.bpf.o")
+	for _, tc := range []struct{ object, fixture string }{
+		{"core.bpf.o", "core.json"},
+		{"core_match.bpf.o", "core-match.json"},
+	} {
+		t.Run(tc.object, func(t *testing.T) {
+			got := parseCoreSpecs(t, "../../testdata/progs/"+tc.object)
+			data, err := os.ReadFile("../../testdata/oracle/" + tc.fixture)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			var want coreFixture
+			if err := json.Unmarshal(data, &want); err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			if !reflect.DeepEqual(got, want.Relos) {
+				t.Fatalf("core specs differ\n got %+v\nwant %+v", got, want.Relos)
+			}
+		})
+	}
+}
+
+// parseCoreSpecs parses and formats the local spec of every CO-RE
+// relocation of the object at path, in .BTF.ext order.
+func parseCoreSpecs(t *testing.T, path string) []coreFixtureRelo {
+	t.Helper()
+
+	o, err := elf.Open(path)
 	if err != nil {
 		t.Fatalf("open object: %v", err)
 	}
@@ -56,7 +87,11 @@ func TestParseCoreSpec(t *testing.T) {
 			}
 			core, err := spec.ParseCoreSpec(relo)
 			if err != nil {
-				t.Fatalf("parse core spec: %v", err)
+				t.Fatalf("parse core spec of insn %d: %v", relo.InsnOff, err)
+			}
+			text, err := spec.FormatCoreSpec(core)
+			if err != nil {
+				t.Fatalf("format core spec of insn %d: %v", relo.InsnOff, err)
 			}
 
 			got = append(got, coreFixtureRelo{
@@ -67,22 +102,12 @@ func TestParseCoreSpec(t *testing.T) {
 				Access:     access,
 				RootTypeID: core.RootTypeID,
 				BitOffset:  core.BitOffset,
+				Spec:       text,
 				Accessors:  coreFixtureAccessors(core.Accessors),
 			})
 		}
 	}
-
-	data, err := os.ReadFile("../../testdata/oracle/core.json")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	var want coreFixture
-	if err := json.Unmarshal(data, &want); err != nil {
-		t.Fatalf("parse fixture: %v", err)
-	}
-	if !reflect.DeepEqual(got, want.Relos) {
-		t.Fatalf("core specs differ\n got %+v\nwant %+v", got, want.Relos)
-	}
+	return got
 }
 
 func TestCalcCoreRelo(t *testing.T) {
@@ -155,4 +180,92 @@ func coreFixtureAccessors(accessors []CoreAccessor) []coreFixtureAccessor {
 		})
 	}
 	return out
+}
+
+// openCoreObject parses the .BTF and the CO-RE records of the only CO-RE
+// section of the named object in testdata/progs.
+func openCoreObject(t *testing.T, name string) (*Spec, []CoreRelo) {
+	t.Helper()
+
+	o, err := elf.Open("../../testdata/progs/" + name)
+	if err != nil {
+		t.Fatalf("open %s: %v", name, err)
+	}
+	spec, err := Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse %s BTF: %v", name, err)
+	}
+	if len(o.BTFExt) == 0 {
+		return spec, nil
+	}
+	ext, err := ParseExt(o.BTFExt, spec, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse %s BTF.ext: %v", name, err)
+	}
+	if len(ext.CoreRelos) != 1 {
+		t.Fatalf("%s: %d CO-RE sections, want one", name, len(ext.CoreRelos))
+	}
+	return spec, ext.CoreRelos[0].Relos
+}
+
+// TestCalcCoreFieldExists relocates field_exists of cc_amb.y from
+// core_amb.bpf.o against the candidates of core_cands_target.bpf.o, which
+// have y at bit 32 and bit 0, and against cc_pick, which has no y. The
+// original value 1 is checked in every case, and a match records the bit
+// offset of the target field.
+func TestCalcCoreFieldExists(t *testing.T) {
+	local, relos := openCoreObject(t, "core_amb.bpf.o")
+	target, _ := openCoreObject(t, "core_cands_target.bpf.o")
+	exists := relos[0]
+	if exists.Kind != CoreFieldExists {
+		t.Fatalf("first record kind = %s, want field_exists", exists.Kind)
+	}
+
+	for _, tc := range []struct {
+		target    string
+		matched   bool
+		newVal    uint64
+		bitOffset uint32
+	}{
+		{"cc_amb", true, 1, 32},
+		{"cc_amb___v2", true, 1, 0},
+		{"cc_pick", false, 0, 0},
+	} {
+		targetType := target.Find(tc.target, KindStruct)
+		if targetType == nil {
+			t.Fatalf("target %s not found", tc.target)
+		}
+		res, err := local.CalcCoreRelo(exists, target, targetType.ID)
+		if err != nil {
+			t.Fatalf("%s: CalcCoreRelo: %v", tc.target, err)
+		}
+		if res.Matched != tc.matched || res.OrigVal != 1 || res.NewVal != tc.newVal || !res.Validate || res.TargetBitOffset != tc.bitOffset {
+			t.Errorf("%s: result %+v, want matched %v, 1/%d, validated, target bit offset %d",
+				tc.target, res, tc.matched, tc.newVal, tc.bitOffset)
+		}
+	}
+}
+
+// TestCalcCoreFieldLocal computes the local side of the field records of
+// core_local.bpf.o: field_exists is 1 and checked, the signedness of the int
+// val is 1, and the signedness of the array element arr[1] fails. A
+// type-based record is not a field record.
+func TestCalcCoreFieldLocal(t *testing.T) {
+	local, relos := openCoreObject(t, "core_local.bpf.o")
+	exists, typeExists, signed, signedElem := relos[0], relos[1], relos[2], relos[3]
+
+	res, err := local.CalcCoreFieldLocal(exists)
+	if err != nil || res.OrigVal != 1 || !res.Validate || res.Poison || res.Matched {
+		t.Errorf("field_exists = %+v, %v, want 1, validated", res, err)
+	}
+	res, err = local.CalcCoreFieldLocal(signed)
+	if err != nil || res.OrigVal != 1 || !res.Validate {
+		t.Errorf("field_signed of val = %+v, %v, want 1, validated", res, err)
+	}
+	if _, err := local.CalcCoreFieldLocal(signedElem); err == nil {
+		t.Error("field_signed of arr[1] succeeded, want the array access error")
+	}
+	if _, err := local.CalcCoreFieldLocal(typeExists); err == nil {
+		t.Errorf("CalcCoreFieldLocal accepted a %s record", typeExists.Kind)
+	}
 }

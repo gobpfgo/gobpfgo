@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/relo_core.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_core_parse_spec, bpf_core_spec, bpf_core_accessor
+// libbpf-symbols: bpf_core_parse_spec, bpf_core_spec, bpf_core_accessor, core_relo_is_type_based, bpf_core_calc_type_relo, bpf_core_calc_field_relo, bpf_core_calc_relo
 
 package btf
 
@@ -69,7 +69,7 @@ func (k CoreReloKind) fieldBased() bool {
 }
 
 func (k CoreReloKind) typeBased() bool {
-	return k >= CoreTypeIDLocal && k <= CoreTypeSize
+	return k >= CoreTypeIDLocal && k <= CoreTypeSize || k == CoreTypeMatches
 }
 
 func (k CoreReloKind) enumvalBased() bool {
@@ -95,8 +95,9 @@ type CoreSpec struct {
 
 // ParseCoreSpec resolves the access string of relo against the local BTF.
 //
-// It handles the field-based, type-based and enum-value kinds. Target type
-// matching, flexible array members and instruction patching come later.
+// It handles the field-based, type-based and enum-value kinds. A type-based
+// relocation, type_matches included, must have the access string "0" and
+// gets a spec with only its root type.
 func (s *Spec) ParseCoreSpec(relo CoreRelo) (*CoreSpec, error) {
 	access, err := s.String(relo.AccessStrOff)
 	if err != nil {
@@ -240,14 +241,25 @@ type CoreReloResult struct {
 
 	// Matched is false when the target type or field did not match.
 	Matched bool
+
+	// TargetBitOffset is the bit offset of the matched target field from
+	// the start of the target type, and 0 for type-based and enum-value
+	// relocations. Candidates that match one relocation must agree on it.
+	TargetBitOffset uint32
 }
 
 // CalcCoreRelo matches relo against targetTypeID and computes the local and
 // target relocation values.
 //
-// It supports the field-based kinds. A field missing from the target yields
-// NewVal zero for FIELD_EXISTS and a poisoned result for every other kind.
-// Type-based and enum-value target matching are not implemented yet.
+// It supports every kind. A field missing from the target yields NewVal zero
+// for FIELD_EXISTS and a poisoned result for every other field kind; a
+// matched field records its TargetBitOffset. A
+// type-based relocation matches when the types are compatible, as
+// TypesAreCompat checks, or, for type_matches, when TypesMatch reports a
+// match; type_exists and type_matches are 1 on a match and 0 otherwise. An
+// enum-value relocation matches when the target enum has the enumerator. A
+// result with Matched false is not a target candidate. An error, such as a
+// type graph too deep to compare, fails the relocation.
 func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
 	if relo.Kind == CoreTypeIDLocal {
 		return &CoreReloResult{
@@ -278,41 +290,30 @@ func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 		return nil, err
 	}
 
-	res := &CoreReloResult{}
 	if !found {
 		if relo.Kind == CoreFieldExists {
-			res.OrigVal = 1
-			res.Validate = true
-			return res, nil
+			return &CoreReloResult{OrigVal: 1, Validate: true}, nil
 		}
-		res.Poison = true
-		return res, nil
+		return &CoreReloResult{Poison: true}, nil
+	}
+	res, err := local.calcLocalField(s, relo.Kind)
+	if err != nil {
+		return nil, err
 	}
 	res.Matched = true
+	res.TargetBitOffset = targ.BitOffset
 
-	origVal, origSize, origType, validate, err := local.calcField(s, relo.Kind)
+	res.NewVal, res.NewSize, res.NewTypeID, _, err = targ.calcField(target, relo.Kind)
 	if err != nil {
 		return nil, err
 	}
-	newVal, newSize, newType, _, err := targ.calcField(target, relo.Kind)
-	if err != nil {
-		return nil, err
-	}
 
-	res.OrigVal = origVal
-	res.NewVal = newVal
-	res.OrigSize = origSize
-	res.NewSize = newSize
-	res.OrigTypeID = origType
-	res.NewTypeID = newType
-	res.Validate = validate
-
-	if origSize != newSize {
-		origBtfType, err := s.TypeByID(origType)
+	if res.OrigSize != res.NewSize {
+		origBtfType, err := s.TypeByID(res.OrigTypeID)
 		if err != nil {
 			return nil, err
 		}
-		newBtfType, err := target.TypeByID(newType)
+		newBtfType, err := target.TypeByID(res.NewTypeID)
 		if err != nil {
 			return nil, err
 		}
@@ -326,9 +327,46 @@ func (s *Spec) CalcCoreRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 	return res, nil
 }
 
-// calcTypeRelo computes a type-based relocation against the target type.
+// CalcCoreFieldLocal computes the local side of the field-based relocation
+// relo, the same way CalcCoreRelo does before it looks at a target: OrigVal,
+// OrigSize, OrigTypeID and Validate are set, the target fields are zero. An
+// access the kind cannot apply to, such as field_signed on an array element,
+// or a bitfield that no 64-bit load holds, is an error.
+func (s *Spec) CalcCoreFieldLocal(relo CoreRelo) (*CoreReloResult, error) {
+	if !relo.Kind.fieldBased() {
+		return nil, fmt.Errorf("btf: %s is not a field relocation", relo.Kind)
+	}
+	local, err := s.ParseCoreSpec(relo)
+	if err != nil {
+		return nil, err
+	}
+	return local.calcLocalField(s, relo.Kind)
+}
+
+// calcLocalField computes the local side of a field-based relocation from
+// the local spec.
+func (spec *CoreSpec) calcLocalField(s *Spec, kind CoreReloKind) (*CoreReloResult, error) {
+	val, size, typeID, validate, err := spec.calcField(s, kind)
+	if err != nil {
+		return nil, err
+	}
+	return &CoreReloResult{OrigVal: val, OrigSize: size, OrigTypeID: typeID, Validate: validate}, nil
+}
+
+// calcTypeRelo computes a type-based relocation against the target type. A
+// type_matches relocation needs the types to match, every other kind needs
+// them to be compatible; an error from either check fails the relocation.
 func (s *Spec) calcTypeRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*CoreReloResult, error) {
-	compatible := coreTypesCompatible(s, relo.TypeID, target, targetTypeID)
+	var compatible bool
+	var err error
+	if relo.Kind == CoreTypeMatches {
+		compatible, err = TypesMatch(s, relo.TypeID, target, targetTypeID)
+	} else {
+		compatible, err = TypesAreCompat(s, relo.TypeID, target, targetTypeID)
+	}
+	if err != nil {
+		return nil, err
+	}
 	res := &CoreReloResult{Validate: true, Matched: compatible}
 
 	switch relo.Kind {
@@ -338,7 +376,7 @@ func (s *Spec) calcTypeRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 		if compatible {
 			res.NewVal = uint64(targetTypeID)
 		}
-	case CoreTypeExists:
+	case CoreTypeExists, CoreTypeMatches:
 		res.OrigVal = 1
 		if compatible {
 			res.NewVal = 1
@@ -409,11 +447,6 @@ func (s *Spec) calcEnumRelo(relo CoreRelo, target *Spec, targetTypeID uint32) (*
 	}
 
 	return res, nil
-}
-
-// coreTypesCompatible applies the field compatibility rules to a root type.
-func coreTypesCompatible(local *Spec, localID uint32, target *Spec, targetID uint32) bool {
-	return coreFieldsCompatible(local, localID, target, targetID)
 }
 
 // enumValue returns the value of the enum member at index.
@@ -598,10 +631,11 @@ func targetMemberType(spec *Spec, id uint32) *Type {
 	return t
 }
 
-// calcField implements bpf_core_calc_field_relo for one spec.
+// calcField implements bpf_core_calc_field_relo for one spec. field_exists
+// keeps the check of the original value, which is 1.
 func (spec *CoreSpec) calcField(s *Spec, kind CoreReloKind) (uint64, uint32, uint32, bool, error) {
 	if kind == CoreFieldExists {
-		return 1, 0, 0, false, nil
+		return 1, 0, 0, true, nil
 	}
 	if len(spec.Accessors) == 0 {
 		return 0, 0, 0, false, fmt.Errorf("btf: empty core access spec")
@@ -771,14 +805,6 @@ func intOffset(t *Type) uint32 {
 
 func isEnumKind(k Kind) bool {
 	return k == KindEnum || k == KindEnum64
-}
-
-// essentialName drops the ___flavor suffix libbpf ignores during matching.
-func essentialName(name string) string {
-	if i := strings.Index(name, "___"); i >= 0 {
-		return name[:i]
-	}
-	return name
 }
 
 // skipModsTypedefs follows typedefs and type modifiers to the underlying

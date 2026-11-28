@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -53,8 +54,14 @@ func TestRingBuffer(t *testing.T) {
 	prog := BpfObjectFindProgramByName(obj, f.Program)
 	ringMap := BpfObjectFindMapByName(obj, f.Map)
 	ringMap2 := BpfObjectFindMapByName(obj, f.Map2)
-	if prog == nil || ringMap == nil || ringMap2 == nil {
-		t.Fatal("program or ring buffer maps not found")
+	data := BpfObjectFindMapByName(obj, ".data")
+	if prog == nil || ringMap == nil || ringMap2 == nil || data == nil {
+		t.Fatal("program, ring buffer or .data maps not found")
+	}
+	// Only this process's opens produce records, so other processes cannot
+	// add any between the trigger and the reads.
+	if err := BpfMapUpdateElem(data, u32Key(0), u32Key(uint32(os.Getpid())), BPF_ANY); err != nil {
+		t.Fatalf("set target_tgid: %v", err)
 	}
 
 	link, err := BpfProgramAttachKprobe(prog, false, "do_sys_openat2")
@@ -98,14 +105,9 @@ func TestRingBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RingBufferPoll: %v", err)
 	}
-	if count < 2 || len(first) == 0 || len(second) == 0 {
-		t.Fatalf("poll consumed %d records, first ring has %d, second has %d", count, len(first), len(second))
-	}
-	if first[0] != f.Samples[0] {
-		t.Fatalf("first sample = %#x, want %#x", first[0], f.Samples[0])
-	}
-	if second[0] != f.Samples2[0] {
-		t.Fatalf("second sample = %#x, want %#x", second[0], f.Samples2[0])
+	if count != 2 || !slices.Equal(first, f.Samples) || !slices.Equal(second, f.Samples2) {
+		t.Fatalf("poll consumed %d records, samples %#x and %#x, want 2, %#x and %#x",
+			count, first, second, f.Samples, f.Samples2)
 	}
 
 	triggerOpen(t)

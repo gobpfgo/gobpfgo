@@ -8,10 +8,14 @@ LIBBPF ?= ../../../libbpf
 # object is the same no matter where the repository is cloned.
 DEBUG_DIR ?= /build/gobpfgo/testdata/progs
 
+# Target BTF for the CO-RE tests: plain C, never loaded, built for its BTF.
+TARGET_OBJS := core_target.bpf.o core_match_target.bpf.o \
+	core_cands_target.bpf.o core_amb_single.bpf.o
+
 # v1 selects the legacy atomic encoding. Newer CPUs emit the BPF_ATOMIC
 # fetch-add form, which the 5.10 floor rejects with reserved fields.
 BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
-	core_module.bpf.o core_module_target.bpf.o core_target.bpf.o \
+	core_module.bpf.o core_module_target.bpf.o \
 	tracepoint.bpf.o tracepoint_alt.bpf.o uprobe.bpf.o fentry.bpf.o \
 	raw_tp.bpf.o cookie.bpf.o kprobe_multi.bpf.o lsm.bpf.o dump.bpf.o \
 	ringbuf.bpf.o perfbuf.bpf.o link_a.bpf.o link_b.bpf.o \
@@ -24,7 +28,8 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	subprog_arg_ctx.bpf.o sanitize_type_tag.bpf.o sanitize_enum64.bpf.o \
 	sanitize_float.bpf.o percpu.bpf.o percpu_unused.bpf.o callx.bpf.o \
 	exception_cb.bpf.o exception_cb_direct.bpf.o subprog_core.bpf.o \
-	kfunc_missing.bpf.o
+	kfunc_missing.bpf.o core_failed.bpf.o core_match.bpf.o \
+	core_local.bpf.o core_amb.bpf.o core_cands.bpf.o $(TARGET_OBJS)
 
 # A host program with SystemTap SDT probes for the USDT parser. It is built
 # with the host compiler, kept unstripped so .note.stapsdt and the symbols
@@ -51,7 +56,7 @@ all: $(BPF_OBJS)
 		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \
 		-c $< -o $@
 
-core_target.bpf.o: core_target.c
+$(TARGET_OBJS): %.bpf.o: %.c
 	$(CLANG) -O2 -g -target bpf -mcpu=v1 -D__TARGET_ARCH_x86 \
 		-fdebug-compilation-dir=$(DEBUG_DIR) \
 		-I$(LIBBPF)/include/uapi -I$(LIBBPF)/src \

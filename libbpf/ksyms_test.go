@@ -46,8 +46,15 @@ func TestKsymsOpenOracle(t *testing.T) {
 // openProg opens the named object from testdata/progs until the test ends.
 func openProg(t *testing.T, name string) *BpfObject {
 	t.Helper()
+	return openProgOpts(t, name, nil)
+}
 
-	obj, err := BpfObjectOpenFile(progsDir+"/"+name, nil)
+// openProgOpts opens the named object from testdata/progs with opts until
+// the test ends. opts may be nil.
+func openProgOpts(t *testing.T, name string, opts *BpfObjectOpenOpts) *BpfObject {
+	t.Helper()
+
+	obj, err := BpfObjectOpenFile(progsDir+"/"+name, opts)
 	if err != nil {
 		t.Fatalf("open %s: %v", name, err)
 	}

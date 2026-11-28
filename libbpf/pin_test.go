@@ -38,28 +38,45 @@ func TestCheckBpfFS(t *testing.T) {
 // TestObjectPinMapsSkipsUncreated pins an object whose only map has
 // autocreate cleared and a stored pin path, as a per-CPU data map has after a
 // load on a kernel without global per-CPU data. The map has no descriptor, so
-// the precondition must not count it and the pin must not try it; a created
-// map is still required to have a descriptor.
+// the pin must not try it.
 func TestObjectPinMapsSkipsUncreated(t *testing.T) {
 	skipped := &BpfMap{name: ".percpu", fd: -1, pinPath: "/sys/fs/bpf/gobpfgo-uncreated"}
-	obj := &BpfObject{maps: []*BpfMap{skipped}}
+	obj := &BpfObject{maps: []*BpfMap{skipped}, attempted: true, loaded: true}
 
-	if !objectMapsLoaded(obj) {
-		t.Fatal("objectMapsLoaded = false with only an autocreate-cleared map")
-	}
 	if err := BpfObjectPinMaps(obj, nil); err != nil {
 		t.Fatalf("BpfObjectPinMaps: %v", err)
 	}
 	if BpfMapIsPinned(skipped) {
 		t.Error("autocreate-cleared map reports pinned")
 	}
+}
 
-	obj.maps = append(obj.maps, &BpfMap{name: ".bss", fd: -1, autocreate: true})
-	if objectMapsLoaded(obj) {
-		t.Error("objectMapsLoaded = true with an uncreated autocreate map")
+// TestObjectPinMapsPrepared checks the load precondition of
+// BpfObjectPinMaps. Before a load it is ENOENT, even when every map has
+// autocreate cleared and no map would be pinned; so it is for a nil or
+// closed object. Once a load has run, the maps are tried: after a failed
+// load an autocreate map has no descriptor and its pin fails with EINVAL,
+// while a map without a pin path is skipped.
+func TestObjectPinMapsPrepared(t *testing.T) {
+	const op = "bpf_object__pin_maps"
+	skipped := &BpfMap{name: ".percpu", fd: -1, pinPath: "/sys/fs/bpf/gobpfgo-uncreated"}
+	opened := &BpfObject{maps: []*BpfMap{skipped}}
+
+	checkMapOpError(t, "before load", BpfObjectPinMaps(opened, nil), op, unix.ENOENT)
+	checkMapOpError(t, "nil object", BpfObjectPinMaps(nil, nil), op, unix.ENOENT)
+	checkMapOpError(t, "closed object", BpfObjectPinMaps(&BpfObject{closed: true, attempted: true}, nil), op, unix.ENOENT)
+
+	unpinned := &BpfMap{name: "counts", fd: -1, autocreate: true}
+	failed := &BpfObject{maps: []*BpfMap{skipped, unpinned}, attempted: true}
+	if err := BpfObjectPinMaps(failed, nil); err != nil {
+		t.Errorf("failed load, no pin path: %v", err)
 	}
-	if err := BpfObjectPinMaps(obj, nil); !errors.Is(err, unix.ENOENT) {
-		t.Errorf("BpfObjectPinMaps = %v, want ENOENT", err)
+	unpinned.pinPath = "/sys/fs/bpf/gobpfgo-failed"
+	if err := BpfObjectPinMaps(failed, nil); !errors.Is(err, unix.EINVAL) {
+		t.Errorf("failed load with a pin path: %v, want EINVAL", err)
+	}
+	if BpfMapIsPinned(skipped) || BpfMapIsPinned(unpinned) {
+		t.Error("a map without a descriptor reports pinned")
 	}
 }
 

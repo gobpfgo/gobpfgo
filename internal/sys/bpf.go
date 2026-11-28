@@ -2,7 +2,7 @@
 // gobpfgo-origin: original bpf() wrapper
 // libbpf-source: src/bpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: sys_bpf, bpf_map_create, bpf_map_freeze
+// libbpf-symbols: sys_bpf, bpf_map_create, bpf_map_freeze, bpf_map_lookup_elem_flags, bpf_map_update_elem, bpf_map_delete_elem_flags, bpf_map_lookup_and_delete_elem_flags, bpf_map_get_next_key
 
 //go:build linux && (amd64 || arm64)
 
@@ -81,10 +81,12 @@ func ObjPin(fd int, path string, fileFlags uint32) error {
 // MapLookupElem calls BPF_MAP_LOOKUP_ELEM and copies the map value into value.
 //
 // key and value are the raw key and value buffers. value must be at least the
-// map value size: the kernel writes that many bytes into it. The slices are
-// kept alive until the syscall returns.
+// map value size: the kernel writes that many bytes into it. An empty key
+// passes a NULL key address, which a map without keys, such as a queue,
+// stack or bloom filter, takes. The slices are kept alive until the syscall
+// returns.
 func MapLookupElem(fd int, key, value []byte, flags uint64) error {
-	if fd < 0 || len(key) == 0 || len(value) == 0 {
+	if fd < 0 || len(value) == 0 {
 		return unix.EINVAL
 	}
 
@@ -102,10 +104,11 @@ func MapLookupElem(fd int, key, value []byte, flags uint64) error {
 
 // MapUpdateElem calls BPF_MAP_UPDATE_ELEM and copies value into the map.
 //
-// flags is one of BPF_ANY, BPF_NOEXIST or BPF_EXIST. The slices are kept
-// alive until the syscall returns.
+// flags is one of BPF_ANY, BPF_NOEXIST or BPF_EXIST, possibly with other
+// BPF_F_* bits. An empty key passes a NULL key address, as for
+// MapLookupElem. The slices are kept alive until the syscall returns.
 func MapUpdateElem(fd int, key, value []byte, flags uint64) error {
-	if fd < 0 || len(key) == 0 || len(value) == 0 {
+	if fd < 0 || len(value) == 0 {
 		return unix.EINVAL
 	}
 
@@ -134,10 +137,11 @@ func MapFreeze(fd int) error {
 
 // MapDeleteElem calls BPF_MAP_DELETE_ELEM and removes key from the map.
 //
-// The value address is NULL, as the command does not read one. key is kept
-// alive until the syscall returns.
+// The value address is NULL, as the command does not read one. An empty key
+// passes a NULL key address, as for MapLookupElem. key is kept alive until
+// the syscall returns.
 func MapDeleteElem(fd int, key []byte, flags uint64) error {
-	if fd < 0 || len(key) == 0 {
+	if fd < 0 {
 		return unix.EINVAL
 	}
 
@@ -148,5 +152,50 @@ func MapDeleteElem(fd int, key []byte, flags uint64) error {
 	}
 	err := BPF(BPF_MAP_DELETE_ELEM, attr.Marshal())
 	runtime.KeepAlive(key)
+	return err
+}
+
+// MapLookupAndDeleteElem calls BPF_MAP_LOOKUP_AND_DELETE_ELEM, which copies
+// the value for key into value and removes the element.
+//
+// value must be at least the size the kernel writes, as for MapLookupElem.
+// An empty key passes a NULL key address, which pops the next element of a
+// queue or stack map. The slices are kept alive until the syscall returns.
+func MapLookupAndDeleteElem(fd int, key, value []byte, flags uint64) error {
+	if fd < 0 || len(value) == 0 {
+		return unix.EINVAL
+	}
+
+	attr := &MapElemAttr{
+		MapFD: uint32(fd),
+		Key:   uint64(addr(key)),
+		Value: uint64(addr(value)),
+		Flags: flags,
+	}
+	err := BPF(BPF_MAP_LOOKUP_AND_DELETE_ELEM, attr.Marshal())
+	runtime.KeepAlive(key)
+	runtime.KeepAlive(value)
+	return err
+}
+
+// MapGetNextKey calls BPF_MAP_GET_NEXT_KEY and copies the key that follows
+// key into nextKey.
+//
+// nextKey must be at least the map key size. An empty key passes a NULL key
+// address, which asks for the first key. The kernel returns ENOENT after the
+// last key. The slices are kept alive until the syscall returns.
+func MapGetNextKey(fd int, key, nextKey []byte) error {
+	if fd < 0 || len(nextKey) == 0 {
+		return unix.EINVAL
+	}
+
+	attr := &MapNextKeyAttr{
+		MapFD:   uint32(fd),
+		Key:     uint64(addr(key)),
+		NextKey: uint64(addr(nextKey)),
+	}
+	err := BPF(BPF_MAP_GET_NEXT_KEY, attr.Marshal())
+	runtime.KeepAlive(key)
+	runtime.KeepAlive(nextKey)
 	return err
 }

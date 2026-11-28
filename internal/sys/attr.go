@@ -130,6 +130,34 @@ func (a *MapElemAttr) Marshal() []byte {
 	return buf
 }
 
+// MapNextKeyAttrSize is offsetofend(union bpf_attr, next_key) on 64-bit
+// Linux. It is the size libbpf passes to BPF_MAP_GET_NEXT_KEY.
+const MapNextKeyAttrSize = 24
+
+// Offset of next_key inside union bpf_attr for the BPF_MAP_GET_NEXT_KEY
+// command. It shares the slot of value in the BPF_MAP_*_ELEM view.
+const mapElemOffNextKey = 16
+
+// MapNextKeyAttr is the BPF_MAP_GET_NEXT_KEY view of union bpf_attr. Key is
+// the address of the current key, or 0 for the first key, and NextKey the
+// address of the buffer the kernel writes the following key into.
+type MapNextKeyAttr struct {
+	MapFD   uint32
+	Key     uint64
+	NextKey uint64
+}
+
+// Marshal returns the bytes passed to bpf(BPF_MAP_GET_NEXT_KEY, ...).
+func (a *MapNextKeyAttr) Marshal() []byte {
+	buf := make([]byte, MapNextKeyAttrSize)
+
+	binary.NativeEndian.PutUint32(buf[mapElemOffMapFD:], a.MapFD)
+	binary.NativeEndian.PutUint64(buf[mapElemOffKey:], a.Key)
+	binary.NativeEndian.PutUint64(buf[mapElemOffNextKey:], a.NextKey)
+
+	return buf
+}
+
 // MapFreezeAttrSize is offsetofend(union bpf_attr, map_fd) on 64-bit Linux. It
 // is the size libbpf passes to BPF_MAP_FREEZE, which reads only the map fd of
 // the BPF_MAP_*_ELEM view.
@@ -220,6 +248,17 @@ func mapElemFieldLayout() []fieldLayout {
 		{"key", mapElemOffKey, 8},
 		{"value", mapElemOffValue, 8},
 		{"flags", mapElemOffFlags, 8},
+	}
+}
+
+// mapNextKeyFieldLayout is the Go claim about the C layout of the
+// BPF_MAP_GET_NEXT_KEY fields. The layout test compares it with the oracle
+// output.
+func mapNextKeyFieldLayout() []fieldLayout {
+	return []fieldLayout{
+		{"map_fd", mapElemOffMapFD, 4},
+		{"key", mapElemOffKey, 8},
+		{"next_key", mapElemOffNextKey, 8},
 	}
 }
 
