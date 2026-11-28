@@ -200,6 +200,12 @@ func TestKprobeMultiLinkPattern(t *testing.T) {
 			0, 0, nil, nil, unix.ENOENT},
 		{"malformed table", BpfKprobeMultiOpts{Pattern: "do_*"}, fixedKprobeResolve("do_*", nil, unix.EINVAL),
 			0, 0, nil, nil, unix.EINVAL},
+		{"pattern and empty symbols", BpfKprobeMultiOpts{Pattern: "do_*", Symbols: []string{}}, unexpectedKprobeResolve,
+			0, 0, nil, nil, unix.EINVAL},
+		{"pattern and empty addresses", BpfKprobeMultiOpts{Pattern: "do_*", Addrs: []uint64{}}, unexpectedKprobeResolve,
+			0, 0, nil, nil, unix.EINVAL},
+		{"pattern and empty cookies", BpfKprobeMultiOpts{Pattern: "do_*", Cookies: []uint64{}}, unexpectedKprobeResolve,
+			0, 0, nil, nil, unix.EINVAL},
 		{"pattern and symbols", BpfKprobeMultiOpts{Pattern: "do_*", Symbols: []string{"vfs_open"}}, unexpectedKprobeResolve,
 			0, 0, nil, nil, unix.EINVAL},
 		{"pattern and addresses", BpfKprobeMultiOpts{Pattern: "do_*", Addrs: []uint64{1}}, unexpectedKprobeResolve,
@@ -234,7 +240,8 @@ func TestKprobeMultiLinkPattern(t *testing.T) {
 }
 
 // TestKprobeMultiSectionOpts checks that the multi and session sections pass
-// their whole target as the pattern.
+// their target as the pattern, cut at the first byte outside libbpf's
+// section character set.
 func TestKprobeMultiSectionOpts(t *testing.T) {
 	tests := []struct {
 		section string
@@ -244,7 +251,7 @@ func TestKprobeMultiSectionOpts(t *testing.T) {
 		{"kprobe.multi/do_sys_open*", BpfKprobeMultiOpts{Pattern: "do_sys_open*"}},
 		{"kretprobe.multi/vfs_*", BpfKprobeMultiOpts{Pattern: "vfs_*", Retprobe: true}},
 		{"kprobe.session/do_sys_ope?", BpfKprobeMultiOpts{Pattern: "do_sys_ope?", Session: true}},
-		{"kprobe.multi/do_sys_openat2+16", BpfKprobeMultiOpts{Pattern: "do_sys_openat2+16"}},
+		{"kprobe.multi/do_sys_openat2+16", BpfKprobeMultiOpts{Pattern: "do_sys_openat2"}},
 		{"kprobe.multi/", BpfKprobeMultiOpts{}},
 	}
 	for _, tt := range tests {
