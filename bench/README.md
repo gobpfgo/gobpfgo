@@ -8,7 +8,7 @@ A benchmark suite that times the Go port against C libbpf on the same host and k
 - Root for `load`, `map` and `attach`. Without it they print a skip line with the errno on both sides. `open`, `btf`, `linker` and `dump` need no privileges.
 - A C compiler, `make`, `pkg-config` and the libelf and zlib development files, as for the oracle.
 - A libbpf source checkout at the commit the port pins, `4f05fb0`. The default `LIBBPF=../libbpf` is the Go package when make runs in `bench/`, the same as for the oracle, so always pass the checkout. The build stops with a message if `LIBBPF` is not a libbpf tree.
-- The Go toolchain from `go.mod`.
+- The Go toolchain from `go.mod`. The Go half runs with `GOMAXPROCS=1`; `GOGC` defaults to 100 and can be set to `off` for a GC control run.
 - `taskset` from util-linux.
 
 ## Run
@@ -20,7 +20,7 @@ make -C bench LIBBPF=/path/to/libbpf
 make -C bench run-all LIBBPF=/path/to/libbpf CPU=2 RUNS=3
 ```
 
-`run-all` prints the kernel, CPU, governor, compiler, Go and libbpf versions first. It then alternates the two halves so that drift in CPU frequency or host load reaches both alike. `make -C bench run` runs only the C half and `make -C bench run-go` only the Go half, each `RUNS` times. Every benchmark runs in its own process, as root through `SUDO` (default `sudo -n`), pinned to `CPU` with `taskset`. The Go half also runs with `GOMAXPROCS=1`. `SUDO=` runs unprivileged.
+`run-all` prints the kernel, CPU, governor, compiler, Go and libbpf versions first. It then alternates the two halves so that drift in CPU frequency or host load reaches both alike. `make -C bench run` runs only the C half and `make -C bench run-go` only the Go half, each `RUNS` times. Every benchmark runs in its own process, as root through `SUDO` (default `sudo -n`), pinned to `CPU` with `taskset`. The Go half also runs with `GOMAXPROCS=1` and `GOGC` (default 100; set `GOGC=off` for a control run). `SUDO=` runs unprivileged.
 
 By hand, for the C half from `bench/`:
 

@@ -28,6 +28,7 @@ RUNS ?= 3
 SUDO ?= sudo -n
 TASKSET ?= taskset -c $(CPU)
 GO ?= go
+GOGC ?= 100
 LLVM_OBJCOPY ?= llvm-objcopy
 
 # BTF replaces vmlinux as the BTF of the btf and dump benchmarks on both
@@ -104,7 +105,7 @@ run-go: $(GO_TEST)
 	@set -o pipefail; for r in $(RUN_IDS); do \
 		echo "# Go run $$r"; \
 		for b in $(GO_BENCHES); do \
-			(cd ../libbpf && $(SUDO) env GOMAXPROCS=1 $(BENCH_ENV) $(TASKSET) \
+			(cd ../libbpf && $(SUDO) env GOMAXPROCS=1 GOGC=$(GOGC) $(BENCH_ENV) $(TASKSET) \
 				$(abspath $(GO_TEST)) -test.run '^$$' -test.v \
 				-test.bench "^Benchmark$${b%%:*}$$" \
 				-test.benchtime "$${b##*:}x" -test.benchmem) \
