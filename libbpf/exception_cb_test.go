@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -337,6 +338,9 @@ func TestExceptionCbNoDeclTag(t *testing.T) {
 // on a kernel whose BTF lacks it, as on 5.10, the load must fail with
 // EINVAL on the unresolved kfunc and the test skips.
 func TestExceptionCbLoad(t *testing.T) {
+	if runtime.GOARCH == "arm64" {
+		t.Skip("kernel 6.17 arm64 hangs in bpf_throw under fentry; the load and append paths are covered on amd64")
+	}
 	kernel := requireKernelBTF(t)
 	obj, err := BpfObjectOpenFile(exceptionCbObject, nil)
 	if err != nil {

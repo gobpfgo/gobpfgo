@@ -68,8 +68,8 @@ func TestCoreRelocLoad(t *testing.T) {
 	if targetType == nil {
 		t.Fatalf("kernel type %s not found", localType.Name)
 	}
-	member := kernel.Member(targetType, "sp")
-	if member == nil {
+	offset, ok := memberBitOffset(kernel, targetType, "sp")
+	if !ok {
 		t.Fatal("kernel pt_regs.sp not found")
 	}
 
@@ -77,7 +77,7 @@ func TestCoreRelocLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CalcCoreRelo: %v", err)
 	}
-	wantOff := uint64(member.Offset / 8)
+	wantOff := uint64(offset / 8)
 	if res.NewVal != wantOff {
 		t.Fatalf("target offset = %d, want %d", res.NewVal, wantOff)
 	}
@@ -97,6 +97,47 @@ func TestCoreRelocLoad(t *testing.T) {
 		}
 		t.Fatalf("BpfObjectLoad: %v", err)
 	}
+}
+
+// memberBitOffset returns the bit offset of name in t or in an anonymous
+// struct or union member of t, summed through the anonymous members. It lets
+// the test find pt_regs.sp directly on amd64 and nested inside the anonymous
+// arm64 regs struct.
+func memberBitOffset(spec *btf.Spec, t *btf.Type, name string) (uint32, bool) {
+	if t == nil {
+		return 0, false
+	}
+	for i := range t.Members {
+		m := &t.Members[i]
+		if m.Name == name {
+			return m.Offset, true
+		}
+		if m.Name != "" {
+			continue
+		}
+		child, err := spec.TypeByID(m.Type)
+		if err != nil {
+			continue
+		}
+		for {
+			switch child.Kind {
+			case btf.KindTypedef, btf.KindVolatile, btf.KindConst, btf.KindRestrict, btf.KindTypeTag:
+				child, err = spec.TypeByID(child.SizeOrType)
+				if err != nil {
+					child = nil
+				}
+				continue
+			}
+			break
+		}
+		if child == nil || child.Kind != btf.KindStruct && child.Kind != btf.KindUnion {
+			continue
+		}
+		if off, ok := memberBitOffset(spec, child, name); ok {
+			return m.Offset + off, true
+		}
+	}
+	return 0, false
 }
 
 func TestCoreModuleCandidate(t *testing.T) {
