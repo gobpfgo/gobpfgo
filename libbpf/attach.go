@@ -44,12 +44,16 @@ type BpfRawTracepointOpts struct {
 
 // BpfKprobeMultiOpts are the optional settings of
 // BpfProgramAttachKprobeMulti. Exactly one of Symbols and Addrs is used;
-// Cookies, when present, has one entry per symbol or address.
+// Cookies, when present, has one entry per symbol or address. Retprobe calls
+// the program when the functions return; Session calls it on entry and,
+// unless the entry run returns nonzero, on return. Retprobe and Session are
+// mutually exclusive.
 type BpfKprobeMultiOpts struct {
 	Symbols  []string
 	Addrs    []uint64
 	Cookies  []uint64
 	Retprobe bool
+	Session  bool
 }
 
 // BpfUprobeMultiOpts are the optional settings of
@@ -216,33 +220,25 @@ func BpfProgramAttachRawTracepointOpts(prog *BpfProgram, name string, opts *BpfR
 	return &BpfLink{fd: fd, perfFD: -1}, nil
 }
 
-// BpfProgramAttachKprobeMulti attaches a loaded kprobe.multi program to
-// several functions in one link. Exactly one of Symbols and Addrs must be
-// set. The kernel must support BPF_TRACE_KPROBE_MULTI (5.18 or newer); older
-// kernels return EINVAL.
+// BpfProgramAttachKprobeMulti attaches a loaded kprobe.multi or
+// kprobe.session program to several functions in one link. Exactly one of
+// Symbols and Addrs must be set, and at most one of Retprobe and Session;
+// otherwise the call returns EINVAL. The link uses BPF_TRACE_KPROBE_SESSION
+// when Session is set and BPF_TRACE_KPROBE_MULTI otherwise, and the program
+// must have been loaded with that expected attach type. The kernel must
+// support the attach type, 5.18 or newer for kprobe multi and 6.10 for
+// sessions; older kernels return EINVAL. A symbol the kernel cannot find
+// returns ENOENT.
 func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*BpfLink, error) {
 	const op = "bpf_program__attach_kprobe_multi"
 	if err := checkAttachProgram(prog, op); err != nil {
 		return nil, err
 	}
-	if opts == nil || len(opts.Symbols) > 0 && len(opts.Addrs) > 0 || len(opts.Symbols) == 0 && len(opts.Addrs) == 0 {
-		return nil, attachErr(op, unix.EINVAL)
+	attr, km, err := kprobeMultiLink(prog, opts)
+	if err != nil {
+		return nil, attachErr(op, err)
 	}
 
-	flags := uint32(0)
-	if opts.Retprobe {
-		flags = BPF_F_KPROBE_MULTI_RETURN
-	}
-	attr := &sys.LinkCreateAttr{
-		ProgFD:     uint32(prog.fd),
-		AttachType: uint32(BPF_TRACE_KPROBE_MULTI),
-	}
-	km := &sys.LinkKprobeMulti{
-		Flags:   flags,
-		Syms:    opts.Symbols,
-		Addrs:   opts.Addrs,
-		Cookies: opts.Cookies,
-	}
 	fd, err := sys.LinkCreate(attr, km)
 	if err != nil {
 		errno := errnoFromError(err)
@@ -252,6 +248,37 @@ func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*B
 		return nil, &Error{Op: op, Errno: errno}
 	}
 	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// kprobeMultiLink checks opts and returns the link attribute and arrays of a
+// kprobe multi or session link for the loaded prog. It returns EINVAL for nil
+// opts, for neither or both of Symbols and Addrs, and for both Retprobe and
+// Session.
+func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*sys.LinkCreateAttr, *sys.LinkKprobeMulti, error) {
+	if opts == nil || len(opts.Symbols) > 0 && len(opts.Addrs) > 0 || len(opts.Symbols) == 0 && len(opts.Addrs) == 0 {
+		return nil, nil, unix.EINVAL
+	}
+	if opts.Retprobe && opts.Session {
+		return nil, nil, unix.EINVAL
+	}
+
+	attachType := BPF_TRACE_KPROBE_MULTI
+	if opts.Session {
+		attachType = BPF_TRACE_KPROBE_SESSION
+	}
+	km := &sys.LinkKprobeMulti{
+		Syms:    opts.Symbols,
+		Addrs:   opts.Addrs,
+		Cookies: opts.Cookies,
+	}
+	if opts.Retprobe {
+		km.Flags = BPF_F_KPROBE_MULTI_RETURN
+	}
+	attr := &sys.LinkCreateAttr{
+		ProgFD:     uint32(prog.fd),
+		AttachType: uint32(attachType),
+	}
+	return attr, km, nil
 }
 
 // BpfProgramAttachUprobeMulti attaches a loaded program to several locations
@@ -441,8 +468,10 @@ func BpfProgramAttachLsm(prog *BpfProgram) (*BpfLink, error) {
 
 // BpfProgramAttach attaches a loaded program using the section name, like the
 // library's automatic attach. It supports the sections this package can
-// attach: kprobe, kretprobe, kprobe.multi, uprobe, uretprobe, tracepoint, tp,
-// raw tracepoint, fentry, fexit, fmod_ret, tp_btf and lsm.
+// attach: kprobe, kretprobe, kprobe.multi, kprobe.session, uprobe, uretprobe,
+// tracepoint, tp, raw tracepoint, fentry, fexit, fmod_ret, tp_btf and lsm.
+// Sections without an automatic attach, such as cgroup, xdp, sk_msg and
+// flow_dissector, return EOPNOTSUPP.
 func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 	const op = "bpf_program__attach"
 	if err := checkAttachProgram(prog, op); err != nil {
@@ -466,6 +495,11 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 		return BpfProgramAttachKprobeMulti(prog, &BpfKprobeMultiOpts{
 			Symbols:  []string{target},
 			Retprobe: def.prefix == "kretprobe.multi/",
+		})
+	case "kprobe.session/":
+		return BpfProgramAttachKprobeMulti(prog, &BpfKprobeMultiOpts{
+			Symbols: []string{target},
+			Session: true,
 		})
 	case "uprobe/", "uretprobe/", "uprobe.s/", "uretprobe.s/":
 		sep := strings.LastIndexByte(target, ':')

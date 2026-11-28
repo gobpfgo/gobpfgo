@@ -29,7 +29,8 @@ BPF_OBJS := kprobe.bpf.o core.bpf.o core_kernel.bpf.o core_missing.bpf.o \
 	sanitize_float.bpf.o percpu.bpf.o percpu_unused.bpf.o callx.bpf.o \
 	exception_cb.bpf.o exception_cb_direct.bpf.o subprog_core.bpf.o \
 	kfunc_missing.bpf.o core_failed.bpf.o core_match.bpf.o \
-	core_local.bpf.o core_amb.bpf.o core_cands.bpf.o $(TARGET_OBJS)
+	core_local.bpf.o core_amb.bpf.o core_cands.bpf.o cgroup.bpf.o \
+	netns.bpf.o xdp.bpf.o sockmap.bpf.o kprobe_session.bpf.o $(TARGET_OBJS)
 
 # A host program with SystemTap SDT probes for the USDT parser. It is built
 # with the host compiler, kept unstripped so .note.stapsdt and the symbols

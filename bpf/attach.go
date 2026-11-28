@@ -125,6 +125,55 @@ func (p *Program) AttachUprobeMulti(pid int, binaryPath string, funcPattern stri
 	return newLink(libbpf.BpfProgramAttachUprobeMulti(p.live(), pid, binaryPath, funcPattern, opts))
 }
 
+// AttachCgroup attaches the program to the cgroup v2 directory cgroupFD with
+// its expected attach type. The caller keeps cgroupFD. See
+// libbpf.BpfProgramAttachCgroup.
+func (p *Program) AttachCgroup(cgroupFD int) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachCgroup(p.live(), cgroupFD))
+}
+
+// AttachCgroupOpts attaches the program to the cgroup v2 directory cgroupFD
+// with the placement, flags and expected revision in opts. See
+// libbpf.BpfProgramAttachCgroupOpts.
+func (p *Program) AttachCgroupOpts(cgroupFD int, opts *libbpf.BpfCgroupOpts) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachCgroupOpts(p.live(), cgroupFD, opts))
+}
+
+// AttachNetns attaches the program, such as a flow_dissector program, to the
+// network namespace netnsFD. The caller keeps netnsFD. See
+// libbpf.BpfProgramAttachNetns.
+func (p *Program) AttachNetns(netnsFD int) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachNetns(p.live(), netnsFD))
+}
+
+// AttachXDP attaches an XDP program to the network interface with index
+// ifindex. See libbpf.BpfProgramAttachXDP.
+func (p *Program) AttachXDP(ifindex int) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachXDP(p.live(), ifindex))
+}
+
+// AttachSockmap attaches the program, such as an sk_msg program, to the
+// sockmap or sockhash mapFD. The caller keeps mapFD. See
+// libbpf.BpfProgramAttachSockmap.
+func (p *Program) AttachSockmap(mapFD int) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachSockmap(p.live(), mapFD))
+}
+
 // AttachUsdt attaches the program to every call site of the USDT probe
 // provider:name in binaryPath for pid, where -1 selects every process. The
 // object must include libbpf's usdt.bpf.h. The Link has no descriptor: FD

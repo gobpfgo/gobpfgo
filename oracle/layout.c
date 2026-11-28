@@ -92,9 +92,12 @@ int oracle_layout(void) {
 	static const struct oracle_field link_create_fields[] = {
 		FC(prog_fd),
 		FC(target_fd),
+		FC(target_ifindex),
 		FC(attach_type),
 		FC(flags),
 		FC(target_btf_id),
+		FC(iter_info),
+		FC(iter_info_len),
 		FC(perf_event.bpf_cookie),
 		FC(kprobe_multi.flags),
 		FC(kprobe_multi.cnt),
@@ -110,6 +113,9 @@ int oracle_layout(void) {
 		FC(uprobe_multi.cnt),
 		FC(uprobe_multi.flags),
 		FC(uprobe_multi.pid),
+		FC(cgroup.relative_fd),
+		FC(cgroup.relative_id),
+		FC(cgroup.expected_revision),
 	};
 	static const struct oracle_field link_update_fields[] = {
 		FU(link_fd),
