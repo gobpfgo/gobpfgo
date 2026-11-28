@@ -110,6 +110,7 @@ const (
 	BPF_TRACE_FEXIT          BpfAttachType = 25
 	BPF_MODIFY_RETURN        BpfAttachType = 26
 	BPF_LSM_MAC              BpfAttachType = 27
+	BPF_TRACE_ITER           BpfAttachType = 28
 	BPF_SK_LOOKUP            BpfAttachType = 36
 	BPF_XDP                  BpfAttachType = 37
 	BPF_PERF_EVENT           BpfAttachType = 41

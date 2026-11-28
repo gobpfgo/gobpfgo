@@ -286,6 +286,18 @@ func TestBtfIDAttrBytes(t *testing.T) {
 			got:    (&ProgLoadAttr{ProgType: 2, FdArray: 0x5555555555555555}).Marshal(),
 			values: map[string]uint64{"prog_type": 2, "fd_array": 0x5555555555555555},
 		},
+		{
+			name:   "prog_load attach prog fd",
+			block:  f.ProgLoad,
+			got:    (&ProgLoadAttr{ProgType: 28, AttachBtfID: 7, AttachProgFD: 9}).Marshal(),
+			values: map[string]uint64{"prog_type": 28, "attach_btf_id": 7, "attach_prog_fd": 9},
+		},
+		{
+			name:   "prog_load attach btf obj fd",
+			block:  f.ProgLoad,
+			got:    (&ProgLoadAttr{ProgType: 26, AttachBtfID: 7, AttachBtfObjFD: 10}).Marshal(),
+			values: map[string]uint64{"prog_type": 26, "attach_btf_id": 7, "attach_btf_obj_fd": 10},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

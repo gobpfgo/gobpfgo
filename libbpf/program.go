@@ -23,16 +23,25 @@ type BpfProgram struct {
 	progFlags          uint32
 	usdt               bool
 	sectionName        string
-	attachBTF          bool
-	attachTarget       string
-	attachBTFID        uint32
-	attachBTFObjFD     int
-	insns              []byte
-	relocs             []elf.Reloc
-	fd                 int
-	id                 uint32
-	xlatedInsnCnt      int
-	jitedLen           uint32
+	// attachBTF marks a program whose section target is a kernel BTF
+	// function, and attachProg one whose target is a function of the BPF
+	// program attachProgFD, a freplace program. attachTarget is the
+	// section target; the load resolves it to attachBTFID, in the BTF
+	// module attachBTFObjFD or 0 for vmlinux, unless
+	// BpfProgramSetAttachTarget set the id. attachProgFD belongs to the
+	// caller of BpfProgramSetAttachTarget.
+	attachBTF      bool
+	attachProg     bool
+	attachTarget   string
+	attachBTFID    uint32
+	attachBTFObjFD int
+	attachProgFD   int
+	insns          []byte
+	relocs         []elf.Reloc
+	fd             int
+	id             uint32
+	xlatedInsnCnt  int
+	jitedLen       uint32
 	// secIdx is the index of the section that holds the program's
 	// function, and secInsnOff and secInsnCnt are the function's first
 	// instruction and length in it. relocs cover only that function, with

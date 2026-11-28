@@ -106,6 +106,7 @@ const (
 	progInfoOffNrJitedFuncLens      = 108
 	progInfoOffJitedKsyms           = 112
 	progInfoOffJitedFuncLens        = 120
+	progInfoOffBtfID                = 128
 	progInfoOffNrLineInfo           = 148
 	progInfoOffLineInfo             = 152
 	progInfoOffJitedLineInfo        = 160
@@ -115,6 +116,9 @@ const (
 )
 
 // ProgInfo is the program metadata returned by BPF_OBJ_GET_INFO_BY_FD.
+//
+// BtfID is the id of the program's BTF object, or 0 for a program loaded
+// without BTF.
 //
 // LineInfo holds NrLineInfo records of LineInfoRecSize bytes in the struct
 // bpf_line_info layout. JitedLineInfo holds NrJitedLineInfo records of
@@ -127,6 +131,7 @@ type ProgInfo struct {
 	ID                   uint32
 	JitedProgLen         uint32
 	XlatedProgLen        uint32
+	BtfID                uint32
 	Name                 string
 	NrJitedKsyms         uint32
 	NrJitedFuncLens      uint32
@@ -151,6 +156,7 @@ func progInfoFieldLayout() []fieldLayout {
 		{"nr_jited_func_lens", progInfoOffNrJitedFuncLens, 4},
 		{"jited_ksyms", progInfoOffJitedKsyms, 8},
 		{"jited_func_lens", progInfoOffJitedFuncLens, 8},
+		{"btf_id", progInfoOffBtfID, 4},
 		{"nr_line_info", progInfoOffNrLineInfo, 4},
 		{"line_info", progInfoOffLineInfo, 8},
 		{"jited_line_info", progInfoOffJitedLineInfo, 8},
@@ -248,6 +254,7 @@ func decodeProgInfo(info []byte, bufs *progInfoBufs) *ProgInfo {
 		ID:                   binary.NativeEndian.Uint32(info[progInfoOffID:]),
 		JitedProgLen:         binary.NativeEndian.Uint32(info[progInfoOffJitedProgLen:]),
 		XlatedProgLen:        binary.NativeEndian.Uint32(info[progInfoOffXlatedProgLen:]),
+		BtfID:                binary.NativeEndian.Uint32(info[progInfoOffBtfID:]),
 		Name:                 cString(info, progInfoOffName, BPF_OBJ_NAME_LEN),
 		NrJitedKsyms:         binary.NativeEndian.Uint32(info[progInfoOffNrJitedKsyms:]),
 		NrJitedFuncLens:      binary.NativeEndian.Uint32(info[progInfoOffNrJitedFuncLens:]),

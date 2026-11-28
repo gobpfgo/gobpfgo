@@ -47,3 +47,21 @@ func TestRetryProgLoad(t *testing.T) {
 		t.Errorf("always EAGAIN: fd %d err %v calls %d, want 0, EAGAIN, 5", fd, err, calls)
 	}
 }
+
+// TestProgLoadAttachFDsExclusive checks that ProgLoad refuses an attach
+// program descriptor together with an attach BTF object descriptor, which
+// share one field, with EINVAL before bpf(), as libbpf's bpf_prog_load does.
+// Without privileges a call that reached bpf() would fail with EPERM.
+func TestProgLoadAttachFDsExclusive(t *testing.T) {
+	exit := []byte{
+		0xb7, 0, 0, 0, 0, 0, 0, 0, // r0 = 0
+		0x95, 0, 0, 0, 0, 0, 0, 0, // exit
+	}
+	attr := &ProgLoadAttr{ProgType: 1, InsnCnt: 2, AttachProgFD: 1 << 30, AttachBtfObjFD: 1 << 30}
+	if fd, err := ProgLoad(attr, exit, []byte("GPL\x00"), nil, nil, nil, nil); !errors.Is(err, unix.EINVAL) {
+		if err == nil {
+			unix.Close(fd)
+		}
+		t.Fatalf("ProgLoad with both attach descriptors = %d, %v, want EINVAL", fd, err)
+	}
+}

@@ -174,6 +174,27 @@ func (p *Program) AttachSockmap(mapFD int) (*Link, error) {
 	return newLink(libbpf.BpfProgramAttachSockmap(p.live(), mapFD))
 }
 
+// AttachIter attaches an iterator program, such as an iter/bpf_map program,
+// through an iterator link with the link info in opts, which may be nil for
+// the default iterator. See libbpf.BpfProgramAttachIter.
+func (p *Program) AttachIter(opts *libbpf.BpfIterOpts) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachIter(p.live(), opts))
+}
+
+// AttachFreplace attaches a freplace program in place of the function
+// attachFuncName of the loaded program targetFD, or, with targetFD 0 and an
+// empty attachFuncName, to the function it was loaded against. The caller
+// keeps targetFD. See libbpf.BpfProgramAttachFreplace.
+func (p *Program) AttachFreplace(targetFD int, attachFuncName string) (*Link, error) {
+	if p.isClosed() {
+		return nil, ErrClosed
+	}
+	return newLink(libbpf.BpfProgramAttachFreplace(p.live(), targetFD, attachFuncName))
+}
+
 // AttachUsdt attaches the program to every call site of the USDT probe
 // provider:name in binaryPath for pid, where -1 selects every process. The
 // object must include libbpf's usdt.bpf.h. The Link has no descriptor: FD

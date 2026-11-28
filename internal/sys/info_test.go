@@ -108,6 +108,7 @@ func fillProgInfo(req []byte, bufs *progInfoBufs) {
 	binary.NativeEndian.PutUint32(req[progInfoOffID:], 77)
 	binary.NativeEndian.PutUint32(req[progInfoOffJitedProgLen:], 100)
 	binary.NativeEndian.PutUint32(req[progInfoOffXlatedProgLen:], 144)
+	binary.NativeEndian.PutUint32(req[progInfoOffBtfID:], 31)
 	copy(req[progInfoOffName:], "handle_open")
 
 	binary.NativeEndian.PutUint64(req[progInfoOffJitedKsyms:], 0)
@@ -126,7 +127,8 @@ func TestDecodeProgInfo(t *testing.T) {
 	fillProgInfo(req, bufs)
 	info := decodeProgInfo(req, bufs)
 
-	if info.Type != 2 || info.ID != 77 || info.JitedProgLen != 100 || info.XlatedProgLen != 144 || info.Name != "handle_open" {
+	if info.Type != 2 || info.ID != 77 || info.JitedProgLen != 100 || info.XlatedProgLen != 144 || info.BtfID != 31 ||
+		info.Name != "handle_open" {
 		t.Errorf("scalars = %+v", info)
 	}
 	if info.NrJitedKsyms != 2 || info.JitedKsyms != nil {

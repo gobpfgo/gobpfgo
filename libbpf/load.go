@@ -310,6 +310,7 @@ func progLoadAttr(obj *BpfObject, code *progCode) *sys.ProgLoadAttr {
 		ExpectedAttachType: uint32(p.expectedAttachType),
 		ProgBtfFD:          uint32(obj.btfFD),
 		AttachBtfID:        p.attachBTFID,
+		AttachProgFD:       uint32(p.attachProgFD),
 		AttachBtfObjFD:     int32(p.attachBTFObjFD),
 		FuncInfoRecSize:    btf.FuncInfoMinSize,
 		FuncInfoCnt:        uint32(len(code.funcInfo) / btf.FuncInfoMinSize),

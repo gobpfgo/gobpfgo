@@ -84,6 +84,20 @@ func (p *Program) Info() (*libbpf.BpfProgInfo, error) {
 	return libbpf.BpfProgramInfo(p.live())
 }
 
+// SetAttachTarget sets what the program is loaded against, before Load: the
+// function attachFuncName of the loaded program attachProgFD, such as the
+// function a freplace program replaces, or of the kernel when attachProgFD
+// is 0. With attachFuncName empty, the section target is looked up in the
+// program attachProgFD at Load. The caller keeps attachProgFD open until
+// Load. It returns ErrClosed after the Object is closed and the core
+// *libbpf.Error otherwise. See libbpf.BpfProgramSetAttachTarget.
+func (p *Program) SetAttachTarget(attachProgFD int, attachFuncName string) error {
+	if p.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfProgramSetAttachTarget(p.live(), attachProgFD, attachFuncName)
+}
+
 // Pin pins the loaded program at path on bpffs, creating a missing parent
 // directory. It returns ErrClosed after the Object is closed and the core
 // *libbpf.Error otherwise.

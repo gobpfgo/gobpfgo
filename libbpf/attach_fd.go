@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_program_attach_fd, bpf_program__attach_cgroup, bpf_program__attach_cgroup_opts, bpf_program__attach_netns, bpf_program__attach_sockmap, bpf_program__attach_xdp
+// libbpf-symbols: bpf_program_attach_fd, bpf_program__attach_cgroup, bpf_program__attach_cgroup_opts, bpf_program__attach_netns, bpf_program__attach_sockmap, bpf_program__attach_xdp, bpf_program__attach_freplace
 
 //go:build linux && (amd64 || arm64)
 
 package libbpf
 
 import (
+	"fmt"
+
 	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
@@ -94,6 +96,59 @@ func BpfProgramAttachXDP(prog *BpfProgram, ifindex int) (*BpfLink, error) {
 // return EINVAL. See bpfProgramAttachFD for the other errors.
 func BpfProgramAttachSockmap(prog *BpfProgram, mapFD int) (*BpfLink, error) {
 	return bpfProgramAttachFD(prog, mapFD, "bpf_program__attach_sockmap", nil)
+}
+
+// BpfProgramAttachFreplace attaches a loaded freplace program, of type
+// BPF_PROG_TYPE_EXT, in place of the function attachFuncName of the loaded
+// program targetFD. The BPF link carries the target descriptor, the
+// function's BTF id in the target's BTF and the program's attach type, 0
+// for a freplace program. The target need not be the program the freplace
+// program was loaded against, but the kernel requires a function of the
+// same type. With targetFD 0 and an empty attachFuncName it attaches to the
+// function the program was loaded against, like BpfProgramAttachTrace,
+// which the kernel allows only for the first attach. The caller keeps
+// targetFD and owns the returned link. The kernel loads a freplace program
+// only against a target, which BpfProgramSetAttachTarget sets before
+// BpfObjectLoad.
+//
+// It returns EINVAL for a nil program, when exactly one of targetFD and
+// attachFuncName is set and when the program type is not
+// BPF_PROG_TYPE_EXT, before any system call. A target lookup that fails
+// returns the error findProgBTFID reports: EINVAL for a target without BTF,
+// as libbpf does, ENOENT for a function its BTF lacks and the kernel errno
+// for a bad descriptor, EBADFD for one that is not open. An unloaded
+// program then returns EINVAL, and a link the kernel refuses its errno.
+func BpfProgramAttachFreplace(prog *BpfProgram, targetFD int, attachFuncName string) (*BpfLink, error) {
+	const op = "bpf_program__attach_freplace"
+
+	if prog == nil {
+		return nil, &Error{Op: op, Errno: unix.EINVAL}
+	}
+	if (targetFD != 0) != (attachFuncName != "") {
+		return nil, &Error{Op: op, Errno: unix.EINVAL,
+			Log: fmt.Sprintf("prog '%s': supply none or both of target_fd and attach_func_name", prog.name)}
+	}
+	if prog.progType != BPF_PROG_TYPE_EXT {
+		return nil, &Error{Op: op, Errno: unix.EINVAL,
+			Log: fmt.Sprintf("prog '%s': only BPF_PROG_TYPE_EXT can attach as freplace", prog.name)}
+	}
+
+	if targetFD == 0 {
+		// No target: attach to the load-time target, through the
+		// raw tracepoint open command on kernels without tracing
+		// links, as libbpf does.
+		link, err := BpfProgramAttachTrace(prog)
+		if err != nil {
+			return nil, &Error{Op: op, Errno: errnoFromError(err)}
+		}
+		return link, nil
+	}
+
+	btfID, err := findProgBTFID(attachFuncName, targetFD)
+	if err != nil {
+		return nil, &Error{Op: op, Errno: errnoFromError(err), Log: err.Error()}
+	}
+	return bpfProgramAttachFD(prog, targetFD, op, &sys.LinkCreateAttr{TargetBTFID: btfID})
 }
 
 // bpfProgramAttachFD creates a BPF link from the loaded prog to targetFD, a

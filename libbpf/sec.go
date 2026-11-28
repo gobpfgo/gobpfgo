@@ -18,6 +18,12 @@ const (
 	// uprobe multi expected attach type when the kernel has that link, so
 	// BpfProgramAttachUsdt can attach every call site through one link.
 	secUSDT
+	// secAttachProg marks sections whose target is a function of another
+	// BPF program, freplace. The program's attach target is the text after
+	// the prefix; the load looks it up in the BTF of the program
+	// BpfProgramSetAttachTarget names, never in the kernel BTF. libbpf
+	// marks freplace SEC_ATTACH_BTF and tells it apart by program type.
+	secAttachProg
 )
 
 // secDef is one entry of the section-definition table. A section name matches
@@ -71,6 +77,9 @@ var secDefs = []secDef{
 	{"fmod_ret/", BPF_PROG_TYPE_TRACING, BPF_MODIFY_RETURN, 0, secAttachBTF},
 	{"lsm.s/", BPF_PROG_TYPE_LSM, BPF_LSM_MAC, BPF_F_SLEEPABLE, secAttachBTF},
 	{"lsm/", BPF_PROG_TYPE_LSM, BPF_LSM_MAC, 0, secAttachBTF},
+	{"iter.s/", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, BPF_F_SLEEPABLE, secAttachBTF},
+	{"iter/", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, 0, secAttachBTF},
+	{"freplace/", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, 0, secAttachProg},
 	{"uprobe.multi.s", BPF_PROG_TYPE_KPROBE, BPF_TRACE_UPROBE_MULTI, BPF_F_SLEEPABLE, 0},
 	{"uprobe.multi", BPF_PROG_TYPE_KPROBE, BPF_TRACE_UPROBE_MULTI, 0, 0},
 	{"uretprobe.multi.s", BPF_PROG_TYPE_KPROBE, BPF_TRACE_UPROBE_MULTI, BPF_F_SLEEPABLE, 0},
