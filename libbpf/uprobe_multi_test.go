@@ -8,9 +8,12 @@ package libbpf
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"syscall"
 	"testing"
 
+	"github.com/gobpfgo/gobpfgo/internal/sys"
 	"golang.org/x/sys/unix"
 )
 
@@ -23,6 +26,10 @@ const (
 
 // uprobeMultiCookie is the cookie the cookie case expects the program to read.
 const uprobeMultiCookie = 0x5eed_c0de_0bad_f00d
+
+// usdtCTargetPath is the USDT parser target, a dynamically linked C program
+// with a static and a dynamic symbol table.
+const usdtCTargetPath = "../testdata/progs/usdt_target"
 
 func TestCheckUprobeMultiInputs(t *testing.T) {
 	const path = "/bin/true"
@@ -77,6 +84,7 @@ func TestCheckUprobeMultiInputs(t *testing.T) {
 func TestBpfProgramAttachUprobeMultiErrors(t *testing.T) {
 	loaded := &BpfProgram{name: "fake", fd: 1 << 30}
 	missing := filepath.Join(t.TempDir(), "missing")
+	notELF := writeTestFile(t, "not-elf", "#!/bin/sh\n")
 	tests := []struct {
 		name    string
 		prog    *BpfProgram
@@ -88,8 +96,11 @@ func TestBpfProgramAttachUprobeMultiErrors(t *testing.T) {
 		{"nil program", nil, funcTestObject, "", &BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
 		{"unloaded program", &BpfProgram{name: "fake", fd: -1}, funcTestObject, "", &BpfUprobeMultiOpts{Offsets: []uint64{0x10}}, unix.EINVAL},
 		{"nil options", loaded, funcTestObject, "", nil, unix.EINVAL},
-		{"pattern", loaded, funcTestObject, "handle_*", nil, unix.EOPNOTSUPP},
-		{"pattern with retprobe", loaded, funcTestObject, "handle_*", &BpfUprobeMultiOpts{Retprobe: true}, unix.EOPNOTSUPP},
+		{"pattern without a match", loaded, funcTestObject, "no_such_*", nil, unix.ENOENT},
+		{"pattern with retprobe without a match", loaded, funcTestObject, "no_such_*", &BpfUprobeMultiOpts{Retprobe: true}, unix.ENOENT},
+		{"pattern on a missing binary", loaded, missing, "handle_*", nil, unix.ENOENT},
+		{"pattern on a binary not in the search path", loaded, "gobpfgo-no-such-binary", "handle_*", nil, unix.ENOENT},
+		{"pattern on a file that is not ELF", loaded, notELF, "handle_*", nil, unix.EINVAL},
 		{"invalid options before pattern", loaded, funcTestObject, "handle_*", &BpfUprobeMultiOpts{Cookies: []uint64{1}}, unix.EINVAL},
 		{"missing symbol", loaded, funcTestObject, "", &BpfUprobeMultiOpts{Syms: []string{funcTestName, "no_such_function"}}, unix.ENOENT},
 		{"missing binary", loaded, missing, "", &BpfUprobeMultiOpts{Syms: []string{funcTestName}}, unix.ENOENT},
@@ -118,22 +129,152 @@ func TestUprobeMultiOffsets(t *testing.T) {
 		t.Fatalf("findFuncOffset: %v", err)
 	}
 
-	got, err := uprobeMultiOffsets(funcTestObject, &BpfUprobeMultiOpts{Syms: []string{funcTestName, funcTestName}})
+	path, got, err := uprobeMultiOffsets(funcTestObject, "", &BpfUprobeMultiOpts{Syms: []string{funcTestName, funcTestName}})
 	if err != nil {
 		t.Fatalf("uprobeMultiOffsets(syms): %v", err)
 	}
-	if len(got) != 2 || got[0] != want || got[1] != want {
-		t.Fatalf("symbol offsets = %#x, want [%#x %#x]", got, want, want)
+	if path != funcTestObject || len(got) != 2 || got[0] != want || got[1] != want {
+		t.Fatalf("symbol offsets = %s %#x, want %s [%#x %#x]", path, got, funcTestObject, want, want)
 	}
 
 	explicit := []uint64{0x10, 0x20, 0x30}
-	got, err = uprobeMultiOffsets(funcTestObject, &BpfUprobeMultiOpts{Offsets: explicit})
+	path, got, err = uprobeMultiOffsets(funcTestObject, "", &BpfUprobeMultiOpts{Offsets: explicit})
 	if err != nil {
 		t.Fatalf("uprobeMultiOffsets(offsets): %v", err)
 	}
-	if len(got) != len(explicit) || got[0] != explicit[0] || got[1] != explicit[1] || got[2] != explicit[2] {
-		t.Fatalf("explicit offsets = %#x, want %#x", got, explicit)
+	if path != funcTestObject || !slices.Equal(got, explicit) {
+		t.Fatalf("explicit offsets = %s %#x, want %s %#x", path, got, funcTestObject, explicit)
 	}
+}
+
+// TestElfResolvePatternOffsets resolves patterns in the checked-in binaries
+// and compares the offsets, in symbol table order, with the single-name
+// lookup. usdt_target has both tables: its static table stores the versioned
+// names of the undefined C library functions, its dynamic table the bare
+// ones, so a bare name is found only through the fallback.
+func TestElfResolvePatternOffsets(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	notELF := writeTestFile(t, "not-elf", "#!/bin/sh\n")
+	tests := []struct {
+		name    string
+		path    string
+		pattern string
+		want    []uint64
+		err     error
+	}{
+		{"single character", usdtTargetPath, "loop_site_?", funcOffsets(t, usdtTargetPath, "loop_site_a", "loop_site_b"), nil},
+		{"star in table order", usdtTargetPath, "loop_*", funcOffsets(t, usdtTargetPath, "loop_site_a", "loop_site_b", "loop_fill.constprop.0"), nil},
+		{"every function", usdtTargetPath, "*", funcOffsets(t, usdtTargetPath, "run", "loop_site_a", "loop_site_b", "loop_fill.constprop.0"), nil},
+		{"literal", usdtTargetPath, "run", funcOffsets(t, usdtTargetPath, "run"), nil},
+		{"static table only, undefined at 0", usdtCTargetPath, "__*",
+			append(funcOffsets(t, usdtCTargetPath, "__do_global_dtors_aux"), 0, 0, 0), nil},
+		{"dynamic table fallback", usdtCTargetPath, "__cxa_finalize", []uint64{0}, nil},
+		{"relocatable object", funcTestObject, "handle_*", funcOffsets(t, funcTestObject, funcTestName), nil},
+		{"no match", usdtTargetPath, "no_such_*", nil, unix.ENOENT},
+		{"empty pattern", usdtTargetPath, "", nil, unix.ENOENT},
+		{"missing file", missing, "*", nil, unix.ENOENT},
+		{"not ELF", notELF, "*", nil, unix.EINVAL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := elfResolvePatternOffsets(tt.path, tt.pattern)
+			checkAddrs(t, got, err, tt.want, tt.err)
+		})
+	}
+}
+
+// TestUprobeMultiLinkPattern checks the attribute a pattern attach sends: the
+// resolved offsets in symbol table order, the path the link names, which is
+// the searched path for a name without a slash, and the attach type and
+// flags of the options.
+func TestUprobeMultiLinkPattern(t *testing.T) {
+	loopOffsets := funcOffsets(t, usdtTargetPath, "loop_site_a", "loop_site_b", "loop_fill.constprop.0")
+	searched := checkedInUsdtTarget(t, usdtTargetPath)
+	tests := []struct {
+		name       string
+		path       string
+		opts       *BpfUprobeMultiOpts
+		wantPath   string
+		attachType uint32
+		flags      uint32
+	}{
+		{"uprobe", usdtTargetPath, nil, usdtTargetPath, sys.BPF_TRACE_UPROBE_MULTI, 0},
+		{"uretprobe", usdtTargetPath, &BpfUprobeMultiOpts{Retprobe: true}, usdtTargetPath, sys.BPF_TRACE_UPROBE_MULTI, BPF_F_UPROBE_MULTI_RETURN},
+		{"session", usdtTargetPath, &BpfUprobeMultiOpts{Session: true}, usdtTargetPath, sys.BPF_TRACE_UPROBE_SESSION, 0},
+		{"searched path", filepath.Base(usdtTargetPath), nil, searched, sys.BPF_TRACE_UPROBE_MULTI, 0},
+	}
+	t.Setenv("PATH", filepath.Dir(searched))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attr, um, err := uprobeMultiLink(&BpfProgram{fd: 5}, -1, tt.path, "loop_*", tt.opts)
+			if err != nil {
+				t.Fatalf("uprobeMultiLink: %v", err)
+			}
+			if want := (sys.LinkCreateAttr{ProgFD: 5, AttachType: tt.attachType}); *attr != want {
+				t.Errorf("attribute %+v, want %+v", *attr, want)
+			}
+			if um.Path != tt.wantPath || !slices.Equal(um.Offsets, loopOffsets) || um.Flags != tt.flags || um.PID != 0 {
+				t.Errorf("link %s %#x flags %#x pid %d, want %s %#x flags %#x pid 0", um.Path, um.Offsets, um.Flags, um.PID, tt.wantPath, loopOffsets, tt.flags)
+			}
+			if um.RefCtrOffsets != nil || um.Cookies != nil {
+				t.Errorf("reference counters %v and cookies %v, want none", um.RefCtrOffsets, um.Cookies)
+			}
+		})
+	}
+}
+
+// TestBpfProgramAttachUprobeMultiPattern attaches a uprobe multi link to
+// loop_site_? in a running usdt_loop_target, filtered to its PID, and
+// requires one run for each of the two functions per round, and none after
+// the link is destroyed.
+func TestBpfProgramAttachUprobeMultiPattern(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("the USDT target is an x86-64 binary")
+	}
+	if version := getKernelVersion(); version < uprobeMultiKernel {
+		t.Skipf("kernel version %#x predates the link type (%#x)", version, uprobeMultiKernel)
+	}
+	obj, prog := loadKprobeRetypedObject(t, "../testdata/progs/uprobe.bpf.o", "handle_uprobe", BPF_TRACE_UPROBE_MULTI)
+	defer BpfObjectClose(obj)
+
+	path := checkedInUsdtTarget(t, usdtTargetPath)
+	target := startUsdtTarget(t, path)
+	link, err := BpfProgramAttachUprobeMulti(prog, target.pid, path, "loop_site_?", nil)
+	if err != nil {
+		if errors.Is(err, unix.EOPNOTSUPP) {
+			t.Skipf("uprobe multi links are not supported by this kernel: %v", err)
+		}
+		t.Fatalf("attach: %v", err)
+	}
+	checkLinkFdinfo(t, link, prog, "uprobe_multi", nil)
+
+	target.trigger(t)
+	if got := mapValue(t, obj, "counts"); got != 2 {
+		t.Fatalf("one round counted %d runs, want 2: loop_site_a and loop_site_b", got)
+	}
+	destroyLink(t, link)
+
+	target.trigger(t)
+	if got := mapValue(t, obj, "counts"); got != 2 {
+		t.Fatalf("a round after destroy left %d runs, want 2", got)
+	}
+	target.stop(t)
+}
+
+// funcOffsets returns the file offset of each named function in the ELF file
+// at path, found by the single-name lookup.
+func funcOffsets(t *testing.T, path string, names ...string) []uint64 {
+	t.Helper()
+
+	offsets := make([]uint64, len(names))
+	for i, name := range names {
+		offset, err := findFuncOffset(path, name)
+		if err != nil {
+			t.Fatalf("offset of %s in %s: %v", name, path, err)
+		}
+		offsets[i] = offset
+	}
+	return offsets
 }
 
 // uprobeMultiCase is one root attach case. The program is retyped as a

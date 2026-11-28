@@ -116,7 +116,7 @@ func (p *Program) AttachKprobeMulti(opts *libbpf.BpfKprobeMultiOpts) (*Link, err
 }
 
 // AttachUprobeMulti attaches the program to the locations in binaryPath that
-// opts selects through one uprobe multi link. See
+// funcPattern or opts selects through one uprobe multi link. See
 // libbpf.BpfProgramAttachUprobeMulti.
 func (p *Program) AttachUprobeMulti(pid int, binaryPath string, funcPattern string, opts *libbpf.BpfUprobeMultiOpts) (*Link, error) {
 	if p.isClosed() {

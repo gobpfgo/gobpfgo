@@ -2,7 +2,7 @@
 // libbpf-source: src/elf.c
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: elf_find_func_offset_from_file, elf_sym_offset, elf_find_func_offset_from_archive
+// libbpf-symbols: elf_find_func_offset_from_file, elf_sym_offset, elf_find_func_offset_from_archive, elf_resolve_pattern_offsets, elf_sym_iter_new
 
 //go:build linux && (amd64 || arm64)
 
@@ -11,7 +11,9 @@ package libbpf
 import (
 	"bytes"
 	"debug/elf"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"syscall"
 
@@ -104,6 +106,77 @@ func findFuncOffsetFromArchive(archivePath, fileName, funcName string) (uint64, 
 		return 0, err
 	}
 	return offset + uint64(entry.DataOffset), nil
+}
+
+// elfResolvePatternOffsets returns the file offsets of the functions in the
+// ELF file at path whose symbol names match pattern, as globMatch does, in
+// symbol table order.
+//
+// The static symbol table is searched first. Only when it is missing or has
+// no match is the dynamic symbol table searched, so a function listed in
+// both is found once. Names are matched as stored, so a versioned static
+// symbol such as "puts@GLIBC_2.2.5" needs a pattern that covers the suffix,
+// while the dynamic table stores the bare name. Every STT_FUNC symbol whose
+// section index names a section counts, an undefined one included: its
+// offset is its value, usually 0.
+//
+// An error opening path returns its errno, a file that is not ELF or has a
+// symbol table it cannot read returns EINVAL, and no match returns ENOENT.
+func elfResolvePatternOffsets(path, pattern string) ([]uint64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	f, err := elf.NewFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", unix.EINVAL, path, err)
+	}
+
+	for _, typ := range []elf.SectionType{elf.SHT_SYMTAB, elf.SHT_DYNSYM} {
+		syms, err := elfSymbolTable(f, typ)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %v symbols: %v", unix.EINVAL, path, typ, err)
+		}
+
+		var offsets []uint64
+		for _, sym := range syms {
+			if elf.ST_TYPE(sym.Info) != elf.STT_FUNC || int(sym.Section) >= len(f.Sections) {
+				continue
+			}
+			if !globMatch(sym.Name, pattern) {
+				continue
+			}
+			section := f.Sections[sym.Section]
+			offsets = append(offsets, sym.Value-section.Addr+section.Offset)
+		}
+		if len(offsets) > 0 {
+			return offsets, nil
+		}
+	}
+
+	return nil, fmt.Errorf("%w: no function matches %q in %s", unix.ENOENT, pattern, path)
+}
+
+// elfSymbolTable returns the symbols of the first section of type typ in f,
+// SHT_SYMTAB or SHT_DYNSYM, without the null symbol. A missing or empty
+// table has no symbols; one without an entry size cannot be read.
+func elfSymbolTable(f *elf.File, typ elf.SectionType) ([]elf.Symbol, error) {
+	section := f.SectionByType(typ)
+	if section == nil {
+		return nil, nil
+	}
+	if section.Entsize == 0 {
+		return nil, errors.New("zero symbol entry size")
+	}
+	if section.Size == 0 {
+		return nil, nil
+	}
+	if typ == elf.SHT_DYNSYM {
+		return f.DynamicSymbols()
+	}
+	return f.Symbols()
 }
 
 // findUprobeFuncOffset resolves funcName for a uprobe on binaryPath and

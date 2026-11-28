@@ -42,13 +42,16 @@ type BpfRawTracepointOpts struct {
 	Cookie uint64
 }
 
-// BpfKprobeMultiOpts are the optional settings of
-// BpfProgramAttachKprobeMulti. Exactly one of Symbols and Addrs is used;
-// Cookies, when present, has one entry per symbol or address. Retprobe calls
-// the program when the functions return; Session calls it on entry and,
-// unless the entry run returns nonzero, on return. Retprobe and Session are
-// mutually exclusive.
+// BpfKprobeMultiOpts are the settings of BpfProgramAttachKprobeMulti. Exactly
+// one of Pattern, Symbols and Addrs selects the functions. Pattern is a
+// function name in which '*' matches any run of characters and '?' any one
+// character; Symbols are function names and Addrs function addresses, used
+// as given. Cookies, when present, has one entry per symbol or address and
+// cannot be combined with Pattern. Retprobe calls the program when the
+// functions return; Session calls it on entry and, unless the entry run
+// returns nonzero, on return. Retprobe and Session are mutually exclusive.
 type BpfKprobeMultiOpts struct {
+	Pattern  string
 	Symbols  []string
 	Addrs    []uint64
 	Cookies  []uint64
@@ -222,19 +225,31 @@ func BpfProgramAttachRawTracepointOpts(prog *BpfProgram, name string, opts *BpfR
 
 // BpfProgramAttachKprobeMulti attaches a loaded kprobe.multi or
 // kprobe.session program to several functions in one link. Exactly one of
-// Symbols and Addrs must be set, and at most one of Retprobe and Session;
-// otherwise the call returns EINVAL. The link uses BPF_TRACE_KPROBE_SESSION
-// when Session is set and BPF_TRACE_KPROBE_MULTI otherwise, and the program
-// must have been loaded with that expected attach type. The kernel must
-// support the attach type, 5.18 or newer for kprobe multi and 6.10 for
-// sessions; older kernels return EINVAL. A symbol the kernel cannot find
-// returns ENOENT.
+// Pattern, Symbols and Addrs must be set, Cookies cannot be combined with
+// Pattern, and at most one of Retprobe and Session may be set; otherwise the
+// call returns EINVAL. The link uses BPF_TRACE_KPROBE_SESSION when Session is
+// set and BPF_TRACE_KPROBE_MULTI otherwise, and the program must have been
+// loaded with that expected attach type. The kernel must support the attach
+// type, 5.18 or newer for kprobe multi and 6.10 for sessions; older kernels
+// return EINVAL. A symbol the kernel cannot find returns ENOENT.
+//
+// A Pattern without '*' or '?' is one function name, passed to the kernel
+// like a single entry of Symbols. Any other Pattern is resolved to the
+// addresses of the matching traceable kernel functions, in the order tracefs
+// lists them, which are passed like Addrs. Resolution reads tracefs
+// available_filter_functions_addrs when the caller can read it, and otherwise
+// the names in available_filter_functions with their addresses from
+// /proc/kallsyms; both need root on most systems. A file that cannot be
+// opened returns its errno, an unparsable tracefs entry returns EINVAL, and
+// no matching function returns ENOENT. The Retprobe and Session check
+// follows the resolution. A "+offset" suffix is part of the name, not an
+// offset.
 func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*BpfLink, error) {
 	const op = "bpf_program__attach_kprobe_multi"
 	if err := checkAttachProgram(prog, op); err != nil {
 		return nil, err
 	}
-	attr, km, err := kprobeMultiLink(prog, opts)
+	attr, km, err := kprobeMultiLink(prog, opts, resolveKprobePattern)
 	if err != nil {
 		return nil, attachErr(op, err)
 	}
@@ -252,11 +267,33 @@ func BpfProgramAttachKprobeMulti(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*B
 
 // kprobeMultiLink checks opts and returns the link attribute and arrays of a
 // kprobe multi or session link for the loaded prog. It returns EINVAL for nil
-// opts, for neither or both of Symbols and Addrs, and for both Retprobe and
-// Session.
-func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*sys.LinkCreateAttr, *sys.LinkKprobeMulti, error) {
-	if opts == nil || len(opts.Symbols) > 0 && len(opts.Addrs) > 0 || len(opts.Symbols) == 0 && len(opts.Addrs) == 0 {
+// opts, for a Pattern with Symbols, Addrs or Cookies, for neither or both of
+// Symbols and Addrs without a Pattern, and for both Retprobe and Session. A
+// Pattern with a wildcard is resolved to addresses with resolve, whose error
+// is returned as is, before Retprobe and Session are checked.
+func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts, resolve kprobePatternResolver) (*sys.LinkCreateAttr, *sys.LinkKprobeMulti, error) {
+	if opts == nil {
 		return nil, nil, unix.EINVAL
+	}
+	syms, addrs := opts.Symbols, opts.Addrs
+	if opts.Pattern != "" {
+		if len(syms) > 0 || len(addrs) > 0 || len(opts.Cookies) > 0 {
+			return nil, nil, unix.EINVAL
+		}
+	} else if (len(syms) > 0) == (len(addrs) > 0) {
+		return nil, nil, unix.EINVAL
+	}
+
+	switch {
+	case opts.Pattern == "":
+	case !hasGlobWildcard(opts.Pattern):
+		syms = []string{opts.Pattern}
+	default:
+		resolved, err := resolve(opts.Pattern)
+		if err != nil {
+			return nil, nil, err
+		}
+		addrs = resolved
 	}
 	if opts.Retprobe && opts.Session {
 		return nil, nil, unix.EINVAL
@@ -267,8 +304,8 @@ func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*sys.LinkCreat
 		attachType = BPF_TRACE_KPROBE_SESSION
 	}
 	km := &sys.LinkKprobeMulti{
-		Syms:    opts.Symbols,
-		Addrs:   opts.Addrs,
+		Syms:    syms,
+		Addrs:   addrs,
 		Cookies: opts.Cookies,
 	}
 	if opts.Retprobe {
@@ -297,8 +334,16 @@ func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts) (*sys.LinkCreat
 // type BPF_TRACE_UPROBE_MULTI, or BPF_TRACE_UPROBE_SESSION for Session; the
 // kernel rejects other programs and older kernels with EINVAL.
 //
-// funcPattern, the function-name pattern alternative to opts, is not
-// supported: a non-empty pattern returns EOPNOTSUPP after the input checks.
+// funcPattern, the alternative to the locations in opts, selects every
+// function in binaryPath whose symbol name matches it: '*' matches any run of
+// characters and '?' any one character. The static symbol table is searched
+// first and the dynamic one only when the static table is missing or has no
+// match; the probes follow the symbol table order. With a pattern, a
+// binaryPath without a slash is searched for as BpfProgramAttachUprobeOpts
+// does, and the link names the path found; Syms and Offsets use binaryPath as
+// given. A pattern that matches nothing returns ENOENT, and a binaryPath that
+// is not an ELF file returns EINVAL.
+//
 // The call returns EINVAL for an unloaded program, an empty binaryPath, a
 // pattern combined with Syms, Offsets, RefCtrOffsets or Cookies, no locations
 // at all, both Syms and Offsets, RefCtrOffsets or Cookies whose length is not
@@ -309,18 +354,31 @@ func BpfProgramAttachUprobeMulti(prog *BpfProgram, pid int, binaryPath string, f
 	if err := checkAttachProgram(prog, op); err != nil {
 		return nil, err
 	}
+	attr, um, err := uprobeMultiLink(prog, pid, binaryPath, funcPattern, opts)
+	if err != nil {
+		return nil, attachErr(op, err)
+	}
+
+	fd, err := sys.LinkCreateUprobeMulti(attr, um)
+	if err != nil {
+		return nil, attachErr(op, err)
+	}
+	return &BpfLink{fd: fd, perfFD: -1}, nil
+}
+
+// uprobeMultiLink checks the inputs, resolves the probe locations and returns
+// the link attribute and arrays of a uprobe multi or session link for the
+// loaded prog. A nil opts has no explicit locations.
+func uprobeMultiLink(prog *BpfProgram, pid int, binaryPath, funcPattern string, opts *BpfUprobeMultiOpts) (*sys.LinkCreateAttr, *sys.LinkUprobeMulti, error) {
 	if opts == nil {
 		opts = &BpfUprobeMultiOpts{}
 	}
 	if err := checkUprobeMultiInputs(binaryPath, funcPattern, opts); err != nil {
-		return nil, attachErr(op, err)
+		return nil, nil, err
 	}
-	if funcPattern != "" {
-		return nil, attachErr(op, unix.EOPNOTSUPP)
-	}
-	offsets, err := uprobeMultiOffsets(binaryPath, opts)
+	path, offsets, err := uprobeMultiOffsets(binaryPath, funcPattern, opts)
 	if err != nil {
-		return nil, attachErr(op, err)
+		return nil, nil, err
 	}
 
 	attachType := BPF_TRACE_UPROBE_MULTI
@@ -328,7 +386,7 @@ func BpfProgramAttachUprobeMulti(prog *BpfProgram, pid int, binaryPath string, f
 		attachType = BPF_TRACE_UPROBE_SESSION
 	}
 	um := &sys.LinkUprobeMulti{
-		Path:          binaryPath,
+		Path:          path,
 		Offsets:       offsets,
 		RefCtrOffsets: opts.RefCtrOffsets,
 		Cookies:       opts.Cookies,
@@ -347,11 +405,7 @@ func BpfProgramAttachUprobeMulti(prog *BpfProgram, pid int, binaryPath string, f
 		ProgFD:     uint32(prog.fd),
 		AttachType: uint32(attachType),
 	}
-	fd, err := sys.LinkCreateUprobeMulti(attr, um)
-	if err != nil {
-		return nil, attachErr(op, err)
-	}
-	return &BpfLink{fd: fd, perfFD: -1}, nil
+	return attr, um, nil
 }
 
 // checkUprobeMultiInputs applies the uprobe multi input rules: a path is
@@ -394,16 +448,34 @@ func optionalArrayLen(n, cnt int) bool {
 	return n == 0 || n == cnt
 }
 
-// uprobeMultiOffsets returns the probe offsets: Offsets as given, or the file
-// offset of each name in Syms, resolved in binaryPath in order.
-func uprobeMultiOffsets(binaryPath string, opts *BpfUprobeMultiOpts) ([]uint64, error) {
+// uprobeMultiOffsets returns the path the link names and the probe offsets:
+// the offsets of the functions matching funcPattern, in the binary
+// resolveFullPath finds for a binaryPath without a slash; otherwise
+// binaryPath itself with Offsets as given, or with the file offset of each
+// name in Syms, resolved in order.
+func uprobeMultiOffsets(binaryPath, funcPattern string, opts *BpfUprobeMultiOpts) (string, []uint64, error) {
+	if funcPattern != "" {
+		path := binaryPath
+		if !strings.Contains(path, "/") {
+			resolved, err := resolveFullPath(path)
+			if err != nil {
+				return "", nil, err
+			}
+			path = resolved
+		}
+		offsets, err := elfResolvePatternOffsets(path, funcPattern)
+		if err != nil {
+			return "", nil, err
+		}
+		return path, offsets, nil
+	}
 	if len(opts.Syms) == 0 {
-		return opts.Offsets, nil
+		return binaryPath, opts.Offsets, nil
 	}
 
 	f, err := elf.Open(binaryPath)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	defer f.Close()
 
@@ -411,11 +483,11 @@ func uprobeMultiOffsets(binaryPath string, opts *BpfUprobeMultiOpts) ([]uint64, 
 	for i, sym := range opts.Syms {
 		offset, err := elfFuncOffset(f, binaryPath, sym)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		offsets[i] = offset
 	}
-	return offsets, nil
+	return binaryPath, offsets, nil
 }
 
 // BpfProgramAttachTrace attaches a loaded fentry, fexit, fmod_ret or tp_btf
@@ -472,6 +544,9 @@ func BpfProgramAttachLsm(prog *BpfProgram) (*BpfLink, error) {
 // tracepoint, tp, raw tracepoint, fentry, fexit, fmod_ret, tp_btf, lsm, iter,
 // which gets the default iterator, and freplace, which attaches to the
 // function it was loaded against, as libbpf's attach_trace does.
+// The text after kprobe.multi/, kretprobe.multi/ and kprobe.session/ is a
+// BpfKprobeMultiOpts Pattern, so "kprobe.multi/do_sys_open*" attaches to
+// every matching function and a name without wildcards to that function.
 // Sections without an automatic attach, such as cgroup, xdp, sk_msg and
 // flow_dissector, return EOPNOTSUPP. So does the bare kprobe.session
 // section, which names no function: libbpf's attach_kprobe_session returns
@@ -496,16 +571,8 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 			return nil, attachErr(op, unix.EINVAL)
 		}
 		return BpfProgramAttachKprobeOpts(prog, funcName, &BpfKprobeOpts{Retprobe: def.prefix == "kretprobe/", Offset: offset})
-	case "kprobe.multi/", "kretprobe.multi/":
-		return BpfProgramAttachKprobeMulti(prog, &BpfKprobeMultiOpts{
-			Symbols:  []string{target},
-			Retprobe: def.prefix == "kretprobe.multi/",
-		})
-	case "kprobe.session/":
-		return BpfProgramAttachKprobeMulti(prog, &BpfKprobeMultiOpts{
-			Symbols: []string{target},
-			Session: true,
-		})
+	case "kprobe.multi/", "kretprobe.multi/", "kprobe.session/":
+		return BpfProgramAttachKprobeMulti(prog, kprobeMultiSectionOpts(def.prefix, target))
 	case "kprobe.session":
 		return nil, attachErr(op, unix.EOPNOTSUPP)
 	case "uprobe/", "uretprobe/", "uprobe.s/", "uretprobe.s/":
@@ -542,6 +609,18 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 		return BpfProgramAttachTrace(prog)
 	default:
 		return nil, attachErr(op, unix.EOPNOTSUPP)
+	}
+}
+
+// kprobeMultiSectionOpts returns the kprobe multi options of a kprobe.multi/,
+// kretprobe.multi/ or kprobe.session/ section: the text after prefix is the
+// pattern, kept whole. An empty target leaves no function and fails the
+// attach with EINVAL.
+func kprobeMultiSectionOpts(prefix, target string) *BpfKprobeMultiOpts {
+	return &BpfKprobeMultiOpts{
+		Pattern:  target,
+		Retprobe: prefix == "kretprobe.multi/",
+		Session:  prefix == "kprobe.session/",
 	}
 }
 
