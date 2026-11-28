@@ -237,6 +237,9 @@ func parseHeader(data []byte, order binary.ByteOrder) (Header, btfSections, erro
 	if hdr.HdrLen < 24 || uint64(hdr.HdrLen) > uint64(len(data)) {
 		return Header{}, btfSections{}, fmt.Errorf("btf: bad header length %d", hdr.HdrLen)
 	}
+	if hdr.TypeOff%4 != 0 {
+		return Header{}, btfSections{}, fmt.Errorf("btf: type section is not aligned to 4 bytes")
+	}
 
 	typeStart := uint64(hdr.HdrLen) + uint64(hdr.TypeOff)
 	typeEnd := typeStart + uint64(hdr.TypeLen)

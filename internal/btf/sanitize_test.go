@@ -678,9 +678,8 @@ func TestSanitizeLayoutOffOnly(t *testing.T) {
 // TestSanitizeLayoutInvalid sanitizes blobs whose header places the layout
 // section where libbpf's parser rejects it: unaligned, over the types, over
 // the strings, not a whole number of entries, or with the types ending
-// after the strings start. A kernel without Layout, which needs the section
-// stripped, gets an error wrapping EINVAL. A kernel with Layout gets the
-// blob back, but an error when the placeholder has to move the section.
+// after the strings start. Every feature set gets an error wrapping EINVAL,
+// whether the section is stripped, kept, or moved for the enum64 placeholder.
 func TestSanitizeLayoutInvalid(t *testing.T) {
 	order := binary.LittleEndian
 	types, strs, _ := layoutSpecTypes()
@@ -703,13 +702,12 @@ func TestSanitizeLayoutInvalid(t *testing.T) {
 		name        string
 		raw         []byte
 		off, length uint32
-		moved       bool
 	}{
-		{"unaligned", valid, typeLen + 2, layoutLen - 4, true},
-		{"over the types", valid, typeLen - 4, layoutLen, true},
-		{"over the strings", valid, typeLen, layoutLen + 4, true},
-		{"partial entry", valid, typeLen, layoutLen - 2, true},
-		{"strings first", stringsFirst, 4, 0, false},
+		{"unaligned", valid, typeLen + 2, layoutLen - 4},
+		{"over the types", valid, typeLen - 4, layoutLen},
+		{"over the strings", valid, typeLen, layoutLen + 4},
+		{"partial entry", valid, typeLen, layoutLen - 2},
+		{"strings first", stringsFirst, 4, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := bytes.Clone(tt.raw)
@@ -717,20 +715,14 @@ func TestSanitizeLayoutInvalid(t *testing.T) {
 			order.PutUint32(raw[hdrLayoutLen:], tt.length)
 			spec := parseOrder(t, raw, order)
 
-			_, err := spec.Sanitize(without(func(k *KernelFeatures) { k.Layout = false }))
-			if !errors.Is(err, syscall.EINVAL) {
-				t.Errorf("Sanitize without Layout = %v, want EINVAL", err)
-			}
-			got, err := spec.Sanitize(allFeatures)
-			if err != nil || !bytes.Equal(got, raw) {
-				t.Errorf("Sanitize with every feature = %v, want an equal copy", err)
-			}
-			_, err = spec.Sanitize(without(func(k *KernelFeatures) { k.Enum64 = false }))
-			if tt.moved && !errors.Is(err, syscall.EINVAL) {
-				t.Errorf("Sanitize without Enum64 = %v, want EINVAL", err)
-			}
-			if !tt.moved && err != nil {
-				t.Errorf("Sanitize without Enum64: %v", err)
+			for _, k := range []KernelFeatures{
+				without(func(k *KernelFeatures) { k.Layout = false }),
+				allFeatures,
+				without(func(k *KernelFeatures) { k.Enum64 = false }),
+			} {
+				if _, err := spec.Sanitize(k); !errors.Is(err, syscall.EINVAL) {
+					t.Errorf("Sanitize(%+v) = %v, want EINVAL", k, err)
+				}
 			}
 		})
 	}
