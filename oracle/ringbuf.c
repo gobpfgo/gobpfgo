@@ -19,6 +19,7 @@
 #define RINGBUF_PROG "handle_ringbuf"
 #define RINGBUF_SAMPLE 0x12345678
 #define RINGBUF_MAX 8
+#define RINGBUF_COMM_LEN 16
 
 struct sample_ctx {
 	__u32 cnt;
@@ -37,13 +38,29 @@ static int sample_cb(void *ctx, void *data, size_t size) {
 	return 0;
 }
 
-/* set_target_tgid makes the program record only the opens of this process,
- * through its target_tgid global, so other processes add no samples.
+/* set_target_comm makes the program record only the opens of this process,
+ * through its target_comm global, so other processes add no samples. It
+ * reads the command name from /proc/self/comm, without the newline and
+ * NUL-padded as bpf_get_current_comm returns it; a PID would differ inside a
+ * PID namespace.
  */
-static int set_target_tgid(struct bpf_map *data) {
-	__u32 key = 0, tgid = (__u32)getpid();
+static int set_target_comm(struct bpf_map *data) {
+	char comm[RINGBUF_COMM_LEN] = {};
+	__u32 key                   = 0;
+	FILE *f;
+	size_t n;
 
-	return bpf_map__update_elem(data, &key, sizeof(key), &tgid, sizeof(tgid), BPF_ANY);
+	f = fopen("/proc/self/comm", "r");
+	if (!f)
+		return -errno;
+	n = fread(comm, 1, sizeof(comm) - 1, f);
+	fclose(f);
+	if (n > 0 && comm[n - 1] == '\n')
+		comm[n - 1] = '\0';
+	if (comm[0] == '\0')
+		return -ENOENT;
+
+	return bpf_map__update_elem(data, &key, sizeof(key), comm, sizeof(comm), BPF_ANY);
 }
 
 static bool trigger_open(void) {
@@ -91,9 +108,9 @@ int oracle_ringbuf(const char *path) {
 		bpf_object__close(obj);
 		return 1;
 	}
-	ret = set_target_tgid(data);
+	ret = set_target_comm(data);
 	if (ret) {
-		fprintf(stderr, "set target_tgid: %s\n", strerror(-ret));
+		fprintf(stderr, "set target_comm: %s\n", strerror(-ret));
 		bpf_object__close(obj);
 		return 1;
 	}

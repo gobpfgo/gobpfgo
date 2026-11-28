@@ -258,6 +258,44 @@ func TestBpfMapInitialValue(t *testing.T) {
 	}
 }
 
+// TestBpfMapInitialValueClose follows the initial value of
+// link_kconfig.bpf.o's .bss map through a failed load and BpfObjectClose. A
+// CONFIG_GOBPFGO_LINKED value that is not an integer fails the load while it
+// resolves the externs, before any bpf() call, so the test needs no
+// privileges. The failed object cannot be loaded again: the map keeps its
+// initial value and a set is EBUSY. BpfObjectClose releases the buffer: the
+// initial value is nil and a set is EINVAL, for the failed object, for one
+// that was only opened, and for a loaded or reused map, which a set would
+// otherwise find busy.
+func TestBpfMapInitialValueClose(t *testing.T) {
+	const op = "bpf_map__set_initial_value"
+
+	kconfig := "CONFIG_TEST=1\nCONFIG_GOBPFGO_LINKED=gobpfgo\n"
+	failed := openProgOpts(t, "link_kconfig.bpf.o", &BpfObjectOpenOpts{Kconfig: &kconfig})
+	bss := globalDataMap(t, failed, ".bss")
+	want := make([]byte, BpfMapValueSize(bss))
+	if err := BpfObjectLoad(failed); err == nil || !strings.Contains(err.Error(), "isn't a valid integer") {
+		t.Fatalf("load: %v, want the CONFIG_GOBPFGO_LINKED parse error", err)
+	}
+	if got := BpfMapInitialValue(bss); !bytes.Equal(got, want) {
+		t.Errorf(".bss initial value after the failed load = %x, want %x", got, want)
+	}
+	checkMapOpError(t, "set after the failed load", BpfMapSetInitialValue(bss, want), op, unix.EBUSY)
+
+	opened := openProg(t, "link_kconfig.bpf.o")
+	loaded, reused := openProg(t, "link_kconfig.bpf.o"), openProg(t, "link_kconfig.bpf.o")
+	loaded.attempted, loaded.loaded = true, true
+	globalDataMap(t, reused, ".bss").reused = true
+	for name, obj := range map[string]*BpfObject{"failed": failed, "opened": opened, "loaded": loaded, "reused": reused} {
+		m := globalDataMap(t, obj, ".bss")
+		BpfObjectClose(obj)
+		if got := BpfMapInitialValue(m); got != nil {
+			t.Errorf("%s: initial value after close = %x, want nil", name, got)
+		}
+		checkMapOpError(t, name+" set after close", BpfMapSetInitialValue(m, want), op, unix.EINVAL)
+	}
+}
+
 // u32Key and u64Value encode a 4-byte key and an 8-byte value in native byte
 // order.
 func u32Key(v uint32) []byte {

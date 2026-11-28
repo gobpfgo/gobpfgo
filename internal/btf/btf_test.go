@@ -198,7 +198,7 @@ func TestFixupDatasecOffsets(t *testing.T) {
 	if err := spec.FixupDatasecSizes(map[string]uint32{".maps": 32, "license": 4}); err != nil {
 		t.Fatalf("FixupDatasecSizes: %v", err)
 	}
-	if err := spec.FixupDatasecOffsets(map[string]uint32{"events": 0, "events2": 16, "LICENSE": 0, "target_tgid": 0}); err != nil {
+	if err := spec.FixupDatasecOffsets(map[string]uint32{"events": 0, "events2": 16, "LICENSE": 0, "target_comm": 0}); err != nil {
 		t.Fatalf("FixupDatasecOffsets: %v", err)
 	}
 

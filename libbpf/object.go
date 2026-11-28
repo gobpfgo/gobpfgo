@@ -515,13 +515,17 @@ func errnoFromError(err error) syscall.Errno {
 }
 
 // BpfObjectClose releases the object, closes any loaded descriptors and
-// invalidates its maps and programs. It is safe to call more than once and on
-// a nil object.
+// invalidates its maps and programs. A map's initial value is released too,
+// so BpfMapInitialValue returns nil for it afterwards. It is safe to call
+// more than once and on a nil object.
 func BpfObjectClose(obj *BpfObject) {
 	if obj == nil {
 		return
 	}
 	obj.closeLoadFDs()
+	for _, m := range obj.maps {
+		m.initialValue = nil
+	}
 	obj.closed = true
 	obj.maps = nil
 	obj.programs = nil

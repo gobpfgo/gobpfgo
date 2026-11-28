@@ -133,12 +133,14 @@ func (c coreCandCache) cands(local *btf.Spec, localID uint32, kernels []*btf.Spe
 // copies of its programs' instructions, in .BTF.ext order: section by
 // section, each in record order. Clang records byte offsets from the section
 // start; a record outside every program, such as one of a weak function that
-// another object overrode, is skipped. Field, type and enum values are
-// matched against the candidates of the record's local type in the vmlinux
-// and module BTFs, which every record of that type shares and narrows, as
-// coreCandCache describes; a value that cannot be resolved is poisoned,
-// which the verifier rejects only if the instruction is reachable. The first
-// record that cannot be relocated stops the relocation with an error.
+// another object overrode, is skipped, and so is every record of a section
+// the object does not have, which no program is in. Field, type and enum
+// values are matched against the candidates of the record's local type in
+// the vmlinux and module BTFs, which every record of that type shares and
+// narrows, as coreCandCache describes; a value that cannot be resolved is
+// poisoned, which the verifier rejects only if the instruction is reachable.
+// The first record that cannot be relocated stops the relocation with an
+// error.
 func relocateCore(obj *BpfObject, insns map[*BpfProgram][]byte, ext *btf.ExtSpec, kernels []*btf.Spec) error {
 	if ext == nil || obj.btf == nil || len(kernels) == 0 {
 		return nil
@@ -198,8 +200,10 @@ func elfSecIdxByName(obj *BpfObject, name string) int {
 // must agree on the target field's bit offset, then on poisoning and the
 // value. The candidates that matched replace the cached list, in place; when
 // none matched, the list stays and the result is the one libbpf computes
-// without a target. The access string is parsed first, so a malformed one
-// fails even without candidates.
+// without a target. The candidate search runs first, then the access string
+// is parsed before any candidate is tried: a malformed string fails even
+// without candidates, and on an anonymous local type the failed search is
+// reported instead.
 func coreReloResult(local *btf.Spec, relo btf.CoreRelo, kernels []*btf.Spec, cache coreCandCache) (*btf.CoreReloResult, error) {
 	var cands []coreCandidate
 	if relo.Kind != btf.CoreTypeIDLocal {

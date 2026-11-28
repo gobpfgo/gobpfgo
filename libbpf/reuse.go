@@ -27,8 +27,9 @@ import (
 // checks fd first, so an fd that is not a BPF map, negative or closed
 // included, returns the kernel errno: EBADFD for one that is not open, or
 // EPERM where unprivileged bpf() is refused. After a failed BpfObjectLoad,
-// which closed the map's descriptor, it returns EBADF and leaves the map as
-// it was. A nil map returns EINVAL.
+// which closed the map's descriptor, and after BpfObjectClose, which
+// released the map, it returns EBADF, closes the duplicate and leaves the
+// map as it was. A nil map returns EINVAL.
 func BpfMapReuseFD(m *BpfMap, fd int) error {
 	const op = "bpf_map__reuse_fd"
 
@@ -47,8 +48,9 @@ func BpfMapReuseFD(m *BpfMap, fd int) error {
 	}
 
 	// The duplicate replaces the map's descriptor in place. A failed load
-	// closed that descriptor, so there is none to replace.
-	if m.obj != nil && m.obj.attempted && !m.obj.loaded {
+	// closed that descriptor, so there is none to replace, and a closed
+	// object released the map with its descriptor.
+	if m.obj != nil && (m.obj.closed || (m.obj.attempted && !m.obj.loaded)) {
 		unix.Close(newFD)
 		return &Error{Op: op, Errno: unix.EBADF}
 	}
