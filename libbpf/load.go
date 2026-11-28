@@ -203,7 +203,7 @@ func loadObject(obj *BpfObject) error {
 	}
 	kernBTF, err := sanitizeBTF(obj.btf, kernelBTFFeatures())
 	if err != nil {
-		return &Error{Op: "bpf_object__load", Errno: unix.EINVAL, Log: err.Error()}
+		return &Error{Op: "bpf_object__load", Errno: errnoFromError(err), Log: err.Error()}
 	}
 
 	logBuf := make([]byte, 64*1024)

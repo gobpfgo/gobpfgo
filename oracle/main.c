@@ -7,7 +7,7 @@
 #include <string.h>
 
 static void usage(const char *prog) {
-	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|linker-kconfig <config> <object>...|dedup <object>...|core <object>|core-reloc <object> <target>|core-match <object> <target>|linfo|zip|usdt <binary>|kconfig <object>|subprog <object>...\n", prog);
+	fprintf(stderr, "usage: %s layout|attr|open <object>|load <object>|attach <dir>|dump <object>|dump-decl <object>|dump-decl-strip <object>|ringbuf <object>|perfbuf <object>|probe|linker <object>...|linker-kconfig <config> <object>...|dedup <object>...|core <object>|core-reloc <object> <target>|core-match <object> <target>|linfo|zip|usdt <binary>|kconfig <object>|subprog <object>...|sanitize <object>...\n", prog);
 }
 
 int main(int argc, char **argv) {
@@ -60,6 +60,8 @@ int main(int argc, char **argv) {
 		return oracle_kconfig(argv[2]);
 	if (strcmp(argv[1], "subprog") == 0 && argc >= 3)
 		return oracle_subprog((const char *const *)&argv[2], argc - 2);
+	if (strcmp(argv[1], "sanitize") == 0 && argc >= 3)
+		return oracle_sanitize((const char *const *)&argv[2], argc - 2);
 
 	usage(argv[0]);
 	return 2;

@@ -2,7 +2,7 @@
 // libbpf-source: src/features.c
 // libbpf-source: src/libbpf_probes.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_btf_type_tag, probe_kern_btf_enum64, probe_kern_btf_qmark_datasec, probe_kern_btf_float, probe_kern_arg_ctx_tag, probe_kern_percpu_data, feat_supported, probe_fd, libbpf__load_raw_btf
+// libbpf-symbols: probe_kern_bpf_cookie, probe_uprobe_multi_link, probe_kern_btf_decl_tag, probe_kern_btf_type_tag, probe_kern_btf_enum64, probe_kern_btf_qmark_datasec, probe_kern_btf_float, probe_kern_btf_func, probe_kern_btf_func_global, probe_kern_btf_datasec, probe_kern_btf_layout, probe_kern_arg_ctx_tag, probe_kern_percpu_data, feat_supported, probe_fd, libbpf__load_raw_btf, libbpf__load_raw_btf_hdr
 
 //go:build linux && (amd64 || arm64)
 
@@ -59,6 +59,20 @@ var (
 	// featBtfFloat is BTF_KIND_FLOAT in BPF_BTF_LOAD. Without it every
 	// FLOAT in the copy is an anonymous empty STRUCT of the same size.
 	featBtfFloat = kernelFeature{probe: probeBtfFloat}
+	// featBtfFunc is BTF_KIND_FUNC and BTF_KIND_FUNC_PROTO in
+	// BPF_BTF_LOAD. Without it every prototype in the copy is an ENUM of
+	// its parameters and every function a TYPEDEF of its prototype.
+	featBtfFunc = kernelFeature{probe: probeBtfFunc}
+	// featBtfGlobalFunc is a FUNC with global linkage in BPF_BTF_LOAD.
+	// Without it every function in the copy is static.
+	featBtfGlobalFunc = kernelFeature{probe: probeBtfGlobalFunc}
+	// featBtfDatasec is BTF_KIND_VAR and BTF_KIND_DATASEC in
+	// BPF_BTF_LOAD. Without it every variable in the copy is a one-byte
+	// INT and every DATASEC a STRUCT of its variables.
+	featBtfDatasec = kernelFeature{probe: probeBtfDatasec}
+	// featBtfLayout is a BTF header with a layout section in
+	// BPF_BTF_LOAD. Without it the copy has no layout section.
+	featBtfLayout = kernelFeature{probe: probeBtfLayout}
 	// featArgCtxTag is the verifier's own support for the arg:ctx decl
 	// tag on a global function argument. Without it the load rewrites the
 	// tagged arguments' BTF types to the program's context struct.
@@ -187,6 +201,10 @@ func kernelBTFFeatures() btf.KernelFeatures {
 		Enum64:       featBtfEnum64.supported(),
 		QmarkDatasec: featBtfQmarkDatasec.supported(),
 		Float:        featBtfFloat.supported(),
+		Func:         featBtfFunc.supported(),
+		Datasec:      featBtfDatasec.supported(),
+		GlobalFunc:   featBtfGlobalFunc.supported(),
+		Layout:       featBtfLayout.supported(),
 	}
 }
 
@@ -267,18 +285,88 @@ func probeBtfQmarkDatasec() bool {
 // qmarkDatasecBTF returns the BTF of the '?' DATASEC probe: an int, a
 // static variable x of it, and a DATASEC named ?.data that holds x.
 func qmarkDatasecBTF() []byte {
-	const strs = "\x00x\x00?.data\x00"
+	return varDatasecBTF("?.data")
+}
+
+// probeBtfDatasec reports whether BPF_BTF_LOAD accepts BTF_KIND_VAR and
+// BTF_KIND_DATASEC.
+func probeBtfDatasec() bool {
+	return probeBTFLoad(datasecBTF())
+}
+
+// datasecBTF returns the BTF of the DATASEC probe: an int, a static
+// variable x of it, and a DATASEC named .data that holds x.
+func datasecBTF() []byte {
+	return varDatasecBTF(".data")
+}
+
+// varDatasecBTF returns the BTF of the DATASEC probes: an int, a static
+// variable x of it, and a 4-byte DATASEC named name that holds x.
+func varDatasecBTF(name string) []byte {
+	strs := "\x00x\x00" + name + "\x00"
 	types := []uint32{
 		// [1] INT: signed, 32 bits, 4 bytes.
 		0, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
 		// [2] VAR x of [1], static.
 		1, btfTypeInfo(btf.KindVar, 0), 1, btf.VarStatic,
-		// [3] DATASEC ?.data: 4 bytes, one variable.
+		// [3] DATASEC name: 4 bytes, one variable.
 		3, btfTypeInfo(btf.KindDatasec, 1), 4,
 		// [2] at offset 0, 4 bytes.
 		2, 0, 4,
 	}
 	return rawBTF(types, strs)
+}
+
+// probeBtfFunc reports whether BPF_BTF_LOAD accepts BTF_KIND_FUNC and
+// BTF_KIND_FUNC_PROTO.
+func probeBtfFunc() bool {
+	return probeBTFLoad(funcBTF(btf.FuncStatic))
+}
+
+// probeBtfGlobalFunc reports whether BPF_BTF_LOAD accepts a FUNC with
+// global linkage.
+func probeBtfGlobalFunc() bool {
+	return probeBTFLoad(funcBTF(btf.FuncGlobal))
+}
+
+// funcBTF returns the BTF of the function probes: an int, the prototype
+// void (int a) and the function x of it with linkage, static for the FUNC
+// probe and global for the global function one.
+func funcBTF(linkage uint32) []byte {
+	const strs = "\x00int\x00x\x00a\x00"
+	types := []uint32{
+		// [1] INT int: signed, 32 bits, 4 bytes.
+		1, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
+		// [2] FUNC_PROTO void (int a).
+		0, btfTypeInfo(btf.KindFuncProto, 1), 0,
+		// a of [1].
+		7, 1,
+		// [3] FUNC x of [2].
+		5, btfTypeInfo(btf.KindFunc, linkage), 2,
+	}
+	return rawBTF(types, strs)
+}
+
+// probeBtfLayout reports whether BPF_BTF_LOAD accepts a header with a
+// layout section. A kernel without it rejects the nonzero header bytes past
+// the fields it knows.
+func probeBtfLayout() bool {
+	return probeBTFLoad(layoutBTF())
+}
+
+// layoutBTF returns the BTF of the layout probe: a signed int named int,
+// and a layout section with the entries of BTF_KIND_UNKN and BTF_KIND_INT
+// between the types and the strings.
+func layoutBTF() []byte {
+	const strs = "\x00int\x00"
+	types := []uint32{
+		// [1] INT int: signed, 32 bits, 4 bytes.
+		1, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
+	}
+	// struct btf_layout: info_sz, elem_sz and 16 bits of flags, for
+	// UNKN, without payload, and INT, with one 4-byte word.
+	layout := []byte{0, 0, 0, 0, 4, 0, 0, 0}
+	return rawBTFLayout(types, layout, strs)
 }
 
 // probeBtfFloat reports whether BPF_BTF_LOAD accepts BTF_KIND_FLOAT.
@@ -375,22 +463,36 @@ func btfTypeInfo(kind btf.Kind, vlen uint32) uint32 {
 }
 
 // rawBTFHdrLen is the size of struct btf_header, with the layout section
-// fields that a probe leaves zero.
+// fields that only the layout probe sets.
 const rawBTFHdrLen = 32
 
 // rawBTF builds a BTF blob from the type words and the string table, with
 // the types right after the header and the strings after the types.
 func rawBTF(types []uint32, strs string) []byte {
+	return rawBTFLayout(types, nil, strs)
+}
+
+// rawBTFLayout builds a BTF blob from the type words, the layout section
+// and the string table, in that order right after the header, as
+// libbpf__load_raw_btf_hdr lays them out. Without a layout section the
+// layout fields stay zero.
+func rawBTFLayout(types []uint32, layout []byte, strs string) []byte {
 	typeLen := uint32(4 * len(types))
-	buf := make([]byte, rawBTFHdrLen, rawBTFHdrLen+int(typeLen)+len(strs))
+	layoutLen := uint32(len(layout))
+	buf := make([]byte, rawBTFHdrLen, rawBTFHdrLen+int(typeLen)+len(layout)+len(strs))
 	binary.NativeEndian.PutUint16(buf[0:], 0xeb9f)
 	buf[2] = 1
 	binary.NativeEndian.PutUint32(buf[4:], rawBTFHdrLen)
 	binary.NativeEndian.PutUint32(buf[12:], typeLen)
-	binary.NativeEndian.PutUint32(buf[16:], typeLen)
+	binary.NativeEndian.PutUint32(buf[16:], typeLen+layoutLen)
 	binary.NativeEndian.PutUint32(buf[20:], uint32(len(strs)))
+	if layoutLen != 0 {
+		binary.NativeEndian.PutUint32(buf[24:], typeLen)
+		binary.NativeEndian.PutUint32(buf[28:], layoutLen)
+	}
 	for _, word := range types {
 		buf = binary.NativeEndian.AppendUint32(buf, word)
 	}
+	buf = append(buf, layout...)
 	return append(buf, strs...)
 }

@@ -642,8 +642,14 @@ func TestBtfDeclTagProbeBTF(t *testing.T) {
 // allBTFFeatures stands in for a kernel whose BTF feature probes all
 // succeed; withoutDeclTag for one that lacks only BTF_KIND_DECL_TAG.
 var (
-	allBTFFeatures = btf.KernelFeatures{DeclTag: true, TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true}
-	withoutDeclTag = btf.KernelFeatures{TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true}
+	allBTFFeatures = btf.KernelFeatures{
+		DeclTag: true, TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true,
+		Func: true, Datasec: true, GlobalFunc: true, Layout: true,
+	}
+	withoutDeclTag = btf.KernelFeatures{
+		TypeTag: true, Enum64: true, QmarkDatasec: true, Float: true,
+		Func: true, Datasec: true, GlobalFunc: true, Layout: true,
+	}
 )
 
 // TestSanitizeBTF builds the BTF that the load passes to the kernel for
