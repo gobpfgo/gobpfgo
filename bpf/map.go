@@ -91,14 +91,90 @@ func (m *Map) FD() int {
 // Lookup copies the value stored for key into value. key must be KeySize
 // bytes; value must be ValueSize bytes, or one 8-byte aligned slot per
 // possible CPU for a per-CPU map without a CPU flag. It returns ErrClosed
-// after the Object is closed and the core *libbpf.Error otherwise, with
-// EBADF before Load and ENOENT for a missing key. See
-// libbpf.BpfMapLookupElem.
+// after the Object is closed and the core *libbpf.Error otherwise. Before
+// Load that is ENOENT, unless ReuseFD gave the map a descriptor. Once Load
+// has run, a map without a descriptor, because the Load did not create it
+// or failed, is EINVAL, and so is a buffer of the wrong size. A missing key
+// is the kernel's ENOENT. See libbpf.BpfMapLookupElem.
 func (m *Map) Lookup(key, value []byte, flags uint64) error {
 	if m.isClosed() {
 		return ErrClosed
 	}
 	return libbpf.BpfMapLookupElem(m.live(), key, value, flags)
+}
+
+// Update stores value for key. key and value follow the sizes of Lookup, and
+// flags is BPF_ANY, BPF_NOEXIST or BPF_EXIST, possibly with other BPF_F_*
+// bits. A queue or stack map takes an empty key and pushes value. It returns
+// ErrClosed after the Object is closed and the core *libbpf.Error otherwise,
+// with the errors of Lookup for the map state and the kernel errno of a
+// failed update, such as EEXIST for BPF_NOEXIST on an existing key or EPERM
+// for a frozen map. See libbpf.BpfMapUpdateElem.
+func (m *Map) Update(key, value []byte, flags uint64) error {
+	if m.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfMapUpdateElem(m.live(), key, value, flags)
+}
+
+// Delete removes key, which must be KeySize bytes. It returns ErrClosed
+// after the Object is closed and the core *libbpf.Error otherwise, with the
+// errors of Lookup for the map state and the kernel errno of a failed
+// delete, such as ENOENT for a missing key or EINVAL for an array map. See
+// libbpf.BpfMapDeleteElem.
+func (m *Map) Delete(key []byte, flags uint64) error {
+	if m.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfMapDeleteElem(m.live(), key, flags)
+}
+
+// LookupAndDelete copies the value stored for key into value and removes
+// the element in one step. key and value follow the sizes of Lookup; a queue
+// or stack map takes an empty key and pops its next element. It returns
+// ErrClosed after the Object is closed and the core *libbpf.Error otherwise,
+// with the errors of Lookup; a kernel older than 5.14 returns ENOTSUPP (524)
+// for a map other than a queue or stack. See
+// libbpf.BpfMapLookupAndDeleteElem.
+func (m *Map) LookupAndDelete(key, value []byte, flags uint64) error {
+	if m.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfMapLookupAndDeleteElem(m.live(), key, value, flags)
+}
+
+// NextKey copies the key that follows curKey into nextKey; an empty curKey
+// asks for the first key. Both are KeySize bytes, curKey unless it is empty.
+// After the last key it returns the core ENOENT error. It returns ErrClosed
+// after the Object is closed and the core *libbpf.Error otherwise, with the
+// errors of Lookup for the map state. See libbpf.BpfMapGetNextKey.
+func (m *Map) NextKey(curKey, nextKey []byte) error {
+	if m.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfMapGetNextKey(m.live(), curKey, nextKey)
+}
+
+// InitialValue returns the initial value of an internal data or .kconfig
+// map, ValueSize bytes that alias the Object's buffer, or nil for a .maps
+// definition and after the Object is closed. Before Load, changing the bytes
+// changes what Load writes into the map; after Load they no longer affect
+// the map. See libbpf.BpfMapInitialValue.
+func (m *Map) InitialValue() []byte {
+	return libbpf.BpfMapInitialValue(m.live())
+}
+
+// SetInitialValue replaces the initial value of an internal data map with a
+// copy of data, which must be ValueSize bytes, so Load writes it into the
+// map. It returns ErrClosed after the Object is closed and the core
+// *libbpf.Error otherwise: EBUSY after ReuseFD or once Load has run, even a
+// failed one, and EINVAL for a .maps definition, the .kconfig map or data of
+// another size. See libbpf.BpfMapSetInitialValue.
+func (m *Map) SetInitialValue(data []byte) error {
+	if m.isClosed() {
+		return ErrClosed
+	}
+	return libbpf.BpfMapSetInitialValue(m.live(), data)
 }
 
 // SetPinPath stores the path Pin and Unpin use when called with nil; a nil

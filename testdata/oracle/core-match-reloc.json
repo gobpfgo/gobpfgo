@@ -1,0 +1,180 @@
+{
+  "case": "core-match",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core_match.bpf.o",
+  "target": "core_match_target.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 0, "type_id": 5, "kind": 12, "access": "0", "name": "cm_enum___sub", "cands": [
+        {"type_id": 18, "name": "cm_enum", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 32, "type_id": 6, "kind": 12, "access": "0", "name": "cm_enum___extra", "cands": [
+        {"type_id": 18, "name": "cm_enum", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 48, "type_id": 7, "kind": 12, "access": "0", "name": "cm_enum64___narrow", "cands": [
+        {"type_id": 32, "name": "cm_enum64", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 8, "kind": 12, "access": "0", "name": "cm_enum64___wide", "cands": [
+        {"type_id": 32, "name": "cm_enum64", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 80, "type_id": 9, "kind": 12, "access": "0", "name": "cm_struct___same", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 96, "type_id": 32, "kind": 12, "access": "0", "name": "cm_struct___subset", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 112, "type_id": 33, "kind": 12, "access": "0", "name": "cm_struct___missing", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 128, "type_id": 34, "kind": 12, "access": "0", "name": "cm_struct___int_name", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 144, "type_id": 35, "kind": 12, "access": "0", "name": "cm_struct___typedefs", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 160, "type_id": 37, "kind": 12, "access": "0", "name": "cm_struct___modifiers", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 176, "type_id": 39, "kind": 12, "access": "0", "name": "cm_struct___inner_sub", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 192, "type_id": 41, "kind": 12, "access": "0", "name": "cm_struct___inner_extra", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 208, "type_id": 43, "kind": 12, "access": "0", "name": "cm_struct___inner_name", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 224, "type_id": 45, "kind": 12, "access": "0", "name": "cm_struct___ptr_loose", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 240, "type_id": 47, "kind": 12, "access": "0", "name": "cm_struct___ptr_union", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 256, "type_id": 49, "kind": 12, "access": "0", "name": "cm_struct___ptr_name", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 272, "type_id": 51, "kind": 12, "access": "0", "name": "cm_struct___not_ptr", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 288, "type_id": 53, "kind": 12, "access": "0", "name": "cm_struct___local_fwd", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 304, "type_id": 56, "kind": 12, "access": "0", "name": "cm_struct___local_ufwd", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 320, "type_id": 59, "kind": 12, "access": "0", "name": "cm_struct___fwd_fwd", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 336, "type_id": 62, "kind": 12, "access": "0", "name": "cm_struct___fwd_complete", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 352, "type_id": 64, "kind": 12, "access": "0", "name": "cm_struct___fwd_union", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 368, "type_id": 66, "kind": 12, "access": "0", "name": "cm_struct___arrays", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 384, "type_id": 67, "kind": 12, "access": "0", "name": "cm_struct___arr_len", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 400, "type_id": 69, "kind": 12, "access": "0", "name": "cm_struct___arr_elem", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 416, "type_id": 71, "kind": 12, "access": "0", "name": "cm_struct___matrix_dims", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 432, "type_id": 74, "kind": 12, "access": "0", "name": "cm_struct___fn", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 448, "type_id": 75, "kind": 12, "access": "0", "name": "cm_struct___fn_args", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 464, "type_id": 78, "kind": 12, "access": "0", "name": "cm_struct___fn_ret", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 480, "type_id": 81, "kind": 12, "access": "0", "name": "cm_struct___fn_arg_type", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 496, "type_id": 84, "kind": 12, "access": "0", "name": "cm_struct___anon", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 512, "type_id": 86, "kind": 12, "access": "0", "name": "cm_struct___anon_extra", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 528, "type_id": 88, "kind": 12, "access": "0", "name": "cm_struct___anon_type", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 544, "type_id": 90, "kind": 12, "access": "0", "name": "cm_struct___anon_type_bad", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 560, "type_id": 92, "kind": 12, "access": "0", "name": "cm_struct___members", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 576, "type_id": 95, "kind": 12, "access": "0", "name": "cm_union___sub", "cands": [
+        {"type_id": 25, "name": "cm_union", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 592, "type_id": 96, "kind": 12, "access": "0", "name": "cm_union___bad", "cands": [
+        {"type_id": 25, "name": "cm_union", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 608, "type_id": 97, "kind": 12, "access": "0", "name": "cm_union___struct", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 624, "type_id": 98, "kind": 12, "access": "0", "name": "cm_struct___a___b", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 640, "type_id": 99, "kind": 12, "access": "0", "name": "cm____odd___v", "cands": [
+        {"type_id": 38, "name": "cm____odd", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 656, "type_id": 100, "kind": 12, "access": "0", "name": "cm_struct_t___td", "cands": [
+        {"type_id": 27, "name": "cm_struct_t", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 672, "type_id": 102, "kind": 12, "access": "0", "name": "cm_fn_t___ok", "cands": [
+        {"type_id": 29, "name": "cm_fn_t", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 688, "type_id": 103, "kind": 12, "access": "0", "name": "cm_fn_t___bad", "cands": [
+        {"type_id": 29, "name": "cm_fn_t", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 704, "type_id": 106, "kind": 12, "access": "0", "name": "cm_dup___m", "cands": [
+        {"type_id": 34, "name": "cm_dup", "match": 1, "compat": 1},
+        {"type_id": 36, "name": "cm_dup___v2", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 720, "type_id": 107, "kind": 12, "access": "0", "name": "cm_ptr_ok___l", "cands": [
+        {"type_id": 139, "name": "cm_ptr_ok", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 736, "type_id": 139, "kind": 12, "access": "0", "name": "cm_ptr_deep___l", "cands": [
+        {"type_id": 105, "name": "cm_ptr_deep", "match": -22, "compat": 1}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 752, "type_id": 141, "kind": 12, "access": "0", "name": "cm_deep0___l", "cands": [
+        {"type_id": 40, "name": "cm_deep0", "match": -22, "compat": 1}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 768, "type_id": 173, "kind": 12, "access": "0", "name": "cm_shallow0___l", "cands": [
+        {"type_id": 73, "name": "cm_shallow0", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 784, "type_id": 204, "kind": 12, "access": "0", "name": "cm_ptr_ok_t___l", "cands": [
+        {"type_id": 143, "name": "cm_ptr_ok_t", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 800, "type_id": 205, "kind": 12, "access": "0", "name": "cm_ptr_deep_t___l", "cands": [
+        {"type_id": 141, "name": "cm_ptr_deep_t", "match": -22, "compat": -22}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 816, "type_id": 33, "kind": 8, "access": "0", "name": "cm_struct___missing", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 0, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 832, "type_id": 97, "kind": 8, "access": "0", "name": "cm_union___struct", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 848, "type_id": 204, "kind": 8, "access": "0", "name": "cm_ptr_ok_t___l", "cands": [
+        {"type_id": 143, "name": "cm_ptr_ok_t", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 1, "new_val": 1, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 1}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 864, "type_id": 205, "kind": 8, "access": "0", "name": "cm_ptr_deep_t___l", "cands": [
+        {"type_id": 141, "name": "cm_ptr_deep_t", "match": -22, "compat": -22}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 880, "type_id": 32, "kind": 9, "access": "0", "name": "cm_struct___subset", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 16, "new_val": 152, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 152}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 896, "type_id": 106, "kind": 9, "access": "0", "name": "cm_dup___m", "cands": [
+        {"type_id": 34, "name": "cm_dup", "match": 1, "compat": 1},
+        {"type_id": 36, "name": "cm_dup___v2", "match": 1, "compat": 1}
+      ], "err": -22},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 912, "type_id": 32, "kind": 7, "access": "0", "name": "cm_struct___subset", "cands": [
+        {"type_id": 1, "name": "cm_struct", "match": 1, "compat": 1}
+      ], "err": 0, "orig_val": 32, "new_val": 1, "validate": false, "poison": false, "new_insn": {"code": 24, "dst": 2, "src": 0, "off": 0, "imm": 1}}
+  ]
+}

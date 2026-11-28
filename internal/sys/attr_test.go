@@ -144,6 +144,28 @@ func TestMapElemAttr(t *testing.T) {
 	}
 }
 
+func TestMapNextKeyAttr(t *testing.T) {
+	attr := &MapNextKeyAttr{
+		MapFD:   7,
+		Key:     0x1122334455667788,
+		NextKey: 0x99aabbccddeeff00,
+	}
+
+	got := attr.Marshal()
+	if len(got) != MapNextKeyAttrSize {
+		t.Fatalf("marshaled %d bytes, want %d", len(got), MapNextKeyAttrSize)
+	}
+	if v := binary.NativeEndian.Uint32(got[0:]); v != attr.MapFD {
+		t.Errorf("map_fd = %#x, want %#x", v, attr.MapFD)
+	}
+	if v := binary.NativeEndian.Uint64(got[8:]); v != attr.Key {
+		t.Errorf("key = %#x, want %#x", v, attr.Key)
+	}
+	if v := binary.NativeEndian.Uint64(got[16:]); v != attr.NextKey {
+		t.Errorf("next_key = %#x, want %#x", v, attr.NextKey)
+	}
+}
+
 func TestMapFreezeAttr(t *testing.T) {
 	attr := &MapFreezeAttr{MapFD: 7}
 

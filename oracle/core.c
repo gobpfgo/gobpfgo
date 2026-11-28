@@ -5,6 +5,7 @@
 
 #include "libbpf.h"
 #include "btf.h"
+#include "libbpf_internal.h"
 #include "relo_core.h"
 
 #include <linux/bpf.h>
@@ -404,6 +405,216 @@ int oracle_core_reloc(const char *path, const char *target_path) {
 	ret = 0;
 
 out:
+	free(btf_data);
+	free(ext_data);
+	free(target_data);
+	return ret;
+}
+
+/* match_cands is the cached candidate list of one local type. */
+struct match_cands {
+	bool searched;
+	struct bpf_core_cand_list list;
+};
+
+struct match_ctx {
+	struct json *j;
+	struct btf *local;
+	struct btf *target;
+	const char *path;
+	struct match_cands *cache; /* indexed by local type ID */
+};
+
+/* find_match_cands fills cands with libbpf's own candidate search on the
+ * whole target BTF, as for vmlinux: the types whose name without a ___flavor
+ * suffix and kind match the local type.
+ */
+static int find_match_cands(struct match_ctx *ctx, const struct bpf_core_relo *relo, struct bpf_core_cand_list *cands) {
+	struct bpf_core_cand local_cand = {.btf = ctx->local, .id = relo->type_id};
+	const struct btf_type *local_type;
+	const char *name;
+
+	local_type = btf__type_by_id(ctx->local, relo->type_id);
+	name       = btf__name_by_offset(ctx->local, local_type->name_off);
+	return bpf_core_add_cands(&local_cand, bpf_core_essential_name_len(name), ctx->target, "target", 1, cands);
+}
+
+/* match_cands returns the candidate list of relo's local type. As with the
+ * cand_cache of bpf_object__relocate_core, the list is searched once per
+ * local type and shared by every relocation of it, which keeps only the
+ * candidates that matched. A TYPE_ID_LOCAL relocation has no candidates and
+ * neither reads nor fills the cache.
+ */
+static struct bpf_core_cand_list *match_cands(struct match_ctx *ctx, const struct bpf_core_relo *relo, struct bpf_core_cand_list *none) {
+	struct match_cands *entry = &ctx->cache[relo->type_id];
+	int err;
+
+	if (relo->kind == BPF_CORE_TYPE_ID_LOCAL)
+		return none;
+
+	if (!entry->searched) {
+		err = find_match_cands(ctx, relo, &entry->list);
+		if (err) {
+			fprintf(stderr, "candidate search failed: %d\n", err);
+			return NULL;
+		}
+		entry->searched = true;
+	}
+	return &entry->list;
+}
+
+static void free_match_cache(struct match_cands *cache, uint32_t cnt) {
+	uint32_t i;
+
+	if (!cache)
+		return;
+
+	for (i = 0; i < cnt; i++)
+		free(cache[i].list.cands);
+	free(cache);
+}
+
+/* json_match_cands prints each candidate with the result of the type match
+ * and of the type compatibility check against it: 1, 0 or a negative errno.
+ */
+static void json_match_cands(struct match_ctx *ctx, uint32_t local_id, const struct bpf_core_cand_list *cands) {
+	int i;
+
+	json_arr_begin(ctx->j, "cands");
+	for (i = 0; i < cands->len; i++) {
+		uint32_t id                 = cands->cands[i].id;
+		const struct btf_type *type = btf__type_by_id(ctx->target, id);
+
+		json_obj_begin_compact(ctx->j, NULL);
+		json_u32(ctx->j, "type_id", id);
+		json_str(ctx->j, "name", btf__name_by_offset(ctx->target, type->name_off));
+		json_s32(ctx->j, "match", bpf_core_types_match(ctx->local, local_id, ctx->target, id));
+		json_s32(ctx->j, "compat", bpf_core_types_are_compat(ctx->local, local_id, ctx->target, id));
+		json_obj_end(ctx->j);
+	}
+	json_arr_end(ctx->j);
+}
+
+/* json_match_result relocates the instruction with res and prints the result
+ * and the patched instruction.
+ */
+static int json_match_result(struct match_ctx *ctx, const char *section, const struct bpf_core_relo *relo, const struct bpf_core_relo_res *res) {
+	unsigned char *program = NULL;
+	size_t program_size    = 0, insn_idx;
+	struct bpf_insn *insns;
+	int err;
+
+	if (read_section(ctx->path, section, &program, &program_size))
+		return -1;
+	if (relo->insn_off % sizeof(*insns) || relo->insn_off + sizeof(*insns) > program_size) {
+		fprintf(stderr, "%s: instruction %u out of bounds\n", section, relo->insn_off);
+		free(program);
+		return -1;
+	}
+	insns    = (struct bpf_insn *)program;
+	insn_idx = relo->insn_off / sizeof(*insns);
+	err      = bpf_core_patch_insn(section, &insns[insn_idx], insn_idx, relo, 0, res);
+	if (err) {
+		fprintf(stderr, "%s: cannot patch core relocation: %d\n", section, err);
+		free(program);
+		return -1;
+	}
+
+	json_u64(ctx->j, "orig_val", res->orig_val);
+	json_u64(ctx->j, "new_val", res->new_val);
+	json_bool(ctx->j, "validate", res->validate);
+	json_bool(ctx->j, "poison", res->poison);
+	json_insn(ctx->j, "new_insn", &insns[insn_idx]);
+	free(program);
+	return 0;
+}
+
+static int print_match(void *opaque, const char *section, const struct bpf_core_relo *relo) {
+	struct match_ctx *ctx             = opaque;
+	struct bpf_core_cand_list none    = {};
+	struct bpf_core_spec specs[3]     = {};
+	struct bpf_core_relo_res res      = {};
+	const struct btf_type *local_type = btf__type_by_id(ctx->local, relo->type_id);
+	const char *access                = btf__name_by_offset(ctx->local, relo->access_str_off);
+	struct bpf_core_cand_list *cands;
+	int err, ret = 0;
+
+	if (!local_type) {
+		fprintf(stderr, "%s: local type %u not found\n", section, relo->type_id);
+		return -1;
+	}
+	cands = match_cands(ctx, relo, &none);
+	if (!cands)
+		return -1;
+
+	json_obj_begin_compact(ctx->j, NULL);
+	json_str(ctx->j, "section", section);
+	json_u32(ctx->j, "insn_off", relo->insn_off);
+	json_u32(ctx->j, "type_id", relo->type_id);
+	json_u32(ctx->j, "kind", relo->kind);
+	json_str(ctx->j, "access", access ? access : "");
+	json_str(ctx->j, "name", btf__name_by_offset(ctx->local, local_type->name_off));
+	json_match_cands(ctx, relo->type_id, cands);
+
+	/* bpf_core_calc_relo_insn keeps only the matching candidates, so the
+	 * list is printed first.
+	 */
+	err = bpf_core_calc_relo_insn(section, relo, 0, ctx->local, cands, specs, &res);
+	json_s32(ctx->j, "err", err);
+	if (!err)
+		ret = json_match_result(ctx, section, relo, &res);
+	json_obj_end(ctx->j);
+	return ret;
+}
+
+int oracle_core_match(const char *path, const char *target_path) {
+	struct oracle_meta meta = {.case_name = "core-match", .version = true};
+	unsigned char *btf_data = NULL, *ext_data = NULL, *target_data = NULL;
+	size_t btf_size = 0, ext_size = 0, target_size = 0;
+	struct match_ctx ctx;
+	struct match_cands *cache = NULL;
+	uint32_t cache_cnt        = 0;
+	struct btf *local = NULL, *target = NULL;
+	struct json j;
+	int ret = 1;
+
+	if (read_section(path, ".BTF", &btf_data, &btf_size) || read_section(path, ".BTF.ext", &ext_data, &ext_size) || read_section(target_path, ".BTF", &target_data, &target_size))
+		goto out;
+
+	local  = btf__new(btf_data, (uint32_t)btf_size);
+	target = btf__new(target_data, (uint32_t)target_size);
+	if (libbpf_get_error(local) || libbpf_get_error(target)) {
+		fprintf(stderr, "parse .BTF: %s\n", strerror(errno));
+		goto out;
+	}
+
+	cache_cnt = btf__type_cnt(local);
+	cache     = calloc(cache_cnt, sizeof(*cache));
+	if (!cache) {
+		fprintf(stderr, "calloc: out of memory\n");
+		goto out;
+	}
+
+	json_init(&j, stdout);
+	json_obj_begin(&j, NULL);
+	oracle_meta(&j, &meta);
+	json_str(&j, "object", oracle_basename(path));
+	json_str(&j, "target", oracle_basename(target_path));
+	ctx = (struct match_ctx){.j = &j, .local = local, .target = target, .path = path, .cache = cache};
+	json_arr_begin(&j, "relos");
+	if (walk_core_relos(local, ext_data, ext_size, print_match, &ctx))
+		goto out;
+	json_arr_end(&j);
+	json_obj_end(&j);
+	fputc('\n', stdout);
+	ret = 0;
+
+out:
+	free_match_cache(cache, cache_cnt);
+	if (!libbpf_get_error(local))
+		btf__free(local);
+	if (!libbpf_get_error(target))
+		btf__free(target);
 	free(btf_data);
 	free(ext_data);
 	free(target_data);

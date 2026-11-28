@@ -55,9 +55,10 @@ type relocator struct {
 
 // relocateObject relocates the programs of obj for loading and returns the
 // code of each main program, in program order, and each subprogram's own
-// instructions as the relocation prepared them. CO-RE runs first, on every
-// program and subprogram, then the calls build each main program's code
-// with its function and line records, and its exception callback is
+// instructions as the relocation prepared them. CO-RE runs first, over every
+// program and subprogram in .BTF.ext order with one candidate list per local
+// type, as relocateCore describes. Then the calls build each main program's
+// code with its function and line records, and its exception callback is
 // appended when declTag reports that the kernel reads decl tags. Last, each
 // main program's records of global functions with arg:ctx arguments are
 // fixed up, which adds types to the object BTF, unless argCtxTag reports
@@ -78,7 +79,13 @@ func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCt
 		relocs: make(map[*BpfProgram][]progReloc, len(obj.programs)),
 	}
 	for _, p := range obj.programs {
-		if err := r.prepare(p, kernels); err != nil {
+		r.insns[p] = slices.Clone(p.insns)
+	}
+	if err := relocateCore(obj, r.insns, ext, kernels); err != nil {
+		return nil, nil, &Error{Op: "bpf_object__relocate_core", Errno: unix.EINVAL, Log: err.Error()}
+	}
+	for _, p := range obj.programs {
+		if err := r.prepare(p); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -130,18 +137,11 @@ func relocateObjectData(codes []*progCode, newMap funcPtrMapCreator) error {
 	return nil
 }
 
-// prepare copies p's instructions, applies its CO-RE relocations, records its
-// ELF relocations and marks its subprogram address loads with
-// BPF_PSEUDO_FUNC, so the call relocation can tell them from other ld_imm64
-// instructions.
-func (r *relocator) prepare(p *BpfProgram, kernels []*btf.Spec) error {
-	insns := slices.Clone(p.insns)
-	if len(kernels) > 0 {
-		if err := relocateCore(p, insns, r.ext, r.obj.btf, kernels); err != nil {
-			return &Error{Op: "bpf_object__relocate_core", Errno: unix.EINVAL, Log: err.Error()}
-		}
-	}
-
+// prepare records the ELF relocations of p and marks its subprogram address
+// loads with BPF_PSEUDO_FUNC in its CO-RE relocated copy, so the call
+// relocation can tell them from other ld_imm64 instructions.
+func (r *relocator) prepare(p *BpfProgram) error {
+	insns := r.insns[p]
 	relocs, err := recordRelocs(r.obj, p, p.insns)
 	if err != nil {
 		return &Error{Op: "bpf_prog_load", Errno: unix.EINVAL, Log: err.Error()}
@@ -152,7 +152,6 @@ func (r *relocator) prepare(p *BpfProgram, kernels []*btf.Spec) error {
 		}
 	}
 
-	r.insns[p] = insns
 	r.relocs[p] = relocs
 	return nil
 }

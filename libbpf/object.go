@@ -33,8 +33,14 @@ type BpfObject struct {
 	elf      *elf.Object
 	license  string
 	btfFD    int
-	loaded   bool
 	closed   bool
+
+	// attempted is set once BpfObjectLoad starts the work that changes the
+	// object, and stays set when that load fails: the object is then
+	// prepared, in libbpf's terms, and cannot be loaded again. loaded is
+	// set when the load succeeds.
+	attempted bool
+	loaded    bool
 
 	// kernVersion is the kern_version every BPF_PROG_LOAD of the object
 	// sends: the running kernel's KERNEL_VERSION code at open, or the
@@ -258,6 +264,9 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 	}
 	for _, p := range programs {
 		p.obj = obj
+	}
+	for _, m := range maps {
+		m.obj = obj
 	}
 	if opts != nil && opts.Kconfig != nil {
 		kconfig := *opts.Kconfig

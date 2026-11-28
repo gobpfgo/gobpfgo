@@ -1,0 +1,123 @@
+{
+  "case": "core",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core_match.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 0, "type_id": 5, "kind": 12, "access": "0", "root_type_id": 5, "bit_offset": 0, "spec": "<type_matches> [5] enum cm_enum___sub", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 32, "type_id": 6, "kind": 12, "access": "0", "root_type_id": 6, "bit_offset": 0, "spec": "<type_matches> [6] enum cm_enum___extra", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 48, "type_id": 7, "kind": 12, "access": "0", "root_type_id": 7, "bit_offset": 0, "spec": "<type_matches> [7] enum cm_enum64___narrow", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 8, "kind": 12, "access": "0", "root_type_id": 8, "bit_offset": 0, "spec": "<type_matches> [8] enum64 cm_enum64___wide", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 80, "type_id": 9, "kind": 12, "access": "0", "root_type_id": 9, "bit_offset": 0, "spec": "<type_matches> [9] struct cm_struct___same", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 96, "type_id": 32, "kind": 12, "access": "0", "root_type_id": 32, "bit_offset": 0, "spec": "<type_matches> [32] struct cm_struct___subset", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 112, "type_id": 33, "kind": 12, "access": "0", "root_type_id": 33, "bit_offset": 0, "spec": "<type_matches> [33] struct cm_struct___missing", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 128, "type_id": 34, "kind": 12, "access": "0", "root_type_id": 34, "bit_offset": 0, "spec": "<type_matches> [34] struct cm_struct___int_name", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 144, "type_id": 35, "kind": 12, "access": "0", "root_type_id": 35, "bit_offset": 0, "spec": "<type_matches> [35] struct cm_struct___typedefs", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 160, "type_id": 37, "kind": 12, "access": "0", "root_type_id": 37, "bit_offset": 0, "spec": "<type_matches> [37] struct cm_struct___modifiers", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 176, "type_id": 39, "kind": 12, "access": "0", "root_type_id": 39, "bit_offset": 0, "spec": "<type_matches> [39] struct cm_struct___inner_sub", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 192, "type_id": 41, "kind": 12, "access": "0", "root_type_id": 41, "bit_offset": 0, "spec": "<type_matches> [41] struct cm_struct___inner_extra", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 208, "type_id": 43, "kind": 12, "access": "0", "root_type_id": 43, "bit_offset": 0, "spec": "<type_matches> [43] struct cm_struct___inner_name", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 224, "type_id": 45, "kind": 12, "access": "0", "root_type_id": 45, "bit_offset": 0, "spec": "<type_matches> [45] struct cm_struct___ptr_loose", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 240, "type_id": 47, "kind": 12, "access": "0", "root_type_id": 47, "bit_offset": 0, "spec": "<type_matches> [47] struct cm_struct___ptr_union", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 256, "type_id": 49, "kind": 12, "access": "0", "root_type_id": 49, "bit_offset": 0, "spec": "<type_matches> [49] struct cm_struct___ptr_name", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 272, "type_id": 51, "kind": 12, "access": "0", "root_type_id": 51, "bit_offset": 0, "spec": "<type_matches> [51] struct cm_struct___not_ptr", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 288, "type_id": 53, "kind": 12, "access": "0", "root_type_id": 53, "bit_offset": 0, "spec": "<type_matches> [53] struct cm_struct___local_fwd", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 304, "type_id": 56, "kind": 12, "access": "0", "root_type_id": 56, "bit_offset": 0, "spec": "<type_matches> [56] struct cm_struct___local_ufwd", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 320, "type_id": 59, "kind": 12, "access": "0", "root_type_id": 59, "bit_offset": 0, "spec": "<type_matches> [59] struct cm_struct___fwd_fwd", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 336, "type_id": 62, "kind": 12, "access": "0", "root_type_id": 62, "bit_offset": 0, "spec": "<type_matches> [62] struct cm_struct___fwd_complete", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 352, "type_id": 64, "kind": 12, "access": "0", "root_type_id": 64, "bit_offset": 0, "spec": "<type_matches> [64] struct cm_struct___fwd_union", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 368, "type_id": 66, "kind": 12, "access": "0", "root_type_id": 66, "bit_offset": 0, "spec": "<type_matches> [66] struct cm_struct___arrays", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 384, "type_id": 67, "kind": 12, "access": "0", "root_type_id": 67, "bit_offset": 0, "spec": "<type_matches> [67] struct cm_struct___arr_len", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 400, "type_id": 69, "kind": 12, "access": "0", "root_type_id": 69, "bit_offset": 0, "spec": "<type_matches> [69] struct cm_struct___arr_elem", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 416, "type_id": 71, "kind": 12, "access": "0", "root_type_id": 71, "bit_offset": 0, "spec": "<type_matches> [71] struct cm_struct___matrix_dims", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 432, "type_id": 74, "kind": 12, "access": "0", "root_type_id": 74, "bit_offset": 0, "spec": "<type_matches> [74] struct cm_struct___fn", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 448, "type_id": 75, "kind": 12, "access": "0", "root_type_id": 75, "bit_offset": 0, "spec": "<type_matches> [75] struct cm_struct___fn_args", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 464, "type_id": 78, "kind": 12, "access": "0", "root_type_id": 78, "bit_offset": 0, "spec": "<type_matches> [78] struct cm_struct___fn_ret", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 480, "type_id": 81, "kind": 12, "access": "0", "root_type_id": 81, "bit_offset": 0, "spec": "<type_matches> [81] struct cm_struct___fn_arg_type", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 496, "type_id": 84, "kind": 12, "access": "0", "root_type_id": 84, "bit_offset": 0, "spec": "<type_matches> [84] struct cm_struct___anon", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 512, "type_id": 86, "kind": 12, "access": "0", "root_type_id": 86, "bit_offset": 0, "spec": "<type_matches> [86] struct cm_struct___anon_extra", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 528, "type_id": 88, "kind": 12, "access": "0", "root_type_id": 88, "bit_offset": 0, "spec": "<type_matches> [88] struct cm_struct___anon_type", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 544, "type_id": 90, "kind": 12, "access": "0", "root_type_id": 90, "bit_offset": 0, "spec": "<type_matches> [90] struct cm_struct___anon_type_bad", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 560, "type_id": 92, "kind": 12, "access": "0", "root_type_id": 92, "bit_offset": 0, "spec": "<type_matches> [92] struct cm_struct___members", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 576, "type_id": 95, "kind": 12, "access": "0", "root_type_id": 95, "bit_offset": 0, "spec": "<type_matches> [95] union cm_union___sub", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 592, "type_id": 96, "kind": 12, "access": "0", "root_type_id": 96, "bit_offset": 0, "spec": "<type_matches> [96] union cm_union___bad", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 608, "type_id": 97, "kind": 12, "access": "0", "root_type_id": 97, "bit_offset": 0, "spec": "<type_matches> [97] struct cm_union___struct", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 624, "type_id": 98, "kind": 12, "access": "0", "root_type_id": 98, "bit_offset": 0, "spec": "<type_matches> [98] struct cm_struct___a___b", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 640, "type_id": 99, "kind": 12, "access": "0", "root_type_id": 99, "bit_offset": 0, "spec": "<type_matches> [99] struct cm____odd___v", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 656, "type_id": 100, "kind": 12, "access": "0", "root_type_id": 100, "bit_offset": 0, "spec": "<type_matches> [100] typedef cm_struct_t___td", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 672, "type_id": 102, "kind": 12, "access": "0", "root_type_id": 102, "bit_offset": 0, "spec": "<type_matches> [102] typedef cm_fn_t___ok", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 688, "type_id": 103, "kind": 12, "access": "0", "root_type_id": 103, "bit_offset": 0, "spec": "<type_matches> [103] typedef cm_fn_t___bad", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 704, "type_id": 106, "kind": 12, "access": "0", "root_type_id": 106, "bit_offset": 0, "spec": "<type_matches> [106] struct cm_dup___m", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 720, "type_id": 107, "kind": 12, "access": "0", "root_type_id": 107, "bit_offset": 0, "spec": "<type_matches> [107] struct cm_ptr_ok___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 736, "type_id": 139, "kind": 12, "access": "0", "root_type_id": 139, "bit_offset": 0, "spec": "<type_matches> [139] struct cm_ptr_deep___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 752, "type_id": 141, "kind": 12, "access": "0", "root_type_id": 141, "bit_offset": 0, "spec": "<type_matches> [141] struct cm_deep0___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 768, "type_id": 173, "kind": 12, "access": "0", "root_type_id": 173, "bit_offset": 0, "spec": "<type_matches> [173] struct cm_shallow0___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 784, "type_id": 204, "kind": 12, "access": "0", "root_type_id": 204, "bit_offset": 0, "spec": "<type_matches> [204] typedef cm_ptr_ok_t___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 800, "type_id": 205, "kind": 12, "access": "0", "root_type_id": 205, "bit_offset": 0, "spec": "<type_matches> [205] typedef cm_ptr_deep_t___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 816, "type_id": 33, "kind": 8, "access": "0", "root_type_id": 33, "bit_offset": 0, "spec": "<type_exists> [33] struct cm_struct___missing", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 832, "type_id": 97, "kind": 8, "access": "0", "root_type_id": 97, "bit_offset": 0, "spec": "<type_exists> [97] struct cm_union___struct", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 848, "type_id": 204, "kind": 8, "access": "0", "root_type_id": 204, "bit_offset": 0, "spec": "<type_exists> [204] typedef cm_ptr_ok_t___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 864, "type_id": 205, "kind": 8, "access": "0", "root_type_id": 205, "bit_offset": 0, "spec": "<type_exists> [205] typedef cm_ptr_deep_t___l", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 880, "type_id": 32, "kind": 9, "access": "0", "root_type_id": 32, "bit_offset": 0, "spec": "<type_size> [32] struct cm_struct___subset", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 896, "type_id": 106, "kind": 9, "access": "0", "root_type_id": 106, "bit_offset": 0, "spec": "<type_size> [106] struct cm_dup___m", "accessors": [
+      ]},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 912, "type_id": 32, "kind": 7, "access": "0", "root_type_id": 32, "bit_offset": 0, "spec": "<target_type_id> [32] struct cm_struct___subset", "accessors": [
+      ]}
+  ]
+}

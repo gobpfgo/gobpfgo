@@ -6,6 +6,8 @@
 package bpf_test
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"os"
@@ -19,9 +21,14 @@ import (
 )
 
 const (
-	progsDir     = "../testdata/progs"
-	oracleDir    = "../testdata/oracle"
-	kprobeObject = progsDir + "/kprobe.bpf.o"
+	progsDir         = "../testdata/progs"
+	oracleDir        = "../testdata/oracle"
+	kprobeObject     = progsDir + "/kprobe.bpf.o"
+	globalDataObject = progsDir + "/global_data.bpf.o"
+
+	// dataMagic is the initial value of global_data.bpf.c's data_magic, the
+	// first .data variable.
+	dataMagic = 0xfeedfacecafebeef
 )
 
 // openFixture is the part of an open oracle fixture the layer exposes: the
@@ -168,8 +175,8 @@ func checkPrograms(t *testing.T, obj *bpf.Object, want []programMeta) {
 }
 
 // TestKprobeObjectOpen checks the kprobe object before Load: the lookups by
-// name, the unloaded descriptors and instructions, and a map lookup that the
-// core rejects with its own error.
+// name, the unloaded descriptors and instructions, and the map element
+// operations, which the core rejects with its own ENOENT.
 func TestKprobeObjectOpen(t *testing.T) {
 	t.Parallel()
 
@@ -198,10 +205,67 @@ func TestKprobeObjectOpen(t *testing.T) {
 
 	key := make([]byte, counts.KeySize())
 	value := make([]byte, counts.ValueSize())
-	err := counts.Lookup(key, value, 0)
+	for name, err := range map[string]error{
+		"Lookup":          counts.Lookup(key, value, 0),
+		"Update":          counts.Update(key, value, 0),
+		"Delete":          counts.Delete(key, 0),
+		"LookupAndDelete": counts.LookupAndDelete(key, value, 0),
+		"NextKey":         counts.NextKey(nil, key),
+	} {
+		var coreErr *libbpf.Error
+		if !errors.As(err, &coreErr) || coreErr.Errno != syscall.ENOENT {
+			t.Errorf("%s before Load = %v, want the core ENOENT error", name, err)
+		}
+	}
+}
+
+// TestMapInitialValueOpen checks the initial value of global_data.bpf.o's
+// .data map through the layer before Load: it is the core's buffer, a copy
+// set with SetInitialValue shows in it, and the core rejects a value of
+// another size and a .maps definition with EINVAL. After Close it is nil and
+// SetInitialValue returns ErrClosed.
+func TestMapInitialValueOpen(t *testing.T) {
+	t.Parallel()
+
+	obj, err := bpf.OpenFile(globalDataObject, nil)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	data := obj.Map(".data")
+	if data == nil {
+		t.Fatal("no .data map")
+	}
+	initial := data.InitialValue()
+	if len(initial) != int(data.ValueSize()) || binary.NativeEndian.Uint64(initial) != dataMagic {
+		t.Fatalf(".data initial value = %x, want %d bytes starting with data_magic", initial, data.ValueSize())
+	}
+
+	value := bytes.Repeat([]byte{0x5a}, len(initial))
+	if err := data.SetInitialValue(value); err != nil {
+		t.Fatalf("SetInitialValue: %v", err)
+	}
+	if !bytes.Equal(data.InitialValue(), value) {
+		t.Errorf(".data initial value = %x after the set, want %x", data.InitialValue(), value)
+	}
+	checkCoreErrno(t, "SetInitialValue with a short value", data.SetInitialValue(value[1:]), syscall.EINVAL)
+
+	obj.Close()
+	if data.InitialValue() != nil {
+		t.Error("InitialValue after Close is not nil")
+	}
+	if err := data.SetInitialValue(value); !errors.Is(err, bpf.ErrClosed) {
+		t.Errorf("SetInitialValue after Close = %v, want ErrClosed", err)
+	}
+}
+
+// checkCoreErrno fails the test unless err is the core *libbpf.Error with
+// errno.
+func checkCoreErrno(t *testing.T, what string, err error, errno syscall.Errno) {
+	t.Helper()
+
 	var coreErr *libbpf.Error
-	if !errors.As(err, &coreErr) || coreErr.Errno != syscall.EBADF {
-		t.Errorf("Lookup before Load = %v, want the core EBADF error", err)
+	if !errors.As(err, &coreErr) || coreErr.Errno != errno {
+		t.Errorf("%s = %v, want the core %v error", what, err, errno)
 	}
 }
 
@@ -369,6 +433,11 @@ func errorMethods(obj *bpf.Object, prog *bpf.Program, counts *bpf.Map) []methodC
 		{"Program.AttachLsm", func() error { return attach(prog.AttachLsm()) }},
 		{"Program.Attach", func() error { return attach(prog.Attach()) }},
 		{"Map.Lookup", func() error { return counts.Lookup(buf[:4], buf, 0) }},
+		{"Map.Update", func() error { return counts.Update(buf[:4], buf, 0) }},
+		{"Map.Delete", func() error { return counts.Delete(buf[:4], 0) }},
+		{"Map.LookupAndDelete", func() error { return counts.LookupAndDelete(buf[:4], buf, 0) }},
+		{"Map.NextKey", func() error { return counts.NextKey(nil, buf[:4]) }},
+		{"Map.SetInitialValue", func() error { return counts.SetInitialValue(buf) }},
 		{"Map.SetPinPath", func() error { return counts.SetPinPath(&path) }},
 		{"Map.Pin", func() error { return counts.Pin(&path) }},
 		{"Map.Unpin", func() error { return counts.Unpin(&path) }},
@@ -393,7 +462,7 @@ func checkClosedAccessors(t *testing.T, obj *bpf.Object, prog *bpf.Program, coun
 		t.Errorf("Program after Close = %+v, FD %d, %d insn bytes", got, prog.FD(), len(prog.Insns()))
 	}
 	if got := mapMetaOf(counts); got != (mapMeta{}) || counts.FD() != -1 || counts.IsPinned() ||
-		counts.IsInternal() || counts.PinPath() != "" {
+		counts.IsInternal() || counts.PinPath() != "" || counts.InitialValue() != nil {
 		t.Errorf("Map after Close = %+v, FD %d, pinned %v, internal %v, pin path %q",
 			got, counts.FD(), counts.IsPinned(), counts.IsInternal(), counts.PinPath())
 	}
@@ -417,8 +486,8 @@ func TestNilReceivers(t *testing.T) {
 	link.Disconnect()
 	link.Destroy()
 	if obj.Name() != "" || obj.Programs() != nil || obj.Program("x") != nil || obj.BTF() != nil ||
-		prog.FD() != -1 || m.FD() != -1 || m.PinPath() != "" || m.IsInternal() || link.FD() != -1 ||
-		link.PinPath() != "" {
+		prog.FD() != -1 || m.FD() != -1 || m.PinPath() != "" || m.IsInternal() || m.InitialValue() != nil ||
+		link.FD() != -1 || link.PinPath() != "" {
 		t.Error("a nil wrapper accessor returned a non-zero value")
 	}
 
@@ -426,6 +495,11 @@ func TestNilReceivers(t *testing.T) {
 		"Object.Load":          obj.Load(),
 		"Program.Pin":          prog.Pin("/sys/fs/bpf/x"),
 		"Map.Lookup":           m.Lookup(nil, nil, 0),
+		"Map.Update":           m.Update(nil, nil, 0),
+		"Map.Delete":           m.Delete(nil, 0),
+		"Map.LookupAndDelete":  m.LookupAndDelete(nil, nil, 0),
+		"Map.NextKey":          m.NextKey(nil, nil),
+		"Map.SetInitialValue":  m.SetInitialValue(nil),
 		"Link.UpdateProgram":   link.UpdateProgram(prog),
 		"Program.AttachKprobe": func() error { _, err := prog.AttachKprobe(false, "x"); return err }(),
 	} {

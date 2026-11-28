@@ -248,9 +248,9 @@ func TestPercpuInitialValue(t *testing.T) {
 // BPF_F_ALL_CPUS but not both.
 func TestValidateMapOp(t *testing.T) {
 	numCPU := testPossibleCPUs(t)
-	array := &BpfMap{name: "array", mapType: BPF_MAP_TYPE_ARRAY, keySize: 4, valueSize: 12}
-	percpu := &BpfMap{name: "percpu", mapType: BPF_MAP_TYPE_PERCPU_ARRAY, keySize: 4, valueSize: 12}
-	hash := &BpfMap{name: "hash", mapType: BPF_MAP_TYPE_PERCPU_HASH, keySize: 8, valueSize: 8}
+	array := loadedMap(&BpfMap{name: "array", mapType: BPF_MAP_TYPE_ARRAY, keySize: 4, valueSize: 12})
+	percpu := loadedMap(&BpfMap{name: "percpu", mapType: BPF_MAP_TYPE_PERCPU_ARRAY, keySize: 4, valueSize: 12})
+	hash := loadedMap(&BpfMap{name: "hash", mapType: BPF_MAP_TYPE_PERCPU_HASH, keySize: 8, valueSize: 8})
 	const cpu1 = BPF_F_CPU | 1<<32
 
 	for _, tc := range []struct {
@@ -278,7 +278,7 @@ func TestValidateMapOp(t *testing.T) {
 		{"per-CPU hash all values", hash, 8, numCPU * 8, 0, true},
 		{"per-CPU hash single value", hash, 8, 8, 0, false},
 	} {
-		err := validateMapOp(tc.m, tc.keySize, tc.valueSize, tc.flags)
+		err := validateMapOp("op", tc.m, tc.keySize, tc.valueSize, true, tc.flags)
 		if (err == nil) != tc.ok {
 			t.Errorf("%s: validateMapOp(key %d, value %d, flags %#x) = %v, want ok %v",
 				tc.name, tc.keySize, tc.valueSize, tc.flags, err, tc.ok)
@@ -296,6 +296,9 @@ func TestValidateMapOp(t *testing.T) {
 // EPERM or EACCES.
 func TestPercpuDataPopulate(t *testing.T) {
 	obj := openPercpu(t, percpuObject)
+	// The maps count as created once a load runs, as BpfObjectLoad marks
+	// the object before it creates them.
+	obj.attempted = true
 
 	for _, section := range percpuSections {
 		m := globalDataMap(t, obj, section)

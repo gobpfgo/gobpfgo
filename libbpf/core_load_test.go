@@ -7,7 +7,10 @@ package libbpf
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/btf"
@@ -79,11 +82,11 @@ func TestCoreRelocLoad(t *testing.T) {
 		t.Fatalf("target offset = %d, want %d", res.NewVal, wantOff)
 	}
 
-	insns := append([]byte(nil), p.insns...)
-	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{kernel}); err != nil {
+	insns, err := coreRelocatedInsns(obj, ext, []*btf.Spec{kernel})
+	if err != nil {
 		t.Fatalf("relocateCore: %v", err)
 	}
-	insn := decodeBpfInsn(insns[relo.InsnOff:])
+	insn := decodeBpfInsn(insns[p][relo.InsnOff:])
 	if uint64(insn.Off) != wantOff {
 		t.Fatalf("patched offset = %d, want %d", insn.Off, wantOff)
 	}
@@ -133,21 +136,31 @@ func TestCoreModuleCandidate(t *testing.T) {
 		t.Fatalf("parse module target: %v", err)
 	}
 
-	insns := append([]byte(nil), p.insns...)
-	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{empty, module}); err != nil {
+	insns, err := coreRelocatedInsns(obj, ext, []*btf.Spec{empty, module})
+	if err != nil {
 		t.Fatalf("relocateCore with module: %v", err)
 	}
-	if got := decodeBpfInsn(insns[relo.InsnOff:]); got.Imm != 1 {
+	if got := decodeBpfInsn(insns[p][relo.InsnOff:]); got.Imm != 1 {
 		t.Fatalf("module type exists = %d, want 1", got.Imm)
 	}
 
-	insns = append([]byte(nil), p.insns...)
-	if err := relocateCore(p, insns, ext, obj.btf, []*btf.Spec{empty}); err != nil {
+	insns, err = coreRelocatedInsns(obj, ext, []*btf.Spec{empty})
+	if err != nil {
 		t.Fatalf("relocateCore without module: %v", err)
 	}
-	if got := decodeBpfInsn(insns[relo.InsnOff:]); got.Imm != 0 {
+	if got := decodeBpfInsn(insns[p][relo.InsnOff:]); got.Imm != 0 {
 		t.Fatalf("missing type exists = %d, want 0", got.Imm)
 	}
+}
+
+// coreRelocatedInsns returns a copy of the instructions of every program of
+// obj, with the CO-RE records of ext applied against kernels.
+func coreRelocatedInsns(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec) (map[*BpfProgram][]byte, error) {
+	insns := make(map[*BpfProgram][]byte, len(obj.programs))
+	for _, p := range obj.programs {
+		insns[p] = slices.Clone(p.insns)
+	}
+	return insns, relocateCore(obj, insns, ext, kernels)
 }
 
 func TestLoadKernelBTFs(t *testing.T) {
@@ -184,5 +197,36 @@ func TestCoreMissingLoad(t *testing.T) {
 			t.Skipf("bpf() not permitted: %v", err)
 		}
 		t.Fatalf("BpfObjectLoad: %v", err)
+	}
+}
+
+// TestCoreFailedLoad loads core_failed.bpf.o, whose program reads a field of
+// a struct no kernel has without checking that it exists. The relocation
+// finds no target, so the load poisons the read, the verifier reaches it and
+// the program fails to load with EINVAL. The log fixup replaces the poisoned
+// call and the verifier's error for it with the instruction index and the
+// relocation's spec. It needs root or CAP_BPF and skips otherwise, and skips
+// without kernel BTF, which the relocation is resolved against.
+func TestCoreFailedLoad(t *testing.T) {
+	requireKernelBTF(t)
+	obj := openProg(t, "core_failed.bpf.o")
+	missing := obj.btf.Find("gobpfgo_missing", btf.KindStruct)
+	if missing == nil {
+		t.Fatal("no struct gobpfgo_missing")
+	}
+
+	err := BpfObjectLoad(obj)
+	skipIfNotPermitted(t, err)
+	var lerr *Error
+	if !errors.As(err, &lerr) || lerr.Op != "bpf_prog_load" || !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("load: %v, want a bpf_prog_load EINVAL for the poisoned read", err)
+	}
+	want := fmt.Sprintf("0: <invalid CO-RE relocation>\n"+
+		"failed to resolve CO-RE relocation <byte_off> [%d] struct gobpfgo_missing.field (0:1 @ offset 4)\n", missing.ID)
+	if !strings.HasPrefix(lerr.Log, "handle_core_failed: ") || !strings.Contains(lerr.Log, want) {
+		t.Errorf("load log = %q, want the handle_core_failed log with %q", lerr.Log, want)
+	}
+	if strings.Contains(lerr.Log, "unknown#195896080") {
+		t.Errorf("load log = %q, still has the poisoned call", lerr.Log)
 	}
 }

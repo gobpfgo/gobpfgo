@@ -128,6 +128,11 @@ int oracle_layout(void) {
 		F(value),
 		F(flags),
 	};
+	static const struct oracle_field map_next_key_fields[] = {
+		F(map_fd),
+		F(key),
+		F(next_key),
+	};
 	static const struct oracle_field obj_pin_fields[] = {
 		F(pathname),
 		F(bpf_fd),
@@ -216,6 +221,7 @@ int oracle_layout(void) {
 	oracle_field_block(&j, "link_update", link_update_fields, ORACLE_ARRAY_SIZE(link_update_fields), ORACLE_OFFSETOFEND(union bpf_attr, link_update));
 	oracle_field_block(&j, "raw_tracepoint", raw_tracepoint_fields, ORACLE_ARRAY_SIZE(raw_tracepoint_fields), ORACLE_OFFSETOFEND(union bpf_attr, raw_tracepoint));
 	oracle_field_block(&j, "map_elem", map_elem_fields, ORACLE_ARRAY_SIZE(map_elem_fields), ORACLE_OFFSETOFEND(union bpf_attr, flags));
+	oracle_field_block(&j, "map_next_key", map_next_key_fields, ORACLE_ARRAY_SIZE(map_next_key_fields), ORACLE_OFFSETOFEND(union bpf_attr, next_key));
 	oracle_field_block(&j, "obj_pin", obj_pin_fields, ORACLE_ARRAY_SIZE(obj_pin_fields), ORACLE_OFFSETOFEND(union bpf_attr, path_fd));
 	oracle_field_block(&j, "get_next_id", get_next_id_fields, ORACLE_ARRAY_SIZE(get_next_id_fields), ORACLE_OFFSETOFEND(union bpf_attr, open_flags));
 	oracle_field_block(&j, "btf_get_fd_by_id", btf_get_fd_by_id_fields, ORACLE_ARRAY_SIZE(btf_get_fd_by_id_fields), ORACLE_OFFSETOFEND(union bpf_attr, fd_by_id_token_fd));

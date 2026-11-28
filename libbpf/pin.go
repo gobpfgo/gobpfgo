@@ -167,11 +167,15 @@ func BpfProgramUnpin(p *BpfProgram, path string) error {
 // autocreate cleared, such as a per-CPU data map on a kernel without global
 // per-CPU data, are skipped and get no pin. If a pin fails, the maps pinned
 // by this call are unpinned.
+//
+// The call fails with ENOENT for a nil or closed object and before
+// BpfObjectLoad, even when no map would be pinned. After a failed load the
+// maps have no descriptor, so pinning one fails with EINVAL.
 func BpfObjectPinMaps(obj *BpfObject, path *string) error {
 	const op = "bpf_object__pin_maps"
 
-	if !objectMapsLoaded(obj) {
-		return &Error{Op: op, Errno: unix.ENOENT}
+	if !objectPrepared(obj) {
+		return &Error{Op: op, Errno: unix.ENOENT, Log: "object not yet loaded; load it first"}
 	}
 
 	pinned := make([]*BpfMap, 0, len(obj.maps))
@@ -320,18 +324,10 @@ func BpfObjectUnpin(obj *BpfObject, path string) error {
 	return BpfObjectUnpinMaps(obj, &path)
 }
 
-// objectMapsLoaded reports whether obj is open and every map the load creates
-// has a descriptor. Maps with autocreate cleared are not checked.
-func objectMapsLoaded(obj *BpfObject) bool {
-	if obj == nil || obj.closed {
-		return false
-	}
-	for _, m := range obj.maps {
-		if m.autocreate && m.fd < 0 {
-			return false
-		}
-	}
-	return true
+// objectPrepared reports whether obj is open and BpfObjectLoad has run on
+// it, successfully or not.
+func objectPrepared(obj *BpfObject) bool {
+	return obj != nil && !obj.closed && obj.attempted
 }
 
 // objectProgramsLoaded reports whether obj has programs and all of them are

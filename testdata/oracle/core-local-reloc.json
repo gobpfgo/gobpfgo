@@ -1,0 +1,18 @@
+{
+  "case": "core-match",
+  "libbpf_version": "1.9.0",
+  "arch": "x86_64",
+  "kernel": "6.18.63-3-lts",
+  "object": "core_local.bpf.o",
+  "target": "core_target.bpf.o",
+  "relos": [
+    {"section": "kprobe/do_sys_openat2", "insn_off": 0, "type_id": 5, "kind": 2, "access": "0:0", "name": "gobpfgo_local_missing", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 32, "type_id": 5, "kind": 8, "access": "0", "name": "gobpfgo_local_missing", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": false, "new_insn": {"code": 183, "dst": 2, "src": 0, "off": 0, "imm": 0}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 48, "type_id": 5, "kind": 3, "access": "0:0", "name": "gobpfgo_local_missing", "cands": [
+      ], "err": 0, "orig_val": 1, "new_val": 0, "validate": true, "poison": true, "new_insn": {"code": 133, "dst": 0, "src": 0, "off": 0, "imm": 195896080}},
+    {"section": "kprobe/do_sys_openat2", "insn_off": 64, "type_id": 5, "kind": 3, "access": "0:1:1", "name": "gobpfgo_local_missing", "cands": [
+      ], "err": -22}
+  ]
+}

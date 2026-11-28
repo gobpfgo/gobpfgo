@@ -9,6 +9,7 @@ package sys
 
 import (
 	"encoding/binary"
+	"errors"
 	"runtime"
 
 	"golang.org/x/sys/unix"
@@ -139,6 +140,11 @@ func progLoadFieldLayout() []fieldLayout {
 	}
 }
 
+// progLoadAttempts is how many times ProgLoad retries a load that returns
+// EAGAIN, which the verifier returns when a signal is pending. It matches
+// libbpf's PROG_LOAD_ATTEMPTS.
+const progLoadAttempts = 5
+
 // ProgLoad loads a BPF program into the kernel and returns its file
 // descriptor. insns and license are copied by the kernel during the call;
 // logBuf may be nil or a buffer for the verifier log. funcInfo and lineInfo
@@ -146,6 +152,10 @@ func progLoadFieldLayout() []fieldLayout {
 // fdArray may be nil or the native-endian 32-bit descriptors a kfunc call
 // names by index in its offset field; its count is not passed, as libbpf
 // does not pass it.
+//
+// A load that fails with EAGAIN is retried up to progLoadAttempts times, as
+// libbpf does, because the verifier returns it when a signal is pending.
+// Every other error is returned at once.
 //
 // The caller sets ProgType, InsnCnt, ProgFlags, ExpectedAttachType and
 // ProgBtfFD before calling, plus the record size and count of each record
@@ -172,7 +182,14 @@ func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo, fd
 		attr.FdArray = uint64(addr(fdArray))
 	}
 
-	fd, err := bpf(BPF_PROG_LOAD, attr.Marshal())
+	var fd uintptr
+	var err error
+	for attempt := 0; attempt < progLoadAttempts; attempt++ {
+		fd, err = bpf(BPF_PROG_LOAD, attr.Marshal())
+		if err == nil || !errors.Is(err, unix.EAGAIN) {
+			break
+		}
+	}
 	runtime.KeepAlive(insns)
 	runtime.KeepAlive(license)
 	runtime.KeepAlive(logBuf)
