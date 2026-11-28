@@ -471,7 +471,10 @@ func BpfProgramAttachLsm(prog *BpfProgram) (*BpfLink, error) {
 // attach: kprobe, kretprobe, kprobe.multi, kprobe.session, uprobe, uretprobe,
 // tracepoint, tp, raw tracepoint, fentry, fexit, fmod_ret, tp_btf and lsm.
 // Sections without an automatic attach, such as cgroup, xdp, sk_msg and
-// flow_dissector, return EOPNOTSUPP.
+// flow_dissector, return EOPNOTSUPP. So does the bare kprobe.session
+// section, which names no function: libbpf's attach_kprobe_session returns
+// success without a link for it, and bpf_program__attach reports a missing
+// link as EOPNOTSUPP.
 func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 	const op = "bpf_program__attach"
 	if err := checkAttachProgram(prog, op); err != nil {
@@ -501,6 +504,8 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 			Symbols: []string{target},
 			Session: true,
 		})
+	case "kprobe.session":
+		return nil, attachErr(op, unix.EOPNOTSUPP)
 	case "uprobe/", "uretprobe/", "uprobe.s/", "uretprobe.s/":
 		sep := strings.LastIndexByte(target, ':')
 		if sep < 0 {

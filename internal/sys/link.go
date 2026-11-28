@@ -61,8 +61,10 @@ const (
 // KprobeMulti fields for the kprobe multi and session types, the UprobeMulti
 // fields for the uprobe multi and session types, TracingCookie for the
 // tracing and LSM types and the Cgroup fields for the cgroup, LSM cgroup and
-// struct_ops types. Fields of the other members are not written. LinkCreate
-// fills the pointer fields for the kprobe multi variant and
+// struct_ops types. Marshal does not write the fields of the other members,
+// and LinkCreate and LinkCreateUprobeMulti refuse them with EINVAL, as
+// libbpf's bpf_link_create refuses options outside the selected member.
+// LinkCreate fills the pointer fields for the kprobe multi variant and
 // LinkCreateUprobeMulti for the uprobe multi variant; the other callers set
 // the value fields directly.
 type LinkCreateAttr struct {
@@ -131,19 +133,19 @@ func (a *LinkCreateAttr) Marshal() []byte {
 		return buf
 	}
 
-	switch {
-	case a.AttachType == BPF_TRACE_ITER:
+	switch linkMemberFor(a.AttachType) {
+	case linkMemberIter:
 		binary.NativeEndian.PutUint64(buf[linkCreateOffIterInfo:], a.IterInfo)
 		binary.NativeEndian.PutUint32(buf[linkCreateOffIterInfoLen:], a.IterInfoLen)
-	case a.AttachType == BPF_PERF_EVENT:
+	case linkMemberPerfEvent:
 		binary.NativeEndian.PutUint64(buf[linkCreateOffPerfEventCookie:], a.PerfEventCookie)
-	case isKprobeMultiAttach(a.AttachType):
+	case linkMemberKprobeMulti:
 		binary.NativeEndian.PutUint32(buf[linkCreateOffKprobeMultiFlag:], a.KprobeMultiFlags)
 		binary.NativeEndian.PutUint32(buf[linkCreateOffKprobeMultiCnt:], a.KprobeMultiCnt)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiSyms:], a.KprobeMultiSyms)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiAddr:], a.KprobeMultiAddrs)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffKprobeMultiCook:], a.KprobeMultiCookies)
-	case isUprobeMultiAttach(a.AttachType):
+	case linkMemberUprobeMulti:
 		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiPath:], a.UprobeMultiPath)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiOffs:], a.UprobeMultiOffsets)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffUprobeMultiRef:], a.UprobeMultiRefCtrOffsets)
@@ -151,10 +153,10 @@ func (a *LinkCreateAttr) Marshal() []byte {
 		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiCnt:], a.UprobeMultiCnt)
 		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiFlag:], a.UprobeMultiFlags)
 		binary.NativeEndian.PutUint32(buf[linkCreateOffUprobeMultiPID:], a.UprobeMultiPID)
-	case isTracingAttach(a.AttachType):
+	case linkMemberTracing:
 		binary.NativeEndian.PutUint32(buf[linkCreateOffTracingBTFID:], 0)
 		binary.NativeEndian.PutUint64(buf[linkCreateOffTracingCookie:], a.TracingCookie)
-	case isCgroupAttach(a.AttachType):
+	case linkMemberCgroup:
 		a.marshalCgroup(buf)
 	}
 
@@ -175,54 +177,83 @@ func (a *LinkCreateAttr) marshalCgroup(buf []byte) {
 }
 
 // validate applies the BPF_LINK_CREATE input rules that do not need the
-// kernel and returns EINVAL when one is broken. Iterator info needs
-// BPF_TRACE_ITER. A target BTF id and iterator info exclude each other and
-// every union field. Otherwise a cgroup link takes at most one of the
-// relative descriptor and id, and an attach type without a union member
-// takes no union field. Fields of another member than the one AttachType
-// selects are ignored, as Marshal does not write them.
+// kernel and returns EINVAL when one is broken. A nonzero TargetBTFID is the
+// union member whatever the attach type, as in libbpf, whose freplace attach
+// passes it with attach type 0, BPF_CGROUP_INET_INGRESS. Otherwise AttachType
+// selects the member as in Marshal, and an attach type without a member
+// selects none. A nonzero field of any member but the selected one is
+// refused, so iterator info needs BPF_TRACE_ITER and a target BTF id takes no
+// other union field. A cgroup link also takes at most one of the relative
+// descriptor and id.
 func (a *LinkCreateAttr) validate() error {
-	if a.IterInfoLen != 0 && a.AttachType != BPF_TRACE_ITER {
+	member := linkMemberFor(a.AttachType)
+	if a.TargetBTFID != 0 {
+		member = linkMemberNone
+	}
+	for m := linkMemberIter; m <= linkMemberCgroup; m++ {
+		if m != member && a.memberSet(m) {
+			return unix.EINVAL
+		}
+	}
+	if member == linkMemberCgroup && a.CgroupRelativeFD != 0 && a.CgroupRelativeID != 0 {
 		return unix.EINVAL
-	}
-	if a.IterInfoLen != 0 || a.TargetBTFID != 0 {
-		if a.IterInfoLen != 0 && a.TargetBTFID != 0 || a.unionFieldSet() {
-			return unix.EINVAL
-		}
-		return nil
-	}
-
-	switch {
-	case isCgroupAttach(a.AttachType):
-		if a.CgroupRelativeFD != 0 && a.CgroupRelativeID != 0 {
-			return unix.EINVAL
-		}
-	case !hasUnionMember(a.AttachType):
-		if a.unionFieldSet() {
-			return unix.EINVAL
-		}
 	}
 	return nil
 }
 
-// unionFieldSet reports whether a field of the perf event, kprobe multi,
-// tracing, uprobe multi or cgroup member is nonzero.
-func (a *LinkCreateAttr) unionFieldSet() bool {
-	return a.PerfEventCookie != 0 ||
-		a.KprobeMultiFlags != 0 || a.KprobeMultiCnt != 0 || a.KprobeMultiSyms != 0 ||
-		a.KprobeMultiAddrs != 0 || a.KprobeMultiCookies != 0 ||
-		a.TracingCookie != 0 ||
-		a.UprobeMultiPath != 0 || a.UprobeMultiOffsets != 0 || a.UprobeMultiRefCtrOffsets != 0 ||
-		a.UprobeMultiCookies != 0 || a.UprobeMultiCnt != 0 || a.UprobeMultiFlags != 0 || a.UprobeMultiPID != 0 ||
-		a.CgroupRelativeFD != 0 || a.CgroupRelativeID != 0 || a.CgroupExpectedRevision != 0
+// linkMember names a member of the BPF_LINK_CREATE union, after the target
+// BTF id.
+type linkMember int
+
+const (
+	linkMemberNone linkMember = iota
+	linkMemberIter
+	linkMemberPerfEvent
+	linkMemberKprobeMulti
+	linkMemberUprobeMulti
+	linkMemberTracing
+	linkMemberCgroup
+)
+
+// linkMemberFor returns the union member attachType selects, or
+// linkMemberNone for an attach type without one, such as BPF_XDP.
+func linkMemberFor(attachType uint32) linkMember {
+	switch {
+	case attachType == BPF_TRACE_ITER:
+		return linkMemberIter
+	case attachType == BPF_PERF_EVENT:
+		return linkMemberPerfEvent
+	case isKprobeMultiAttach(attachType):
+		return linkMemberKprobeMulti
+	case isUprobeMultiAttach(attachType):
+		return linkMemberUprobeMulti
+	case isTracingAttach(attachType):
+		return linkMemberTracing
+	case isCgroupAttach(attachType):
+		return linkMemberCgroup
+	}
+	return linkMemberNone
 }
 
-// hasUnionMember reports whether attachType selects a member of the union in
-// Marshal.
-func hasUnionMember(attachType uint32) bool {
-	return attachType == BPF_TRACE_ITER || attachType == BPF_PERF_EVENT ||
-		isKprobeMultiAttach(attachType) || isUprobeMultiAttach(attachType) ||
-		isTracingAttach(attachType) || isCgroupAttach(attachType)
+// memberSet reports whether a field of member m is nonzero.
+func (a *LinkCreateAttr) memberSet(m linkMember) bool {
+	switch m {
+	case linkMemberIter:
+		return a.IterInfo != 0 || a.IterInfoLen != 0
+	case linkMemberPerfEvent:
+		return a.PerfEventCookie != 0
+	case linkMemberKprobeMulti:
+		return a.KprobeMultiFlags != 0 || a.KprobeMultiCnt != 0 || a.KprobeMultiSyms != 0 ||
+			a.KprobeMultiAddrs != 0 || a.KprobeMultiCookies != 0
+	case linkMemberUprobeMulti:
+		return a.UprobeMultiPath != 0 || a.UprobeMultiOffsets != 0 || a.UprobeMultiRefCtrOffsets != 0 ||
+			a.UprobeMultiCookies != 0 || a.UprobeMultiCnt != 0 || a.UprobeMultiFlags != 0 || a.UprobeMultiPID != 0
+	case linkMemberTracing:
+		return a.TracingCookie != 0
+	case linkMemberCgroup:
+		return a.CgroupRelativeFD != 0 || a.CgroupRelativeID != 0 || a.CgroupExpectedRevision != 0
+	}
+	return false
 }
 
 func isKprobeMultiAttach(attachType uint32) bool {
@@ -266,11 +297,20 @@ func isCgroupAttach(attachType uint32) bool {
 
 // LinkCreate calls BPF_LINK_CREATE and returns the new link descriptor. When
 // km is non-nil, its arrays are copied into the attribute and kept alive until
-// the syscall returns.
+// the syscall returns; AttachType must then be BPF_TRACE_KPROBE_MULTI or
+// BPF_TRACE_KPROBE_SESSION, the types that select the kprobe multi member,
+// or the call returns EINVAL before it fills the arrays. It also returns
+// EINVAL for a nil attr and for the attributes validate refuses.
 func LinkCreate(attr *LinkCreateAttr, km *LinkKprobeMulti) (int, error) {
 	var keeps [][]byte
 
+	if attr == nil {
+		return -1, unix.EINVAL
+	}
 	if km != nil {
+		if !isKprobeMultiAttach(attr.AttachType) {
+			return -1, unix.EINVAL
+		}
 		if attr.TargetBTFID != 0 || attr.PerfEventCookie != 0 || attr.TracingCookie != 0 {
 			return -1, unix.EINVAL
 		}
@@ -315,6 +355,8 @@ func LinkCreate(attr *LinkCreateAttr, km *LinkKprobeMulti) (int, error) {
 // LinkCreateUprobeMulti calls BPF_LINK_CREATE for a uprobe multi link and
 // returns the new link descriptor. The path and arrays of um are copied into
 // the attribute and kept alive until the syscall returns. It returns EINVAL
+// before it fills the arrays when AttachType is not BPF_TRACE_UPROBE_MULTI or
+// BPF_TRACE_UPROBE_SESSION, the types that select the uprobe multi member,
 // when the path is empty or contains a NUL byte, when Offsets is empty, when
 // RefCtrOffsets or Cookies is set with a different length, or when attr
 // already uses another member of the union.
@@ -330,7 +372,7 @@ func LinkCreateUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) (int, erro
 // points the uprobe multi fields of attr at them. It returns the buffers,
 // which must stay alive until the syscall returns.
 func setUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) ([][]byte, error) {
-	if attr == nil || um == nil {
+	if attr == nil || um == nil || !isUprobeMultiAttach(attr.AttachType) {
 		return nil, unix.EINVAL
 	}
 	if attr.TargetBTFID != 0 || attr.PerfEventCookie != 0 || attr.TracingCookie != 0 || attr.KprobeMultiCnt != 0 {

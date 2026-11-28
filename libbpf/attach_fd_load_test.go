@@ -28,12 +28,17 @@ import (
 // rather than from its version.
 
 // TestBpfProgramAttachCgroup attaches each program of cgroup.bpf.o to the
-// cgroup v2 root, with and without options, and checks the cgroup link and
-// its attach type.
+// cgroup v2 root, with and without options, and checks the cgroup link, its
+// attach type and its cgroup id, which on 64-bit Linux is the inode number of
+// the cgroup directory.
 func TestBpfProgramAttachCgroup(t *testing.T) {
 	obj := loadTestObject(t, progsDir+"/cgroup.bpf.o")
 	defer BpfObjectClose(obj)
 	cgroupFD := openCgroupV2Root(t)
+	var st unix.Stat_t
+	if err := unix.Fstat(cgroupFD, &st); err != nil {
+		t.Fatalf("stat cgroup: %v", err)
+	}
 
 	attaches := map[string]func(*BpfProgram) (*BpfLink, error){
 		"plain":       func(p *BpfProgram) (*BpfLink, error) { return BpfProgramAttachCgroup(p, cgroupFD) },
@@ -52,6 +57,7 @@ func TestBpfProgramAttachCgroup(t *testing.T) {
 					t.Fatalf("attach: %v", err)
 				}
 				checkLinkFdinfo(t, link, prog, "cgroup", map[string]string{
+					"cgroup_id":   strconv.FormatUint(st.Ino, 10),
 					"attach_type": strconv.Itoa(int(prog.expectedAttachType)),
 				})
 				destroyLink(t, link)
@@ -89,7 +95,7 @@ func TestBpfProgramAttachCgroupOptsPlacement(t *testing.T) {
 		RelativeID: anchorID,
 	})
 	if err != nil {
-		skipIfKernelLacks(t, "cgroup program revisions", kernelStructHasMember("cgroup_bpf", "revisions"), err)
+		skipIfKernelLacks(t, "cgroup program revisions", kernelStructHasMember(t, "cgroup_bpf", "revisions"), err)
 		t.Fatalf("attach before link id %d: %v", anchorID, err)
 	}
 	defer destroyLink(t, before)
@@ -196,7 +202,7 @@ func TestBpfProgramAttachSockmap(t *testing.T) {
 	link, err := BpfProgramAttachSockmap(prog, mapFD)
 	if err != nil {
 		skipIfNotPermitted(t, err)
-		skipIfKernelLacks(t, "sockmap links", kernelEnumHas("bpf_link_type", "BPF_LINK_TYPE_SOCKMAP"), err)
+		skipIfKernelLacks(t, "sockmap links", kernelEnumHas(t, "bpf_link_type", "BPF_LINK_TYPE_SOCKMAP"), err)
 		t.Fatalf("attach: %v", err)
 	}
 	checkLinkFdinfo(t, link, prog, "sockmap", map[string]string{
@@ -278,7 +284,7 @@ func skipIfKernelLacksKprobeSession(t *testing.T, err error) {
 	if errors.Is(err, unix.EOPNOTSUPP) {
 		t.Skipf("kprobe multi links are not supported by this kernel: %v", err)
 	}
-	skipIfKernelLacks(t, "kprobe sessions", kernelEnumHas("bpf_attach_type", "BPF_TRACE_KPROBE_SESSION"), err)
+	skipIfKernelLacks(t, "kprobe sessions", kernelEnumHas(t, "bpf_attach_type", "BPF_TRACE_KPROBE_SESSION"), err)
 }
 
 // skipIfKernelLacks skips the test with err when has is false, that is when
@@ -293,12 +299,15 @@ func skipIfKernelLacks(t *testing.T, feature string, has bool, err error) {
 }
 
 // kernelEnumHas reports whether the running kernel's BTF has the enum
-// enumName with the value valueName. It reports false when the kernel BTF
-// cannot be read.
-func kernelEnumHas(enumName, valueName string) bool {
+// enumName with the value valueName. It fails the test when the kernel BTF
+// cannot be read, so that an unreadable BTF does not pass for a missing
+// feature and skip the test.
+func kernelEnumHas(t *testing.T, enumName, valueName string) bool {
+	t.Helper()
+
 	kernel, err := vmlinuxBTF()
 	if err != nil {
-		return false
+		t.Fatalf("read kernel BTF for enum %s: %v", enumName, err)
 	}
 	enum := kernel.Find(enumName, btf.KindEnum)
 	if enum == nil {
@@ -313,12 +322,14 @@ func kernelEnumHas(enumName, valueName string) bool {
 }
 
 // kernelStructHasMember reports whether the running kernel's BTF has the
-// struct structName with the member member. It reports false when the
-// kernel BTF cannot be read.
-func kernelStructHasMember(structName, member string) bool {
+// struct structName with the member member. It fails the test when the
+// kernel BTF cannot be read, like kernelEnumHas.
+func kernelStructHasMember(t *testing.T, structName, member string) bool {
+	t.Helper()
+
 	kernel, err := vmlinuxBTF()
 	if err != nil {
-		return false
+		t.Fatalf("read kernel BTF for struct %s: %v", structName, err)
 	}
 	st := kernel.Find(structName, btf.KindStruct)
 	return st != nil && kernel.Member(st, member) != nil

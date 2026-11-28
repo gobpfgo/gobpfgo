@@ -260,6 +260,16 @@ func TestBpfProgramAttachKprobeMultiSessionRetprobe(t *testing.T) {
 	checkAttachError(t, link, err, "bpf_program__attach_kprobe_multi", unix.EINVAL)
 }
 
+// TestBpfProgramAttachBareKprobeSession checks that the automatic attach of
+// the bare kprobe.session section, which names no function, returns
+// EOPNOTSUPP and no link before bpf(), as libbpf's bpf_program__attach does
+// when attach_kprobe_session returns no link.
+func TestBpfProgramAttachBareKprobeSession(t *testing.T) {
+	prog := &BpfProgram{fd: fakeLoadedFD, sectionName: "kprobe.session", expectedAttachType: BPF_TRACE_KPROBE_SESSION}
+	link, err := BpfProgramAttach(prog)
+	checkAttachError(t, link, err, "bpf_program__attach", unix.EOPNOTSUPP)
+}
+
 // TestAttachTypeValuesMatchKernel compares the attach type values of this
 // package and of internal/sys with the running kernel's enum bpf_attach_type.
 // A name the kernel does not know is skipped; the test skips when the kernel
