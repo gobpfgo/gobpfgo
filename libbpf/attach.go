@@ -235,8 +235,9 @@ func BpfProgramAttachRawTracepointOpts(prog *BpfProgram, name string, opts *BpfR
 //
 // A Pattern without '*' or '?' is one function name, passed to the kernel
 // like a single entry of Symbols. Any other Pattern is resolved to the
-// addresses of the matching traceable kernel functions, in the order tracefs
-// lists them, which are passed like Addrs. Resolution reads tracefs
+// addresses of the matching traceable kernel functions, in the order the
+// selected source lists them (tracefs, or /proc/kallsyms on the fallback),
+// which are passed like Addrs. Resolution reads tracefs
 // available_filter_functions_addrs when the caller can read it, and otherwise
 // the names in available_filter_functions with their addresses from
 // /proc/kallsyms; both need root on most systems. A file that cannot be
@@ -277,7 +278,7 @@ func kprobeMultiLink(prog *BpfProgram, opts *BpfKprobeMultiOpts, resolve kprobeP
 	}
 	syms, addrs := opts.Symbols, opts.Addrs
 	if opts.Pattern != "" {
-		if len(syms) > 0 || len(addrs) > 0 || len(opts.Cookies) > 0 {
+		if syms != nil || addrs != nil || opts.Cookies != nil {
 			return nil, nil, unix.EINVAL
 		}
 	} else if (len(syms) > 0) == (len(addrs) > 0) {
@@ -613,15 +614,31 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 }
 
 // kprobeMultiSectionOpts returns the kprobe multi options of a kprobe.multi/,
-// kretprobe.multi/ or kprobe.session/ section: the text after prefix is the
-// pattern, kept whole. An empty target leaves no function and fails the
-// attach with EINVAL.
+// kretprobe.multi/ or kprobe.session/ section. The text after prefix is the
+// pattern, cut at the first byte outside [a-zA-Z0-9_.*?], as libbpf's
+// section parser does; a "+offset" suffix is not part of the pattern. An
+// empty target leaves no function and fails the attach with EINVAL.
 func kprobeMultiSectionOpts(prefix, target string) *BpfKprobeMultiOpts {
 	return &BpfKprobeMultiOpts{
-		Pattern:  target,
+		Pattern:  kprobeSectionPattern(target),
 		Retprobe: prefix == "kretprobe.multi/",
 		Session:  prefix == "kprobe.session/",
 	}
+}
+
+// kprobeSectionPattern cuts target at the first byte libbpf's
+// [a-zA-Z0-9_.*?] section scan does not accept.
+func kprobeSectionPattern(target string) string {
+	for i := 0; i < len(target); i++ {
+		c := target[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '_', c == '.', c == '*', c == '?':
+			continue
+		}
+		return target[:i]
+	}
+	return target
 }
 
 // checkAttachProgram rejects a nil or unloaded program.

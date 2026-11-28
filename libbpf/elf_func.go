@@ -114,11 +114,10 @@ func findFuncOffsetFromArchive(archivePath, fileName, funcName string) (uint64, 
 //
 // The static symbol table is searched first. Only when it is missing or has
 // no match is the dynamic symbol table searched, so a function listed in
-// both is found once. Names are matched as stored, so a versioned static
-// symbol such as "puts@GLIBC_2.2.5" needs a pattern that covers the suffix,
-// while the dynamic table stores the bare name. Every STT_FUNC symbol whose
-// section index names a section counts, an undefined one included: its
-// offset is its value, usually 0.
+// both is found once. Names are matched as the symbol table stores them;
+// debug/elf does not append the .gnu.version suffix. Only STT_FUNC symbols that
+// name a section count; an undefined symbol, SHN_UNDEF, has no file offset
+// and is skipped, as libbpf's symbol iterator skips it.
 //
 // An error opening path returns its errno, a file that is not ELF or has a
 // symbol table it cannot read returns EINVAL, and no match returns ENOENT.
@@ -142,13 +141,17 @@ func elfResolvePatternOffsets(path, pattern string) ([]uint64, error) {
 
 		var offsets []uint64
 		for _, sym := range syms {
-			if elf.ST_TYPE(sym.Info) != elf.STT_FUNC || int(sym.Section) >= len(f.Sections) {
+			if elf.ST_TYPE(sym.Info) != elf.STT_FUNC || sym.Section == elf.SHN_UNDEF ||
+				int(sym.Section) >= len(f.Sections) {
 				continue
 			}
 			if !globMatch(sym.Name, pattern) {
 				continue
 			}
 			section := f.Sections[sym.Section]
+			if sym.Value < section.Addr {
+				continue
+			}
 			offsets = append(offsets, sym.Value-section.Addr+section.Offset)
 		}
 		if len(offsets) > 0 {
@@ -173,10 +176,17 @@ func elfSymbolTable(f *elf.File, typ elf.SectionType) ([]elf.Symbol, error) {
 	if section.Size == 0 {
 		return nil, nil
 	}
+	var syms []elf.Symbol
+	var err error
 	if typ == elf.SHT_DYNSYM {
-		return f.DynamicSymbols()
+		syms, err = f.DynamicSymbols()
+	} else {
+		syms, err = f.Symbols()
 	}
-	return f.Symbols()
+	if errors.Is(err, elf.ErrNoSymbols) {
+		return nil, nil
+	}
+	return syms, err
 }
 
 // findUprobeFuncOffset resolves funcName for a uprobe on binaryPath and
