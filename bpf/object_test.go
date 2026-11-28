@@ -428,6 +428,11 @@ func errorMethods(obj *bpf.Object, prog *bpf.Program, counts *bpf.Map) []methodC
 		{"Program.AttachKprobeMulti", func() error { return attach(prog.AttachKprobeMulti(nil)) }},
 		{"Program.AttachUprobeMulti", func() error { return attach(prog.AttachUprobeMulti(-1, "/bin/true", "", nil)) }},
 		{"Program.AttachUsdt", func() error { return attach(prog.AttachUsdt(-1, "/bin/true", "provider", "name", nil)) }},
+		{"Program.AttachCgroup", func() error { return attach(prog.AttachCgroup(0)) }},
+		{"Program.AttachCgroupOpts", func() error { return attach(prog.AttachCgroupOpts(0, nil)) }},
+		{"Program.AttachNetns", func() error { return attach(prog.AttachNetns(0)) }},
+		{"Program.AttachXDP", func() error { return attach(prog.AttachXDP(1)) }},
+		{"Program.AttachSockmap", func() error { return attach(prog.AttachSockmap(0)) }},
 		{"Program.AttachTrace", func() error { return attach(prog.AttachTrace()) }},
 		{"Program.AttachTraceOpts", func() error { return attach(prog.AttachTraceOpts(nil)) }},
 		{"Program.AttachLsm", func() error { return attach(prog.AttachLsm()) }},
@@ -502,6 +507,8 @@ func TestNilReceivers(t *testing.T) {
 		"Map.SetInitialValue":  m.SetInitialValue(nil),
 		"Link.UpdateProgram":   link.UpdateProgram(prog),
 		"Program.AttachKprobe": func() error { _, err := prog.AttachKprobe(false, "x"); return err }(),
+		"Program.AttachCgroup": func() error { _, err := prog.AttachCgroup(0); return err }(),
+		"Program.AttachXDP":    func() error { _, err := prog.AttachXDP(1); return err }(),
 	} {
 		var coreErr *libbpf.Error
 		if !errors.As(err, &coreErr) || coreErr.Errno != syscall.EINVAL {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: include/uapi/linux/bpf.h
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: enum bpf_map_type, enum bpf_prog_type, enum bpf_attach_type, BPF_F_CPU, BPF_F_ALL_CPUS
+// libbpf-symbols: enum bpf_map_type, enum bpf_prog_type, enum bpf_attach_type, BPF_F_CPU, BPF_F_ALL_CPUS, BPF_F_BEFORE, BPF_F_AFTER, BPF_F_ID, BPF_F_PREORDER, BPF_F_LINK
 
 package libbpf
 
@@ -93,10 +93,17 @@ type BpfAttachType uint32
 
 // Attach types used by the SEC table and by link creation. The values match
 // linux/bpf.h.
+//
+// BPF_ATTACH_TYPE_UNSPEC is the zero value a section without an attach type
+// reports; the kernel's enum names 0 BPF_CGROUP_INET_INGRESS.
 const (
 	BPF_ATTACH_TYPE_UNSPEC   BpfAttachType = 0
+	BPF_CGROUP_INET_INGRESS  BpfAttachType = 0
+	BPF_CGROUP_INET_EGRESS   BpfAttachType = 1
+	BPF_SK_MSG_VERDICT       BpfAttachType = 7
 	BPF_CGROUP_INET4_CONNECT BpfAttachType = 10
 	BPF_LIRC_MODE2           BpfAttachType = 16
+	BPF_FLOW_DISSECTOR       BpfAttachType = 17
 	BPF_CGROUP_GETSOCKOPT    BpfAttachType = 21
 	BPF_TRACE_RAW_TP         BpfAttachType = 23
 	BPF_TRACE_FENTRY         BpfAttachType = 24
@@ -104,11 +111,27 @@ const (
 	BPF_MODIFY_RETURN        BpfAttachType = 26
 	BPF_LSM_MAC              BpfAttachType = 27
 	BPF_SK_LOOKUP            BpfAttachType = 36
+	BPF_XDP                  BpfAttachType = 37
 	BPF_PERF_EVENT           BpfAttachType = 41
 	BPF_TRACE_KPROBE_MULTI   BpfAttachType = 42
 	BPF_NETFILTER            BpfAttachType = 45
 	BPF_TRACE_UPROBE_MULTI   BpfAttachType = 48
+	BPF_TRACE_KPROBE_SESSION BpfAttachType = 56
 	BPF_TRACE_UPROBE_SESSION BpfAttachType = 57
+)
+
+// Link attach flags for BpfCgroupOpts.Flags. BPF_F_BEFORE and BPF_F_AFTER
+// place the new program before or after the relative program or link, or
+// first or last without one; BPF_F_LINK makes the relative object a link;
+// BPF_F_PREORDER runs the program before the programs of descendant cgroups.
+// BPF_F_ID marks the relative object as an id; the attach sets it itself
+// when RelativeID is used.
+const (
+	BPF_F_BEFORE   uint32 = 1 << 3
+	BPF_F_AFTER    uint32 = 1 << 4
+	BPF_F_ID       uint32 = 1 << 5
+	BPF_F_PREORDER uint32 = 1 << 6
+	BPF_F_LINK     uint32 = 1 << 13
 )
 
 // BpfFuncID is a helper id from enum bpf_func_id.

@@ -70,9 +70,12 @@
     "fields": [
       {"name": "prog_fd", "offset": 0, "size": 4},
       {"name": "target_fd", "offset": 4, "size": 4},
+      {"name": "target_ifindex", "offset": 4, "size": 4},
       {"name": "attach_type", "offset": 8, "size": 4},
       {"name": "flags", "offset": 12, "size": 4},
       {"name": "target_btf_id", "offset": 16, "size": 4},
+      {"name": "iter_info", "offset": 16, "size": 8},
+      {"name": "iter_info_len", "offset": 24, "size": 4},
       {"name": "perf_event.bpf_cookie", "offset": 16, "size": 8},
       {"name": "kprobe_multi.flags", "offset": 16, "size": 4},
       {"name": "kprobe_multi.cnt", "offset": 20, "size": 4},
@@ -87,7 +90,10 @@
       {"name": "uprobe_multi.cookies", "offset": 40, "size": 8},
       {"name": "uprobe_multi.cnt", "offset": 48, "size": 4},
       {"name": "uprobe_multi.flags", "offset": 52, "size": 4},
-      {"name": "uprobe_multi.pid", "offset": 56, "size": 4}
+      {"name": "uprobe_multi.pid", "offset": 56, "size": 4},
+      {"name": "cgroup.relative_fd", "offset": 16, "size": 4},
+      {"name": "cgroup.relative_id", "offset": 16, "size": 4},
+      {"name": "cgroup.expected_revision", "offset": 24, "size": 8}
     ]
   },
   "link_update": {
