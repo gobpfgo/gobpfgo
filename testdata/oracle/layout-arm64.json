@@ -1,0 +1,242 @@
+{
+  "libbpf_commit": "4f05fb027a08a8a66d03916cf6a68a91e2c720ea",
+  "arch": "aarch64",
+  "kernel": "6.17.0-41-generic",
+  "map_create": {
+    "attr_size": 92,
+    "fields": [
+      {"name": "map_type", "offset": 0, "size": 4},
+      {"name": "key_size", "offset": 4, "size": 4},
+      {"name": "value_size", "offset": 8, "size": 4},
+      {"name": "max_entries", "offset": 12, "size": 4},
+      {"name": "map_flags", "offset": 16, "size": 4},
+      {"name": "inner_map_fd", "offset": 20, "size": 4},
+      {"name": "numa_node", "offset": 24, "size": 4},
+      {"name": "map_name", "offset": 28, "size": 16},
+      {"name": "map_ifindex", "offset": 44, "size": 4},
+      {"name": "btf_fd", "offset": 48, "size": 4},
+      {"name": "btf_key_type_id", "offset": 52, "size": 4},
+      {"name": "btf_value_type_id", "offset": 56, "size": 4},
+      {"name": "btf_vmlinux_value_type_id", "offset": 60, "size": 4},
+      {"name": "map_extra", "offset": 64, "size": 8},
+      {"name": "value_type_btf_obj_fd", "offset": 72, "size": 4},
+      {"name": "map_token_fd", "offset": 76, "size": 4},
+      {"name": "excl_prog_hash", "offset": 80, "size": 8},
+      {"name": "excl_prog_hash_size", "offset": 88, "size": 4}
+    ]
+  },
+  "btf_load": {
+    "attr_size": 40,
+    "fields": [
+      {"name": "btf", "offset": 0, "size": 8},
+      {"name": "btf_log_buf", "offset": 8, "size": 8},
+      {"name": "btf_size", "offset": 16, "size": 4},
+      {"name": "btf_log_size", "offset": 20, "size": 4},
+      {"name": "btf_log_level", "offset": 24, "size": 4},
+      {"name": "btf_log_true_size", "offset": 28, "size": 4},
+      {"name": "btf_flags", "offset": 32, "size": 4},
+      {"name": "btf_token_fd", "offset": 36, "size": 4}
+    ]
+  },
+  "prog_load": {
+    "attr_size": 168,
+    "fields": [
+      {"name": "prog_type", "offset": 0, "size": 4},
+      {"name": "insn_cnt", "offset": 4, "size": 4},
+      {"name": "insns", "offset": 8, "size": 8},
+      {"name": "license", "offset": 16, "size": 8},
+      {"name": "log_level", "offset": 24, "size": 4},
+      {"name": "log_size", "offset": 28, "size": 4},
+      {"name": "log_buf", "offset": 32, "size": 8},
+      {"name": "kern_version", "offset": 40, "size": 4},
+      {"name": "prog_flags", "offset": 44, "size": 4},
+      {"name": "prog_name", "offset": 48, "size": 16},
+      {"name": "prog_ifindex", "offset": 64, "size": 4},
+      {"name": "expected_attach_type", "offset": 68, "size": 4},
+      {"name": "prog_btf_fd", "offset": 72, "size": 4},
+      {"name": "func_info_rec_size", "offset": 76, "size": 4},
+      {"name": "func_info", "offset": 80, "size": 8},
+      {"name": "func_info_cnt", "offset": 88, "size": 4},
+      {"name": "line_info_rec_size", "offset": 92, "size": 4},
+      {"name": "line_info", "offset": 96, "size": 8},
+      {"name": "line_info_cnt", "offset": 104, "size": 4},
+      {"name": "attach_btf_id", "offset": 108, "size": 4},
+      {"name": "attach_prog_fd", "offset": 112, "size": 4},
+      {"name": "attach_btf_obj_fd", "offset": 112, "size": 4},
+      {"name": "fd_array", "offset": 120, "size": 8}
+    ]
+  },
+  "link_create": {
+    "attr_size": 64,
+    "fields": [
+      {"name": "prog_fd", "offset": 0, "size": 4},
+      {"name": "target_fd", "offset": 4, "size": 4},
+      {"name": "target_ifindex", "offset": 4, "size": 4},
+      {"name": "attach_type", "offset": 8, "size": 4},
+      {"name": "flags", "offset": 12, "size": 4},
+      {"name": "target_btf_id", "offset": 16, "size": 4},
+      {"name": "iter_info", "offset": 16, "size": 8},
+      {"name": "iter_info_len", "offset": 24, "size": 4},
+      {"name": "perf_event.bpf_cookie", "offset": 16, "size": 8},
+      {"name": "kprobe_multi.flags", "offset": 16, "size": 4},
+      {"name": "kprobe_multi.cnt", "offset": 20, "size": 4},
+      {"name": "kprobe_multi.syms", "offset": 24, "size": 8},
+      {"name": "kprobe_multi.addrs", "offset": 32, "size": 8},
+      {"name": "kprobe_multi.cookies", "offset": 40, "size": 8},
+      {"name": "tracing.target_btf_id", "offset": 16, "size": 4},
+      {"name": "tracing.cookie", "offset": 24, "size": 8},
+      {"name": "uprobe_multi.path", "offset": 16, "size": 8},
+      {"name": "uprobe_multi.offsets", "offset": 24, "size": 8},
+      {"name": "uprobe_multi.ref_ctr_offsets", "offset": 32, "size": 8},
+      {"name": "uprobe_multi.cookies", "offset": 40, "size": 8},
+      {"name": "uprobe_multi.cnt", "offset": 48, "size": 4},
+      {"name": "uprobe_multi.flags", "offset": 52, "size": 4},
+      {"name": "uprobe_multi.pid", "offset": 56, "size": 4},
+      {"name": "cgroup.relative_fd", "offset": 16, "size": 4},
+      {"name": "cgroup.relative_id", "offset": 16, "size": 4},
+      {"name": "cgroup.expected_revision", "offset": 24, "size": 8}
+    ]
+  },
+  "link_update": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "link_fd", "offset": 0, "size": 4},
+      {"name": "new_prog_fd", "offset": 4, "size": 4},
+      {"name": "flags", "offset": 8, "size": 4},
+      {"name": "old_prog_fd", "offset": 12, "size": 4}
+    ]
+  },
+  "raw_tracepoint": {
+    "attr_size": 24,
+    "fields": [
+      {"name": "name", "offset": 0, "size": 8},
+      {"name": "prog_fd", "offset": 8, "size": 4},
+      {"name": "cookie", "offset": 16, "size": 8}
+    ]
+  },
+  "map_elem": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "map_fd", "offset": 0, "size": 4},
+      {"name": "key", "offset": 8, "size": 8},
+      {"name": "value", "offset": 16, "size": 8},
+      {"name": "flags", "offset": 24, "size": 8}
+    ]
+  },
+  "map_next_key": {
+    "attr_size": 24,
+    "fields": [
+      {"name": "map_fd", "offset": 0, "size": 4},
+      {"name": "key", "offset": 8, "size": 8},
+      {"name": "next_key", "offset": 16, "size": 8}
+    ]
+  },
+  "obj_pin": {
+    "attr_size": 20,
+    "fields": [
+      {"name": "pathname", "offset": 0, "size": 8},
+      {"name": "bpf_fd", "offset": 8, "size": 4},
+      {"name": "file_flags", "offset": 12, "size": 4},
+      {"name": "path_fd", "offset": 16, "size": 4}
+    ]
+  },
+  "get_next_id": {
+    "attr_size": 12,
+    "fields": [
+      {"name": "start_id", "offset": 0, "size": 4},
+      {"name": "next_id", "offset": 4, "size": 4},
+      {"name": "open_flags", "offset": 8, "size": 4}
+    ]
+  },
+  "btf_get_fd_by_id": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "btf_id", "offset": 0, "size": 4},
+      {"name": "open_flags", "offset": 8, "size": 4},
+      {"name": "fd_by_id_token_fd", "offset": 12, "size": 4}
+    ]
+  },
+  "obj_info": {
+    "attr_size": 16,
+    "fields": [
+      {"name": "bpf_fd", "offset": 0, "size": 4},
+      {"name": "info_len", "offset": 4, "size": 4},
+      {"name": "info", "offset": 8, "size": 8}
+    ]
+  },
+  "map_info": {
+    "attr_size": 104,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "id", "offset": 4, "size": 4},
+      {"name": "key_size", "offset": 8, "size": 4},
+      {"name": "value_size", "offset": 12, "size": 4},
+      {"name": "max_entries", "offset": 16, "size": 4},
+      {"name": "map_flags", "offset": 20, "size": 4},
+      {"name": "name", "offset": 24, "size": 16},
+      {"name": "btf_key_type_id", "offset": 68, "size": 4},
+      {"name": "btf_value_type_id", "offset": 72, "size": 4}
+    ]
+  },
+  "prog_info": {
+    "attr_size": 232,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "id", "offset": 4, "size": 4},
+      {"name": "jited_prog_len", "offset": 16, "size": 4},
+      {"name": "xlated_prog_len", "offset": 20, "size": 4},
+      {"name": "btf_id", "offset": 128, "size": 4},
+      {"name": "name", "offset": 64, "size": 16},
+      {"name": "nr_jited_ksyms", "offset": 104, "size": 4},
+      {"name": "nr_jited_func_lens", "offset": 108, "size": 4},
+      {"name": "jited_ksyms", "offset": 112, "size": 8},
+      {"name": "jited_func_lens", "offset": 120, "size": 8},
+      {"name": "nr_line_info", "offset": 148, "size": 4},
+      {"name": "line_info", "offset": 152, "size": 8},
+      {"name": "jited_line_info", "offset": 160, "size": 8},
+      {"name": "nr_jited_line_info", "offset": 168, "size": 4},
+      {"name": "line_info_rec_size", "offset": 172, "size": 4},
+      {"name": "jited_line_info_rec_size", "offset": 176, "size": 4}
+    ]
+  },
+  "btf_info": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "btf", "offset": 0, "size": 8},
+      {"name": "btf_size", "offset": 8, "size": 4},
+      {"name": "id", "offset": 12, "size": 4},
+      {"name": "name", "offset": 16, "size": 8},
+      {"name": "name_len", "offset": 24, "size": 4},
+      {"name": "kernel_btf", "offset": 28, "size": 4}
+    ]
+  },
+  "perf_event": {
+    "attr_size": 1040,
+    "fields": [
+      {"name": "data_head", "offset": 1024, "size": 8},
+      {"name": "data_tail", "offset": 1032, "size": 8}
+    ]
+  },
+  "perf_event_header": {
+    "attr_size": 8,
+    "fields": [
+      {"name": "type", "offset": 0, "size": 4},
+      {"name": "misc", "offset": 4, "size": 2},
+      {"name": "size", "offset": 6, "size": 2}
+    ]
+  },
+  "perf_sample": {
+    "attr_size": 12,
+    "fields": [
+      {"name": "size", "offset": 8, "size": 4}
+    ]
+  },
+  "perf_lost": {
+    "attr_size": 32,
+    "fields": [
+      {"name": "id", "offset": 8, "size": 8},
+      {"name": "lost", "offset": 16, "size": 8},
+      {"name": "sample_id", "offset": 24, "size": 8}
+    ]
+  }
+}
