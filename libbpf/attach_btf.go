@@ -39,20 +39,23 @@ func vmlinuxBTF() (*btf.Spec, error) {
 // after the section prefix, as libbpf_find_attach_btf_id does. A program
 // whose id BpfProgramSetAttachTarget already set keeps it.
 //
-// A freplace program, and any program BpfProgramSetAttachTarget gave an
-// attach program descriptor, resolves the target in that program's BTF; a
-// freplace program without one returns EINVAL, as in libbpf. The other
+// A bare section, such as SEC("freplace"), names no target, and its program
+// returns EINVAL unless BpfProgramSetAttachTarget set the function. A
+// BPF_PROG_TYPE_EXT program, and any program BpfProgramSetAttachTarget gave
+// an attach program descriptor, resolves the target in that program's BTF;
+// an EXT program without one returns EINVAL, as in libbpf. The other
 // programs resolve it in the vmlinux BTF; module targets are not supported
-// yet.
+// yet. An empty target after the slash is looked up like any other and
+// returns ENOENT.
 func resolveAttachBTFID(p *BpfProgram) error {
 	if !p.attachBTF && !p.attachProg || p.attachBTFID != 0 {
 		return nil
 	}
-	if p.attachTarget == "" {
-		return fmt.Errorf("section %s has no attach target", p.sectionName)
+	if !strings.Contains(p.sectionName, "/") {
+		return fmt.Errorf("%w: prog '%s': no BTF-based attach target is specified, use BpfProgramSetAttachTarget", unix.EINVAL, p.name)
 	}
 
-	if p.attachProg || p.attachProgFD != 0 {
+	if p.progType == BPF_PROG_TYPE_EXT || p.attachProgFD != 0 {
 		if p.attachProgFD == 0 {
 			return fmt.Errorf("%w: prog '%s': attach program FD is not set, use BpfProgramSetAttachTarget", unix.EINVAL, p.name)
 		}
@@ -155,15 +158,19 @@ func findProgBTFID(name string, attachProgFD int) (uint32, error) {
 //
 // With both set, the function's BTF id is looked up in the program's BTF
 // now. With only attachProgFD, the section target is looked up in that
-// program's BTF at load. With only attachFuncName, the function is looked
-// up in the vmlinux BTF now, with the prefix and kind of the program's
-// expected attach type; module functions are not supported yet. The
-// program keeps attachProgFD, which the caller must keep open until the
-// load.
+// program's BTF at load, and a function id an earlier call set is dropped,
+// so the load does not use a function of the previous target; libbpf keeps
+// that id. A bare section, such as SEC("freplace"), has no section target,
+// so its program needs attachFuncName. With only attachFuncName, the
+// function is looked up in the vmlinux BTF now, with the prefix and kind of
+// the program's expected attach type; module functions are not supported
+// yet. The program keeps attachProgFD, which the caller must keep open
+// until the load.
 //
 // It returns EINVAL for a nil program, a negative attachProgFD, neither
 // argument, and a program whose object is loaded or closed. A failed lookup
-// returns the error findProgBTFID or the vmlinux lookup reports.
+// returns the error findProgBTFID or the vmlinux lookup reports and leaves
+// the program unchanged.
 func BpfProgramSetAttachTarget(prog *BpfProgram, attachProgFD int, attachFuncName string) error {
 	const op = "bpf_program__set_attach_target"
 
@@ -176,6 +183,8 @@ func BpfProgramSetAttachTarget(prog *BpfProgram, attachProgFD int, attachFuncNam
 
 	if attachProgFD != 0 && attachFuncName == "" {
 		prog.attachProgFD = attachProgFD
+		prog.attachBTFID = 0
+		prog.attachBTFObjFD = 0
 		return nil
 	}
 

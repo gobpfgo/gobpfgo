@@ -112,12 +112,13 @@ func BpfProgramAttachSockmap(prog *BpfProgram, mapFD int) (*BpfLink, error) {
 // BpfObjectLoad.
 //
 // It returns EINVAL for a nil program, when exactly one of targetFD and
-// attachFuncName is set and when the program type is not
-// BPF_PROG_TYPE_EXT, before any system call. A target lookup that fails
-// returns the error findProgBTFID reports: EINVAL for a target without BTF,
-// as libbpf does, ENOENT for a function its BTF lacks and the kernel errno
-// for a bad descriptor, EBADFD for one that is not open. An unloaded
-// program then returns EINVAL, and a link the kernel refuses its errno.
+// attachFuncName is set, when the program type is not BPF_PROG_TYPE_EXT
+// and for an unloaded program, before any system call; libbpf reads the
+// target BTF before it checks that the program is loaded. A target lookup
+// that fails returns the error findProgBTFID reports: EINVAL for a target
+// without BTF, as libbpf does, ENOENT for a function its BTF lacks and the
+// kernel errno for a bad descriptor, EBADFD for one that is not open. A
+// link the kernel refuses returns its errno.
 func BpfProgramAttachFreplace(prog *BpfProgram, targetFD int, attachFuncName string) (*BpfLink, error) {
 	const op = "bpf_program__attach_freplace"
 
@@ -131,6 +132,9 @@ func BpfProgramAttachFreplace(prog *BpfProgram, targetFD int, attachFuncName str
 	if prog.progType != BPF_PROG_TYPE_EXT {
 		return nil, &Error{Op: op, Errno: unix.EINVAL,
 			Log: fmt.Sprintf("prog '%s': only BPF_PROG_TYPE_EXT can attach as freplace", prog.name)}
+	}
+	if err := checkAttachProgram(prog, op); err != nil {
+		return nil, err
 	}
 
 	if targetFD == 0 {

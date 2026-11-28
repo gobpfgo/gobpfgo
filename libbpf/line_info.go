@@ -40,6 +40,9 @@ type BpfLineInfo struct {
 
 // BpfProgInfo is the program metadata BpfProgramInfo reads from the kernel.
 //
+// BtfID is the id of the program's BTF object, the object BTF it was loaded
+// with, or 0 for a program loaded without BTF.
+//
 // LineInfo holds NrLineInfo records of LineInfoRecSize bytes in the kernel's
 // struct bpf_line_info layout. JitedLineInfo holds NrJitedLineInfo records of
 // JitedLineInfoRecSize bytes; each starts with the jited address of the
@@ -51,6 +54,7 @@ type BpfProgInfo struct {
 	ID                   uint32
 	JitedProgLen         uint32
 	XlatedProgLen        uint32
+	BtfID                uint32
 	Name                 string
 	NrJitedKsyms         uint32
 	NrJitedFuncLens      uint32
@@ -87,6 +91,7 @@ func BpfProgramInfo(prog *BpfProgram) (*BpfProgInfo, error) {
 		ID:                   info.ID,
 		JitedProgLen:         info.JitedProgLen,
 		XlatedProgLen:        info.XlatedProgLen,
+		BtfID:                info.BtfID,
 		Name:                 info.Name,
 		NrJitedKsyms:         info.NrJitedKsyms,
 		NrJitedFuncLens:      info.NrJitedFuncLens,

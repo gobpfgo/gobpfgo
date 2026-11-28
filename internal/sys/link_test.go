@@ -345,37 +345,63 @@ func TestLinkCreateRejectsBeforeSyscall(t *testing.T) {
 	}
 }
 
-// TestLinkCreateIterInfo checks that LinkCreateIter points the iterator info
-// at the caller's bytes and writes the pointer and length at the offsets
-// libbpf's headers report, with every other byte of the union zero, and
-// that nil info leaves both zero. The invalid program descriptor makes
-// bpf() fail with EBADF, or EPERM without privileges, after the fields are
-// filled.
+// TestLinkCreateIterInfo checks the attribute LinkCreateIter sends: a copy
+// of the caller's attribute whose iterator info points at the caller's
+// bytes, which are kept alive for the syscall, with the pointer and length
+// at the offsets libbpf's headers report and every other byte of the union
+// zero. Empty info, nil or not, leaves both zero.
 func TestLinkCreateIterInfo(t *testing.T) {
 	f := loadLayoutFixture(t)
 
 	info := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	attr := &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: BPF_TRACE_ITER}
-	if _, err := LinkCreateIter(attr, info); err == nil || errors.Is(err, unix.EINVAL) {
-		t.Fatalf("LinkCreateIter with a bad program = %v, want a kernel error other than EINVAL", err)
+	orig := *attr
+	iter, keeps, err := iterLinkAttr(attr, info)
+	if err != nil {
+		t.Fatalf("iterLinkAttr: %v", err)
 	}
-	if attr.IterInfo != uint64(addr(info)) || attr.IterInfoLen != uint32(len(info)) {
-		t.Fatalf("iter info = %#x/%d, want %#x/%d", attr.IterInfo, attr.IterInfoLen, addr(info), len(info))
+	if iter == attr || *attr != orig {
+		t.Fatalf("iterLinkAttr changed the caller's attribute: %+v, want %+v in a copy", *attr, orig)
 	}
+	if iter.IterInfoLen != uint32(len(info)) {
+		t.Fatalf("iter info length = %d, want %d", iter.IterInfoLen, len(info))
+	}
+	checkKeptBuffer(t, keeps, "iter_info", iter.IterInfo, info)
 	want := fixtureBytes(t, f.LinkCreate, map[string]uint64{
 		"prog_fd": uint64(^uint32(0)), "attach_type": BPF_TRACE_ITER,
 		"iter_info": uint64(addr(info)), "iter_info_len": uint64(len(info)),
 	})
-	if got := attr.Marshal(); !bytes.Equal(got, want) {
+	if got := iter.Marshal(); !bytes.Equal(got, want) {
 		t.Fatalf("link_create bytes:\n got %x\nwant %x", got, want)
 	}
 
-	attr = &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: BPF_TRACE_ITER}
-	if _, err := LinkCreateIter(attr, nil); err == nil || errors.Is(err, unix.EINVAL) {
-		t.Fatalf("LinkCreateIter without info = %v, want a kernel error other than EINVAL", err)
+	for name, empty := range map[string][]byte{"nil": nil, "empty": {}} {
+		iter, _, err := iterLinkAttr(attr, empty)
+		if err != nil {
+			t.Fatalf("iterLinkAttr with %s info: %v", name, err)
+		}
+		if iter.IterInfo != 0 || iter.IterInfoLen != 0 {
+			t.Fatalf("iter info with %s info = %#x/%d, want 0/0", name, iter.IterInfo, iter.IterInfoLen)
+		}
 	}
-	if attr.IterInfo != 0 || attr.IterInfoLen != 0 {
-		t.Fatalf("iter info without info = %#x/%d, want 0/0", attr.IterInfo, attr.IterInfoLen)
+}
+
+// TestLinkCreateIterKeepsCaller checks that LinkCreateIter leaves the
+// caller's attribute unchanged, with and without info. The invalid program
+// descriptor makes bpf() fail with EBADF, or EPERM without privileges, after
+// the copy is filled.
+func TestLinkCreateIterKeepsCaller(t *testing.T) {
+	for name, info := range map[string][]byte{"info": {1, 2, 3, 4}, "no info": nil} {
+		t.Run(name, func(t *testing.T) {
+			attr := &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: BPF_TRACE_ITER}
+			orig := *attr
+			if _, err := LinkCreateIter(attr, info); err == nil || errors.Is(err, unix.EINVAL) {
+				t.Fatalf("LinkCreateIter with a bad program = %v, want a kernel error other than EINVAL", err)
+			}
+			if *attr != orig {
+				t.Fatalf("attribute after LinkCreateIter = %+v, want the caller's %+v", *attr, orig)
+			}
+		})
 	}
 }
 
