@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: fixup_verifier_log, find_prev_line, patch_log, fixup_log_missing_map_load
+// libbpf-symbols: fixup_verifier_log, find_prev_line, patch_log, fixup_log_missing_map_load, fixup_log_missing_kfunc_call
 
 package libbpf
 
@@ -17,6 +17,12 @@ import (
 // index, which prints as 200100 followed by four more digits.
 const poisonLdimm64MapLogPrefix = "invalid func unknown#200100"
 
+// poisonCallKfuncLogPrefix starts the verifier's error line for a reachable
+// poisoned call to an unresolved kernel function: the helper ID is
+// poisonCallKfuncBase plus the extern index. libbpf matches only the first
+// four digits, so the map prefix must be checked first.
+const poisonCallKfuncLogPrefix = "invalid func unknown#2002"
+
 // maxLogPatchLen is the longest replacement text the log fixup writes.
 const maxLogPatchLen = 127
 
@@ -27,11 +33,12 @@ var poisonCallLine = regexp.MustCompile(`^\s*([+-]?\d+):\s*\(\s*[+-]?\d+\)\s*cal
 
 // fixupVerifierLog rewrites the verifier log in buf after a failed program
 // load of obj. The log is the C string at the start of buf, and len(buf) is
-// its capacity. When one of the last ten lines reports a poisoned call for a
-// map that the load did not create, that line and the instruction line
-// before it become two lines that name the instruction and the map. Text
-// after them moves to make room, and the end of the log is cut when buf is
-// full. Any other log is left unchanged.
+// its capacity. When one of the last ten lines reports a poisoned call, that
+// line and the instruction line before it become two lines that name the
+// instruction and what the call stands for: a map that the load did not
+// create, or a kernel function extern that it did not resolve. Text after
+// them moves to make room, and the end of the log is cut when buf is full.
+// Any other log is left unchanged.
 func fixupVerifierLog(obj *BpfObject, buf []byte) {
 	const maxLastLineCnt = 10
 
@@ -45,9 +52,16 @@ func fixupVerifierLog(obj *BpfObject, buf []byte) {
 		if cur < 0 {
 			return
 		}
-		if bytes.HasPrefix(buf[cur:end], []byte(poisonLdimm64MapLogPrefix)) {
+		var fixup func(obj *BpfObject, buf []byte, logSz, line1, line3 int)
+		switch {
+		case bytes.HasPrefix(buf[cur:end], []byte(poisonLdimm64MapLogPrefix)):
+			fixup = fixupLogMissingMapLoad
+		case bytes.HasPrefix(buf[cur:end], []byte(poisonCallKfuncLogPrefix)):
+			fixup = fixupLogMissingKfuncCall
+		}
+		if fixup != nil {
 			if prev := findPrevLine(buf, cur); prev >= 0 {
-				fixupLogMissingMapLoad(obj, buf, end+1, prev, next)
+				fixup(obj, buf, end+1, prev, next)
 				return
 			}
 		}
@@ -74,16 +88,8 @@ func findPrevLine(buf []byte, cur int) int {
 // logSz bytes long, including its NUL. Lines that do not parse, or name no
 // map of obj, are left unchanged.
 func fixupLogMissingMapLoad(obj *BpfObject, buf []byte, logSz, line1, line3 int) {
-	match := poisonCallLine.FindSubmatch(buf[line1 : logSz-1])
-	if match == nil {
-		return
-	}
-	insnIdx, err := strconv.Atoi(string(match[1]))
-	if err != nil {
-		return
-	}
-	id, err := strconv.Atoi(string(match[2]))
-	if err != nil {
+	insnIdx, id, ok := parsePoisonCallLine(buf[line1 : logSz-1])
+	if !ok {
 		return
 	}
 	mapIdx := id - poisonLdimm64MapBase
@@ -93,10 +99,55 @@ func fixupLogMissingMapLoad(obj *BpfObject, buf []byte, logSz, line1, line3 int)
 
 	patch := fmt.Sprintf("%d: <invalid BPF map reference>\nBPF map '%s' is referenced but wasn't created\n",
 		insnIdx, obj.maps[mapIdx].name)
-	if len(patch) > maxLogPatchLen {
-		patch = patch[:maxLogPatchLen]
+	patchLog(buf, logSz, line1, line3-line1, truncateLogPatch(patch))
+}
+
+// fixupLogMissingKfuncCall replaces the log lines from line1 to line3, a
+// poisoned call instruction and the verifier's error for it, with the
+// instruction index and the name of the kernel function extern the call
+// stands for. The log is logSz bytes long, including its NUL. Lines that do
+// not parse, or name no extern of obj, are left unchanged.
+func fixupLogMissingKfuncCall(obj *BpfObject, buf []byte, logSz, line1, line3 int) {
+	insnIdx, id, ok := parsePoisonCallLine(buf[line1 : logSz-1])
+	if !ok {
+		return
 	}
-	patchLog(buf, logSz, line1, line3-line1, patch)
+	extIdx := id - poisonCallKfuncBase
+	if extIdx < 0 || extIdx >= len(obj.externs) {
+		return
+	}
+
+	patch := fmt.Sprintf("%d: <invalid kfunc call>\nkfunc '%s' is referenced but wasn't resolved\n",
+		insnIdx, obj.externs[extIdx].name)
+	patchLog(buf, logSz, line1, line3-line1, truncateLogPatch(patch))
+}
+
+// parsePoisonCallLine parses the instruction index and the helper ID of the
+// poisoned call instruction line at the start of log, as libbpf's sscanf
+// format "%d: (%*d) call unknown#%d" does.
+func parsePoisonCallLine(log []byte) (insnIdx, id int, ok bool) {
+	match := poisonCallLine.FindSubmatch(log)
+	if match == nil {
+		return 0, 0, false
+	}
+	insnIdx, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+	id, err = strconv.Atoi(string(match[2]))
+	if err != nil {
+		return 0, 0, false
+	}
+	return insnIdx, id, true
+}
+
+// truncateLogPatch cuts patch to maxLogPatchLen bytes, as libbpf's
+// snprintf into a 128-byte buffer does.
+func truncateLogPatch(patch string) string {
+	if len(patch) > maxLogPatchLen {
+		return patch[:maxLogPatchLen]
+	}
+	return patch
 }
 
 // patchLog replaces the origSz bytes at offset orig of the log in buf, which

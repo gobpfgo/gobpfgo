@@ -193,6 +193,29 @@ func relocateWithoutKernelArgCtx(t *testing.T, obj *BpfObject, ext *btf.ExtSpec,
 func relocateWithStandIns(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtxTag func() bool) ([]*progCode, []standInCopy, error) {
 	t.Helper()
 
+	rel, err := relocateWithTargets(t, obj, ext, nil, argCtxTag)
+	if err != nil {
+		return nil, nil, err
+	}
+	return rel.codes, rel.copies, nil
+}
+
+// standInRelocation is what relocateWithTargets returns: each main
+// program's code, each subprogram's own instructions as the relocation
+// prepared them, and the programs' copies of the maps with function
+// pointers.
+type standInRelocation struct {
+	codes        []*progCode
+	subprogInsns map[*BpfProgram][]byte
+	copies       []standInCopy
+}
+
+// relocateWithTargets relocates obj like relocateWithStandIns, with kernels
+// as the CO-RE targets; nil applies no CO-RE relocation, as libbpf's
+// generated loader does not.
+func relocateWithTargets(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag func() bool) (*standInRelocation, error) {
+	t.Helper()
+
 	for i, m := range obj.maps {
 		m.fd = i
 	}
@@ -207,20 +230,20 @@ func relocateWithStandIns(t *testing.T, obj *BpfObject, ext *btf.ExtSpec, argCtx
 		obj.funcPtrMaps = nil
 	}()
 
-	codes, err := relocateObject(obj, ext, nil, argCtxTag, declTagSupported)
+	codes, subprogInsns, err := relocateObject(obj, ext, kernels, argCtxTag, declTagSupported)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	standIn := newFuncPtrMapStandIn(obj)
 	if err := relocateObjectData(codes, standIn.create); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	var copies []standInCopy
+	rel := &standInRelocation{codes: codes, subprogInsns: subprogInsns}
 	for _, c := range obj.funcPtrMaps {
-		copies = append(copies, standInCopy{prog: c.prog, m: c.m, fd: c.fd, value: standIn.values[c.fd]})
+		rel.copies = append(rel.copies, standInCopy{prog: c.prog, m: c.m, fd: c.fd, value: standIn.values[c.fd]})
 	}
-	return codes, copies, nil
+	return rel, nil
 }
 
 // standInTypedKsyms marks every typed .ksyms extern of obj resolved, with
@@ -334,6 +357,7 @@ func TestSubprogOracle(t *testing.T) {
 		"subprog-hidden.json", "subprog-arg-ctx.json",
 		"subprog-callx.json",
 		"subprog-exception-cb.json", "subprog-exception-cb-direct.json",
+		"subprog-core.json",
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
@@ -768,8 +792,11 @@ func checkSubprogDescriptors(t *testing.T, obj *BpfObject) {
 
 // TestSubprogLoad loads subprog.bpf.o, checks that only the main programs
 // have descriptors and that the kernel saw each one's functions and line
-// records, attaches both to do_sys_openat2, opens a file and reads what the
-// subprograms counted. Each call adds its own delta, so a wrong argument or
+// records, and that each subprogram returns its own relocated copy, which
+// for this object without CO-RE or subprogram address loads keeps the
+// object's bytes, unpatched map load included. It then attaches both
+// programs to do_sys_openat2, opens a file and reads what the subprograms
+// counted. Each call adds its own delta, so a wrong argument or
 // call target shows in the values. It then closes the object and checks that
 // every descriptor is gone. It needs root or CAP_BPF and skips otherwise.
 func TestSubprogLoad(t *testing.T) {
@@ -779,6 +806,15 @@ func TestSubprogLoad(t *testing.T) {
 	checkSubprogDescriptors(t, obj)
 	if _, err := BpfProgramInfo(findFunction(t, obj, "subprog_add")); !errors.Is(err, unix.EINVAL) {
 		t.Errorf("BpfProgramInfo(subprog_add) = %v, want EINVAL", err)
+	}
+	for _, p := range obj.programs {
+		if !progIsSubprog(obj, p) {
+			continue
+		}
+		own := sectionInsns(t, obj, p.secIdx)[p.secInsnOff*bpfInsnLength : (p.secInsnOff+p.secInsnCnt)*bpfInsnLength]
+		if insns := BpfProgramInsns(p); !bytes.Equal(insns, own) || &insns[0] == &own[0] {
+			t.Errorf("subprogram %s: instructions after load are not a copy of its own function", p.name)
+		}
 	}
 	for name, layout := range subprogLayouts {
 		info, err := BpfProgramInfo(BpfObjectFindProgramByName(obj, name))

@@ -67,6 +67,10 @@ var (
 	// of a per-CPU array directly, which .percpu variables need. Without it
 	// the load does not create the per-CPU data maps.
 	featPercpuData = kernelFeature{probe: probePercpuData}
+	// featSyscallWrapper is a kernel whose syscalls enter through
+	// arch-specific wrappers, CONFIG_ARCH_HAS_SYSCALL_WRAPPER, behind
+	// LINUX_HAS_SYSCALL_WRAPPER. The probe needs root or CAP_PERFMON.
+	featSyscallWrapper = kernelFeature{probe: probeSyscallWrapper}
 )
 
 // probeBpfCookie reports whether a program can read a BPF cookie: the kernel

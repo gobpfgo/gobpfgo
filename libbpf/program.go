@@ -94,7 +94,7 @@ func BpfProgramSectionName(p *BpfProgram) string {
 // BpfProgramInsnCnt returns the number of 8-byte BPF instructions that
 // BpfProgramInsns returns: the program's own function before BpfObjectLoad,
 // and after a successful load the final code, which includes the appended
-// subprograms.
+// subprograms. A subprogram's count stays its own function's.
 func BpfProgramInsnCnt(p *BpfProgram) int {
 	if p == nil {
 		return 0
@@ -108,9 +108,13 @@ func BpfProgramInsnCnt(p *BpfProgram) int {
 // kernel received: CO-RE relocated, with a copy of every .text subprogram
 // the program reaches appended in the order the load first reaches each, the
 // calls pointing at those copies, and the map descriptors, global variable
-// offsets and extern values patched in. A failed load leaves them as they
-// were. A subprogram, which the program iteration skips, keeps its own
-// function. The object file's section data is never changed.
+// offsets and extern values patched in. A subprogram, which the program
+// iteration skips, gets its own function after CO-RE instead, with every
+// load of a subprogram address marked BPF_PSEUDO_FUNC, as libbpf leaves it:
+// its calls, map loads and extern references stay as the object file has
+// them, because they are relocated only in each copy appended to a main
+// program. A failed load leaves every program as it was. The object file's
+// section data is never changed.
 //
 // The slice belongs to the program. Do not modify it and do not use it
 // after BpfObjectClose.

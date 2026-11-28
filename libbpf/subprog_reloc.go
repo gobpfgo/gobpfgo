@@ -54,7 +54,8 @@ type relocator struct {
 }
 
 // relocateObject relocates the programs of obj for loading and returns the
-// code of each main program, in program order. CO-RE runs first, on every
+// code of each main program, in program order, and each subprogram's own
+// instructions as the relocation prepared them. CO-RE runs first, on every
 // program and subprogram, then the calls build each main program's code
 // with its function and line records, and its exception callback is
 // appended when declTag reports that the kernel reads decl tags. Last, each
@@ -62,10 +63,14 @@ type relocator struct {
 // fixed up, which adds types to the object BTF, unless argCtxTag reports
 // that the kernel reads the tag. relocateObjectData patches the map, global
 // data and extern loads once the maps exist. The program instructions are
-// not changed; each step works on copies. ext may be nil, and kernels is
-// empty when there is no CO-RE relocation. A bad exception callback tag
-// returns EINVAL or ENOENT, as assignExceptionCb describes.
-func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag, declTag func() bool) ([]*progCode, error) {
+// not changed; each step works on copies. A subprogram's copy is CO-RE
+// relocated, with its subprogram address loads marked BPF_PSEUDO_FUNC, and
+// keeps its calls, map loads and extern references as the object file has
+// them: libbpf relocates those only in the main programs' code. ext may be
+// nil, and kernels is empty when there is no CO-RE relocation. A bad
+// exception callback tag returns EINVAL or ENOENT, as assignExceptionCb
+// describes.
+func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCtxTag, declTag func() bool) ([]*progCode, map[*BpfProgram][]byte, error) {
 	r := &relocator{
 		obj:    obj,
 		ext:    ext,
@@ -74,39 +79,41 @@ func relocateObject(obj *BpfObject, ext *btf.ExtSpec, kernels []*btf.Spec, argCt
 	}
 	for _, p := range obj.programs {
 		if err := r.prepare(p, kernels); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	var codes []*progCode
+	subprogInsns := make(map[*BpfProgram][]byte)
 	for _, p := range obj.programs {
 		if progIsSubprog(obj, p) {
+			subprogInsns[p] = r.insns[p]
 			continue
 		}
 		code, err := r.relocateCalls(p)
 		if err != nil {
-			return nil, &Error{
+			return nil, nil, &Error{
 				Op:    "bpf_object__relocate",
 				Errno: unix.EINVAL,
 				Log:   fmt.Sprintf("prog '%s': failed to relocate calls: %v", p.name, err),
 			}
 		}
 		if err := r.appendExceptionCb(code, declTag); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		codes = append(codes, code)
 	}
 
 	for _, code := range codes {
 		if err := fixupFuncInfo(obj, ext, code, argCtxTag); err != nil {
-			return nil, &Error{
+			return nil, nil, &Error{
 				Op:    "bpf_object__relocate",
 				Errno: unix.EINVAL,
 				Log:   fmt.Sprintf("prog '%s': failed to perform .BTF.ext fix ups: %v", code.prog.name, err),
 			}
 		}
 	}
-	return codes, nil
+	return codes, subprogInsns, nil
 }
 
 // relocateObjectData patches the map, global data and extern loads in the

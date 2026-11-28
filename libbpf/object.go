@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object_open, bpf_object__init_maps, bpf_object_init_progs, bpf_object_fixup_btf
+// libbpf-symbols: bpf_object__open_file, bpf_object__open_mem, bpf_object__close, bpf_object__name, bpf_object__next_map, bpf_object__next_program, bpf_object__find_map_by_name, bpf_object__find_program_by_name, bpf_object_open, bpf_object__new, bpf_object__init_kversion, bpf_object__init_maps, bpf_object_init_progs, bpf_object_fixup_btf
 
 package libbpf
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -34,6 +35,12 @@ type BpfObject struct {
 	btfFD    int
 	loaded   bool
 	closed   bool
+
+	// kernVersion is the kern_version every BPF_PROG_LOAD of the object
+	// sends: the running kernel's KERNEL_VERSION code at open, or the
+	// object's "version" section when it has one. Kernels since 5.0 ignore
+	// it.
+	kernVersion uint32
 
 	// textShndx is the .text section index, or 0 without one. The programs
 	// in it are subprograms, which the public iteration skips and the load
@@ -229,20 +236,25 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 		return nil, openError(path, err)
 	}
 	assignFuncPtrs(maps, funcPtrs)
+	kernVersion, err := objectKernVersion(e, getKernelVersion())
+	if err != nil {
+		return nil, withPath(err, path)
+	}
 
 	obj := &BpfObject{
-		name:       name,
-		path:       path,
-		maps:       maps,
-		programs:   programs,
-		textShndx:  textShndx,
-		btf:        spec,
-		elf:        e,
-		license:    e.License,
-		btfFD:      -1,
-		externs:    externs,
-		kconfigMap: kconfigMap,
-		funcPtrs:   funcPtrs,
+		name:        name,
+		path:        path,
+		maps:        maps,
+		programs:    programs,
+		textShndx:   textShndx,
+		btf:         spec,
+		elf:         e,
+		license:     e.License,
+		btfFD:       -1,
+		kernVersion: kernVersion,
+		externs:     externs,
+		kconfigMap:  kconfigMap,
+		funcPtrs:    funcPtrs,
 	}
 	for _, p := range programs {
 		p.obj = obj
@@ -252,6 +264,25 @@ func openBytes(path string, data []byte, name string, opts *BpfObjectOpenOpts) (
 		obj.kconfig = &kconfig
 	}
 	return obj, nil
+}
+
+// objectKernVersion returns the kernel version the programs of e are loaded
+// with: running, the running kernel's KERNEL_VERSION code, unless e has a
+// section named "version", whose 4-byte value in host byte order replaces
+// it. A "version" section of any other size, or without data, is
+// LIBBPF_ERRNO__FORMAT. With several such sections the last one wins.
+func objectKernVersion(e *elf.Object, running uint32) (uint32, error) {
+	version := running
+	for _, sec := range e.Sections {
+		if sec.Name != "version" {
+			continue
+		}
+		if len(sec.Data) != 4 {
+			return 0, &Error{Op: "bpf_object__open", Errno: libbpfErrnoFormat, Log: "invalid kver section"}
+		}
+		version = binary.NativeEndian.Uint32(sec.Data)
+	}
+	return version, nil
 }
 
 // withPath sets the object path on an open error that is already an *Error.

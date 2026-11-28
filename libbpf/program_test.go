@@ -7,11 +7,15 @@ package libbpf
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"maps"
+	"os"
+	"slices"
 	"testing"
 
 	"github.com/gobpfgo/gobpfgo/internal/btf"
+	"github.com/gobpfgo/gobpfgo/internal/elf"
 	"golang.org/x/sys/unix"
 )
 
@@ -26,11 +30,13 @@ func sectionBytes(obj *BpfObject) map[int][]byte {
 }
 
 // TestBpfProgramInsnsFinal relocates subprog.bpf.o without a kernel and
-// installs each main program's code as the load does after loading it.
-// Before that, every function returns its own instructions. After it, each
-// main program returns its final code, libbpf's with the subprograms
-// appended, in a buffer of its own; the subprograms keep their own
-// instructions and the object's section data does not change.
+// installs the instructions as the load does after loading it. Before that,
+// every function returns its own instructions. After it, each main program
+// returns its final code, libbpf's with the subprograms appended, in a
+// buffer of its own. The subprograms have no CO-RE relocation and no
+// subprogram address load, so each returns its own instructions unchanged,
+// though in a buffer of its own, and the object's section data does not
+// change.
 func TestBpfProgramInsnsFinal(t *testing.T) {
 	want := loadSubprogFixture(t, "subprog.json")
 	obj := openSubprogObject(t, "subprog.bpf.o")
@@ -44,16 +50,16 @@ func TestBpfProgramInsnsFinal(t *testing.T) {
 		own[p] = bytes.Clone(BpfProgramInsns(p))
 	}
 
-	codes, err := relocateWithoutKernel(t, obj, objectExt(t, obj))
+	rel, err := relocateWithTargets(t, obj, objectExt(t, obj), nil, argCtxTagSupported)
 	if err != nil {
 		t.Fatalf("relocate: %v", err)
 	}
-	setFinalInsns(codes)
+	setFinalInsns(rel.codes, rel.subprogInsns)
 
 	for i, w := range want.Programs {
 		p := BpfObjectFindProgramByName(obj, w.Name)
 		insns := BpfProgramInsns(p)
-		if p != codes[i].prog || BpfProgramInsnCnt(p) != w.InsnCnt || len(insns) != w.InsnCnt*bpfInsnLength {
+		if p != rel.codes[i].prog || BpfProgramInsnCnt(p) != w.InsnCnt || len(insns) != w.InsnCnt*bpfInsnLength {
 			t.Fatalf("%s: %d instructions after load, want %d", w.Name, BpfProgramInsnCnt(p), w.InsnCnt)
 		}
 		if !bytes.Equal(insns, mapLoadsByDescriptor(mustDecodeHex(t, w.Insns))) {
@@ -64,13 +70,159 @@ func TestBpfProgramInsnsFinal(t *testing.T) {
 		}
 	}
 	for _, p := range obj.programs {
-		if progIsSubprog(obj, p) && !bytes.Equal(BpfProgramInsns(p), own[p]) {
+		if !progIsSubprog(obj, p) {
+			continue
+		}
+		insns := BpfProgramInsns(p)
+		if !bytes.Equal(insns, own[p]) {
 			t.Errorf("subprogram %s: instructions changed", p.name)
+		}
+		if &insns[0] == &sectionInsns(t, obj, p.secIdx)[p.secInsnOff*bpfInsnLength] {
+			t.Errorf("subprogram %s: instructions alias the section data", p.name)
 		}
 	}
 	if !maps.EqualFunc(sectionBytes(obj), secs, bytes.Equal) {
 		t.Error("section data changed")
 	}
+}
+
+// TestSubprogInsnsCore relocates subprog_core.bpf.o against the BTF of
+// core_target.bpf.o and installs the instructions as a successful load does.
+// Each .text subprogram then returns what libbpf leaves in it: its own
+// function with libbpf's patched instruction, from the core-reloc oracle,
+// at every CO-RE record inside it, and its load of the bpf_loop callback's
+// address marked BPF_PSEUDO_FUNC. Nothing else changes, so the callback
+// load keeps its .text offset, the map load stays unpatched and the call to
+// the global subprogram keeps its object-file immediate. The main program
+// returns its final code: libbpf's from the subprog oracle, whose generated
+// loader leaves CO-RE to the kernel, with every record's patched instruction
+// at its place in the main program's own code or in the appended copy of
+// the subprogram that holds it.
+func TestSubprogInsnsCore(t *testing.T) {
+	obj := openSubprogObject(t, "subprog_core.bpf.o")
+	target := objectBTF(t, "core_target.bpf.o")
+	relos := loadCoreRelocFixture(t, "core-reloc-subprog.json")
+	final := loadSubprogFixture(t, "subprog-core.json")
+	secs := sectionBytes(obj)
+
+	rel, err := relocateWithTargets(t, obj, objectExt(t, obj), []*btf.Spec{target}, argCtxTagSupported)
+	if err != nil {
+		t.Fatalf("relocate: %v", err)
+	}
+	if len(rel.codes) != 1 || len(final.Programs) != 1 {
+		t.Fatalf("%d main programs, fixture %d, want 1", len(rel.codes), len(final.Programs))
+	}
+	setFinalInsns(rel.codes, rel.subprogInsns)
+
+	// The own-code index of each subprogram's subprogram address load and
+	// the CO-RE records each holds.
+	wantMarks := map[string][]int{"subprog_core_enum": nil, "subprog_core_read": {10}, "subprog_core_step": nil}
+	wantRecords := map[string]int{"subprog_core_enum": 1, "subprog_core_read": 2, "subprog_core_step": 1}
+
+	text := sectionInsns(t, obj, obj.textShndx)
+	for _, p := range obj.programs {
+		if !progIsSubprog(obj, p) {
+			continue
+		}
+		marks, ok := wantMarks[p.name]
+		if !ok {
+			t.Fatalf("unexpected subprogram %s", p.name)
+		}
+		want := bytes.Clone(text[p.secInsnOff*bpfInsnLength : (p.secInsnOff+p.secInsnCnt)*bpfInsnLength])
+		records := 0
+		for _, r := range relos.Relos {
+			idx := int(r.InsnOff / bpfInsnLength)
+			if r.Section != textSec || !progContainsInsn(p, idx) {
+				continue
+			}
+			off := (idx - p.secInsnOff) * bpfInsnLength
+			if got := decodeBpfInsn(want[off:]); got != r.OrigInsn.bpfInsn() {
+				t.Fatalf("%s: insn %d = %+v, oracle original %+v", p.name, idx-p.secInsnOff, got, r.OrigInsn.bpfInsn())
+			}
+			encodeBpfInsn(want[off:], r.NewInsn.bpfInsn())
+			records++
+		}
+		if records != wantRecords[p.name] {
+			t.Errorf("%s: %d CO-RE records, want %d", p.name, records, wantRecords[p.name])
+		}
+		for _, idx := range marks {
+			want[idx*bpfInsnLength+1] = want[idx*bpfInsnLength+1]&0x0f | bpfPseudoFunc<<4
+		}
+
+		insns := BpfProgramInsns(p)
+		if BpfProgramInsnCnt(p) != p.secInsnCnt {
+			t.Errorf("%s: %d instructions after load, want its own %d", p.name, BpfProgramInsnCnt(p), p.secInsnCnt)
+		}
+		for i := 0; i < len(want); i += bpfInsnLength {
+			if !bytes.Equal(insns[i:i+bpfInsnLength], want[i:i+bpfInsnLength]) {
+				t.Errorf("%s: insn %d = %+v, want %+v", p.name, i/bpfInsnLength, decodeBpfInsn(insns[i:]), decodeBpfInsn(want[i:]))
+			}
+		}
+		if &insns[0] == &text[p.secInsnOff*bpfInsnLength] {
+			t.Errorf("%s: instructions alias the section data", p.name)
+		}
+	}
+
+	code := rel.codes[0]
+	main := code.prog
+	want := mapLoadsByDescriptor(mustDecodeHex(t, final.Programs[0].Insns))
+	for _, r := range relos.Relos {
+		idx := int(r.InsnOff / bpfInsnLength)
+		holder := main
+		if r.Section == textSec {
+			holder = findProgBySecInsn(obj.programs, obj.textShndx, idx)
+		}
+		start, ok := code.subInsnOff[holder]
+		if holder == nil || !ok || (holder == main && r.Section != main.sectionName) {
+			t.Fatalf("record %s+%d: no copy in %s", r.Section, r.InsnOff, main.name)
+		}
+		encodeBpfInsn(want[(start+idx-holder.secInsnOff)*bpfInsnLength:], r.NewInsn.bpfInsn())
+	}
+	if insns := BpfProgramInsns(main); !bytes.Equal(insns, want) {
+		for i := 0; i < len(want) && i < len(insns); i += bpfInsnLength {
+			if !bytes.Equal(insns[i:i+bpfInsnLength], want[i:i+bpfInsnLength]) {
+				t.Errorf("%s: insn %d = %+v, want %+v", main.name, i/bpfInsnLength, decodeBpfInsn(insns[i:]), decodeBpfInsn(want[i:]))
+			}
+		}
+		t.Errorf("%s: final code has %d instructions, want %d", main.name, len(insns)/bpfInsnLength, len(want)/bpfInsnLength)
+	}
+
+	if !maps.EqualFunc(sectionBytes(obj), secs, bytes.Equal) {
+		t.Error("section data changed")
+	}
+}
+
+// objectBTF parses the .BTF section of the object name in testdata/progs.
+func objectBTF(t *testing.T, name string) *btf.Spec {
+	t.Helper()
+
+	o, err := elf.Open(progsDir + "/" + name)
+	if err != nil {
+		t.Fatalf("open %s: %v", name, err)
+	}
+	spec, err := btf.Parse(o.BTF, o.ByteOrder)
+	if err != nil {
+		t.Fatalf("parse %s BTF: %v", name, err)
+	}
+	return spec
+}
+
+// loadCoreRelocFixture reads a core-reloc oracle fixture.
+func loadCoreRelocFixture(t *testing.T, name string) coreRelocFixture {
+	t.Helper()
+
+	data, err := os.ReadFile("../testdata/oracle/" + name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	var f coreRelocFixture
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	if len(f.Relos) == 0 || !slices.ContainsFunc(f.Relos, func(r coreRelocEntry) bool { return r.Section == textSec }) {
+		t.Fatalf("%s has no .text relocation", name)
+	}
+	return f
 }
 
 // sectionInsns returns the instruction bytes the object holds for the

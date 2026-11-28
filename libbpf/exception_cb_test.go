@@ -223,7 +223,7 @@ func TestExceptionCbRelocateObject(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := excCbObject(t, excCbTypes(excCbTag(exceptionCbTag+tt.tag, excCbHandleID, -1)), tt.subs)
 
-			codes, err := relocateObject(obj, nil, nil, argCtxTagSupported, declTagSupported)
+			codes, _, err := relocateObject(obj, nil, nil, argCtxTagSupported, declTagSupported)
 			if got := errnoOf(err); got != tt.errno {
 				t.Fatalf("relocateObject = %v, want errno %d", err, tt.errno)
 			}
@@ -308,7 +308,7 @@ func TestExceptionCbDirectCall(t *testing.T) {
 func TestExceptionCbNoDeclTag(t *testing.T) {
 	obj := openSubprogObject(t, "exception_cb.bpf.o")
 
-	codes, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported, declTagMissing)
+	codes, _, err := relocateObject(obj, objectExt(t, obj), nil, argCtxTagSupported, declTagMissing)
 	if err != nil {
 		t.Fatalf("relocateObject: %v", err)
 	}

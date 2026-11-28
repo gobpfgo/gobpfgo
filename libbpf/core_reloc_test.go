@@ -22,6 +22,11 @@ type coreRelocInsn struct {
 	Imm  int32  `json:"imm"`
 }
 
+// bpfInsn returns the instruction the oracle printed.
+func (i coreRelocInsn) bpfInsn() bpfInsn {
+	return bpfInsn{Code: uint8(i.Code), Dst: uint8(i.Dst), Src: uint8(i.Src), Off: int16(i.Off), Imm: i.Imm}
+}
+
 type coreRelocEntry struct {
 	Section           string        `json:"section"`
 	InsnOff           uint32        `json:"insn_off"`

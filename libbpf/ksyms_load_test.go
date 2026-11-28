@@ -8,8 +8,10 @@ package libbpf
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -121,6 +123,44 @@ func TestKsymsLoadWeak(t *testing.T) {
 	got := bssU64s(t, obj, path, "ksym_weak", 4)
 	if want := []uint64{0, 0, 0, active}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ksym_weak = %#x, want %#x", got, want)
+	}
+}
+
+// TestKsymsLoadMissingKfunc loads kfunc_missing.bpf.o, whose program calls
+// a weak kernel function no kernel has without checking that it exists. The
+// loader poisons the call with the extern's index, the verifier reaches it
+// and the program fails to load with EINVAL. The log fixup replaces the
+// poisoned call and the verifier's error for it with the instruction index
+// and the kernel function's name. It needs root or CAP_BPF and skips
+// otherwise, and skips without kernel BTF, which the extern needs.
+func TestKsymsLoadMissingKfunc(t *testing.T) {
+	requireKernelBTF(t)
+	obj := openProg(t, "kfunc_missing.bpf.o")
+	err := BpfObjectLoad(obj)
+	skipIfNotPermitted(t, err)
+
+	var lerr *Error
+	if !errors.As(err, &lerr) || lerr.Op != "bpf_prog_load" || !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("load: %v, want a bpf_prog_load EINVAL for the poisoned kfunc call", err)
+	}
+	if ext := findExternByName(obj.externs, "gobpfgo_missing_kfunc"); ext.isSet {
+		t.Fatalf("gobpfgo_missing_kfunc resolved to %+v", ext.ksym)
+	}
+	p := BpfObjectFindProgramByName(obj, "handle_kfunc_missing")
+	if len(p.relocs) != 1 {
+		t.Fatalf("%d relocations, want the kfunc call's", len(p.relocs))
+	}
+	extIdx := slices.IndexFunc(obj.externs, func(e externDesc) bool { return e.name == "gobpfgo_missing_kfunc" })
+	want := fmt.Sprintf("%d: <invalid kfunc call>\nkfunc 'gobpfgo_missing_kfunc' is referenced but wasn't resolved\n",
+		p.relocs[0].Offset/bpfInsnLength)
+	if !strings.HasPrefix(lerr.Log, "handle_kfunc_missing: ") || !strings.Contains(lerr.Log, want) {
+		t.Errorf("load log = %q, want the handle_kfunc_missing log with %q", lerr.Log, want)
+	}
+	if poison := fmt.Sprintf("unknown#%d", poisonCallKfuncBase+extIdx); strings.Contains(lerr.Log, poison) {
+		t.Errorf("load log = %q, still has the poisoned call %s", lerr.Log, poison)
+	}
+	if BpfProgramFD(p) != -1 {
+		t.Errorf("program descriptor %d after the failed load", BpfProgramFD(p))
 	}
 }
 
