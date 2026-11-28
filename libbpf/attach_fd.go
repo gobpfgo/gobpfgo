@@ -99,9 +99,11 @@ func BpfProgramAttachSockmap(prog *BpfProgram, mapFD int) (*BpfLink, error) {
 // bpfProgramAttachFD creates a BPF link from the loaded prog to targetFD, a
 // descriptor or, for XDP, an interface index, with the program's expected
 // attach type. attr, which may be nil, carries the flags and union fields of
-// the link; the call fills in the program, target and attach type. It
-// returns EINVAL for a nil or unloaded program or for attr fields the attach
-// type does not take, and the kernel errno when the link is refused.
+// the link; the call fills in the program, target and attach type. The attach
+// type selects the union member the attr fields belong to, and the link
+// attribute validation refuses fields of another member with EINVAL where
+// libbpf's bpf_link_create refuses them. It returns EINVAL for a nil or
+// unloaded program, and the kernel errno when the link is refused.
 func bpfProgramAttachFD(prog *BpfProgram, targetFD int, op string, attr *sys.LinkCreateAttr) (*BpfLink, error) {
 	if err := checkAttachProgram(prog, op); err != nil {
 		return nil, err

@@ -43,7 +43,7 @@ func TestSetUprobeMulti(t *testing.T) {
 // TestSetUprobeMultiOptionalArrays checks that absent reference counter
 // offsets and cookies leave their pointers NULL.
 func TestSetUprobeMultiOptionalArrays(t *testing.T) {
-	attr := &LinkCreateAttr{}
+	attr := &LinkCreateAttr{AttachType: BPF_TRACE_UPROBE_MULTI}
 	keeps, err := setUprobeMulti(attr, &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10}})
 	if err != nil {
 		t.Fatalf("setUprobeMulti: %v", err)
@@ -60,22 +60,29 @@ func TestSetUprobeMultiInvalid(t *testing.T) {
 	valid := func() *LinkUprobeMulti {
 		return &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10, 0x20}}
 	}
+	uprobe := func(attr LinkCreateAttr) *LinkCreateAttr {
+		attr.AttachType = BPF_TRACE_UPROBE_MULTI
+		return &attr
+	}
 	tests := []struct {
 		name string
 		attr *LinkCreateAttr
 		um   *LinkUprobeMulti
 	}{
 		{"nil attr", nil, valid()},
-		{"nil arrays", &LinkCreateAttr{}, nil},
-		{"empty path", &LinkCreateAttr{}, &LinkUprobeMulti{Offsets: []uint64{0x10}}},
-		{"path with NUL", &LinkCreateAttr{}, &LinkUprobeMulti{Path: "/bin\x00/sh", Offsets: []uint64{0x10}}},
-		{"no offsets", &LinkCreateAttr{}, &LinkUprobeMulti{Path: "/bin/sh"}},
-		{"short ref_ctr_offsets", &LinkCreateAttr{}, &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10, 0x20}, RefCtrOffsets: []uint64{0x30}}},
-		{"long cookies", &LinkCreateAttr{}, &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10}, Cookies: []uint64{1, 2}}},
-		{"target btf id set", &LinkCreateAttr{TargetBTFID: 1}, valid()},
-		{"perf event cookie set", &LinkCreateAttr{PerfEventCookie: 1}, valid()},
-		{"tracing cookie set", &LinkCreateAttr{TracingCookie: 1}, valid()},
-		{"kprobe multi set", &LinkCreateAttr{KprobeMultiCnt: 1}, valid()},
+		{"nil arrays", uprobe(LinkCreateAttr{}), nil},
+		{"zero attach type", &LinkCreateAttr{}, valid()},
+		{"cgroup attach type", &LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS}, valid()},
+		{"kprobe multi attach type", &LinkCreateAttr{AttachType: BPF_TRACE_KPROBE_MULTI}, valid()},
+		{"empty path", uprobe(LinkCreateAttr{}), &LinkUprobeMulti{Offsets: []uint64{0x10}}},
+		{"path with NUL", uprobe(LinkCreateAttr{}), &LinkUprobeMulti{Path: "/bin\x00/sh", Offsets: []uint64{0x10}}},
+		{"no offsets", uprobe(LinkCreateAttr{}), &LinkUprobeMulti{Path: "/bin/sh"}},
+		{"short ref_ctr_offsets", uprobe(LinkCreateAttr{}), &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10, 0x20}, RefCtrOffsets: []uint64{0x30}}},
+		{"long cookies", uprobe(LinkCreateAttr{}), &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10}, Cookies: []uint64{1, 2}}},
+		{"target btf id set", uprobe(LinkCreateAttr{TargetBTFID: 1}), valid()},
+		{"perf event cookie set", uprobe(LinkCreateAttr{PerfEventCookie: 1}), valid()},
+		{"tracing cookie set", uprobe(LinkCreateAttr{TracingCookie: 1}), valid()},
+		{"kprobe multi set", uprobe(LinkCreateAttr{KprobeMultiCnt: 1}), valid()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,6 +90,38 @@ func TestSetUprobeMultiInvalid(t *testing.T) {
 				t.Fatalf("setUprobeMulti = %v, want EINVAL", err)
 			}
 		})
+	}
+}
+
+// TestLinkCreateArraysNeedAttachType checks that LinkCreate with kprobe multi
+// arrays and LinkCreateUprobeMulti refuse an attach type that does not select
+// the member the arrays belong to, before they fill the arrays. Attach type 0
+// is BPF_CGROUP_INET_INGRESS: Marshal would write the cgroup member and drop
+// the arrays. The invalid program descriptor makes bpf() fail with EBADF, or
+// EPERM without privileges, if the check is missing.
+func TestLinkCreateArraysNeedAttachType(t *testing.T) {
+	km := &LinkKprobeMulti{Syms: []string{"do_sys_openat2"}, Cookies: []uint64{1}}
+	for _, attachType := range []uint32{0, BPF_CGROUP_INET_EGRESS, BPF_PERF_EVENT, BPF_TRACE_FENTRY,
+		BPF_TRACE_UPROBE_MULTI, BPF_TRACE_UPROBE_SESSION, linkCreateAttachXDP} {
+		attr := &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: attachType}
+		if _, err := LinkCreate(attr, km); !errors.Is(err, unix.EINVAL) {
+			t.Errorf("LinkCreate kprobe multi with attach type %d = %v, want EINVAL", attachType, err)
+		}
+		if attr.memberSet(linkMemberKprobeMulti) {
+			t.Errorf("attach type %d: kprobe multi fields filled: %+v", attachType, *attr)
+		}
+	}
+
+	um := &LinkUprobeMulti{Path: "/bin/sh", Offsets: []uint64{0x10}, Cookies: []uint64{1}}
+	for _, attachType := range []uint32{0, BPF_CGROUP_INET_EGRESS, BPF_PERF_EVENT, BPF_TRACE_FENTRY,
+		BPF_TRACE_KPROBE_MULTI, BPF_TRACE_KPROBE_SESSION, linkCreateAttachXDP} {
+		attr := &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: attachType}
+		if _, err := LinkCreateUprobeMulti(attr, um); !errors.Is(err, unix.EINVAL) {
+			t.Errorf("LinkCreateUprobeMulti with attach type %d = %v, want EINVAL", attachType, err)
+		}
+		if attr.memberSet(linkMemberUprobeMulti) {
+			t.Errorf("attach type %d: uprobe multi fields filled: %+v", attachType, *attr)
+		}
 	}
 }
 
@@ -209,6 +248,9 @@ func TestLinkCreateMarshalKeepsFlags(t *testing.T) {
 	}
 }
 
+// TestLinkCreateAttrValidate checks the input rules of validate: the attach
+// type, or a nonzero target BTF id, selects one union member, and a field of
+// any other member is EINVAL.
 func TestLinkCreateAttrValidate(t *testing.T) {
 	tests := []struct {
 		name string
@@ -219,16 +261,49 @@ func TestLinkCreateAttrValidate(t *testing.T) {
 		{"iterator info on another type", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, IterInfoLen: 8}, unix.EINVAL},
 		{"iterator info and target btf id", LinkCreateAttr{AttachType: BPF_TRACE_ITER, IterInfoLen: 8, TargetBTFID: 1}, unix.EINVAL},
 		{"iterator info and union field", LinkCreateAttr{AttachType: BPF_TRACE_ITER, IterInfoLen: 8, TracingCookie: 1}, unix.EINVAL},
+		{"iterator with tracing cookie", LinkCreateAttr{AttachType: BPF_TRACE_ITER, TracingCookie: 1}, unix.EINVAL},
 		{"target btf id", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, TargetBTFID: 1}, nil},
+		{"target btf id with attach type 0", LinkCreateAttr{AttachType: 0, TargetBTFID: 1}, nil},
 		{"target btf id and union field", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, TargetBTFID: 1, TracingCookie: 1}, unix.EINVAL},
+		{"target btf id and cgroup field", LinkCreateAttr{AttachType: BPF_CGROUP_INET_INGRESS, TargetBTFID: 1, CgroupRelativeFD: 3}, unix.EINVAL},
+
 		{"cgroup relative fd", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, CgroupRelativeFD: 3, CgroupExpectedRevision: 2}, nil},
 		{"cgroup relative id", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, CgroupRelativeID: 3}, nil},
 		{"cgroup relative fd and id", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, CgroupRelativeFD: 3, CgroupRelativeID: 4}, unix.EINVAL},
-		{"cgroup ignores another member", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, TracingCookie: 1}, nil},
+		{"struct_ops revision", LinkCreateAttr{AttachType: BPF_STRUCT_OPS, CgroupExpectedRevision: 1}, nil},
+		{"cgroup with perf event cookie", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, PerfEventCookie: 1}, unix.EINVAL},
+		{"cgroup with kprobe multi count", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, KprobeMultiCnt: 1}, unix.EINVAL},
+		{"cgroup with kprobe multi symbols", LinkCreateAttr{AttachType: BPF_CGROUP_INET_INGRESS, KprobeMultiSyms: 1}, unix.EINVAL},
+		{"cgroup with tracing cookie", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, TracingCookie: 1}, unix.EINVAL},
+		{"cgroup with uprobe multi path", LinkCreateAttr{AttachType: BPF_CGROUP_INET_INGRESS, UprobeMultiPath: 1}, unix.EINVAL},
+		{"cgroup with uprobe multi pid", LinkCreateAttr{AttachType: BPF_CGROUP_SOCK_OPS, UprobeMultiPID: 1}, unix.EINVAL},
+		{"cgroup with iterator info", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, IterInfo: 1}, unix.EINVAL},
+		{"cgroup with iterator info length", LinkCreateAttr{AttachType: BPF_CGROUP_INET_EGRESS, IterInfoLen: 8}, unix.EINVAL},
+		{"lsm cgroup with tracing cookie", LinkCreateAttr{AttachType: BPF_LSM_CGROUP, CgroupRelativeFD: 3, TracingCookie: 1}, unix.EINVAL},
+
+		{"tracing cookie", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, TracingCookie: 1}, nil},
+		{"lsm cookie", LinkCreateAttr{AttachType: BPF_LSM_MAC, TracingCookie: 1}, nil},
+		{"tracing with cgroup relative fd", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, CgroupRelativeFD: 1}, unix.EINVAL},
+		{"tracing with cgroup revision", LinkCreateAttr{AttachType: BPF_TRACE_FEXIT, TracingCookie: 1, CgroupExpectedRevision: 1}, unix.EINVAL},
+		{"tracing with perf event cookie", LinkCreateAttr{AttachType: BPF_TRACE_RAW_TP, PerfEventCookie: 1}, unix.EINVAL},
+		{"tracing with kprobe multi count", LinkCreateAttr{AttachType: BPF_MODIFY_RETURN, KprobeMultiCnt: 1}, unix.EINVAL},
+		{"tracing with uprobe multi count", LinkCreateAttr{AttachType: BPF_LSM_MAC, UprobeMultiCnt: 1}, unix.EINVAL},
+
+		{"perf event cookie", LinkCreateAttr{AttachType: BPF_PERF_EVENT, TargetFD: 9, PerfEventCookie: 1}, nil},
+		{"perf event with tracing cookie", LinkCreateAttr{AttachType: BPF_PERF_EVENT, TracingCookie: 1}, unix.EINVAL},
+		{"kprobe session", LinkCreateAttr{AttachType: BPF_TRACE_KPROBE_SESSION, KprobeMultiCnt: 1}, nil},
+		{"kprobe multi", LinkCreateAttr{AttachType: BPF_TRACE_KPROBE_MULTI, KprobeMultiFlags: 1, KprobeMultiCnt: 2,
+			KprobeMultiSyms: 1, KprobeMultiCookies: 2}, nil},
+		{"kprobe multi with uprobe multi path", LinkCreateAttr{AttachType: BPF_TRACE_KPROBE_MULTI, KprobeMultiCnt: 1, UprobeMultiPath: 1}, unix.EINVAL},
+		{"uprobe session", LinkCreateAttr{AttachType: BPF_TRACE_UPROBE_SESSION, UprobeMultiPath: 1, UprobeMultiOffsets: 2,
+			UprobeMultiCnt: 1, UprobeMultiPID: 3}, nil},
+		{"uprobe multi with kprobe multi count", LinkCreateAttr{AttachType: BPF_TRACE_UPROBE_MULTI, UprobeMultiCnt: 1, KprobeMultiCnt: 1}, unix.EINVAL},
+		{"uprobe multi with cgroup revision", LinkCreateAttr{AttachType: BPF_TRACE_UPROBE_MULTI, UprobeMultiCnt: 1, CgroupExpectedRevision: 1}, unix.EINVAL},
+
 		{"xdp", LinkCreateAttr{AttachType: linkCreateAttachXDP, TargetFD: 1, Flags: 2}, nil},
 		{"xdp with cgroup revision", LinkCreateAttr{AttachType: linkCreateAttachXDP, CgroupExpectedRevision: 1}, unix.EINVAL},
+		{"xdp with iterator info", LinkCreateAttr{AttachType: linkCreateAttachXDP, IterInfo: 1}, unix.EINVAL},
 		{"sk_msg with relative fd", LinkCreateAttr{AttachType: linkCreateAttachSkMsgVerdict, CgroupRelativeFD: 1}, unix.EINVAL},
-		{"kprobe session", LinkCreateAttr{AttachType: BPF_TRACE_KPROBE_SESSION, KprobeMultiCnt: 1}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -241,12 +316,25 @@ func TestLinkCreateAttrValidate(t *testing.T) {
 
 // TestLinkCreateRejectsBeforeSyscall checks that LinkCreate returns the
 // validation error without calling bpf(), which would fail with EBADF for
-// the invalid descriptors or EPERM without privileges.
+// the invalid descriptors or EPERM without privileges. The uprobe multi
+// fields on attach type 0 are the arrays Marshal would drop for the cgroup
+// member.
 func TestLinkCreateRejectsBeforeSyscall(t *testing.T) {
-	attr := &LinkCreateAttr{ProgFD: ^uint32(0), TargetFD: ^uint32(0), AttachType: BPF_CGROUP_INET_INGRESS,
-		CgroupRelativeFD: 3, CgroupRelativeID: 4}
-	if _, err := LinkCreate(attr, nil); !errors.Is(err, unix.EINVAL) {
-		t.Fatalf("LinkCreate = %v, want EINVAL", err)
+	tests := map[string]*LinkCreateAttr{
+		"nil attr":                             nil,
+		"cgroup relative fd and id":            {AttachType: BPF_CGROUP_INET_INGRESS, CgroupRelativeFD: 3, CgroupRelativeID: 4},
+		"cgroup with tracing cookie":           {AttachType: BPF_CGROUP_INET_INGRESS, TracingCookie: 1},
+		"uprobe multi fields on attach type 0": {UprobeMultiPath: 1, UprobeMultiOffsets: 2, UprobeMultiCnt: 1},
+	}
+	for name, attr := range tests {
+		t.Run(name, func(t *testing.T) {
+			if attr != nil {
+				attr.ProgFD, attr.TargetFD = ^uint32(0), ^uint32(0)
+			}
+			if _, err := LinkCreate(attr, nil); !errors.Is(err, unix.EINVAL) {
+				t.Fatalf("LinkCreate = %v, want EINVAL", err)
+			}
+		})
 	}
 }
 
