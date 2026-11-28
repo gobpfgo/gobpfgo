@@ -370,21 +370,35 @@ func LinkCreateUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) (int, erro
 
 // LinkCreateIter calls BPF_LINK_CREATE for an iterator link and returns the
 // new link descriptor. info, when not empty, is the union
-// bpf_iter_link_info the iterator target takes: IterInfo and IterInfoLen
-// point at it, and it is kept alive until the syscall returns. An empty info
-// leaves both zero, the target's default iterator. It returns EINVAL before
-// the syscall when attr is nil, when AttachType is not BPF_TRACE_ITER, the
-// type that selects the iterator member, when attr already sets IterInfo or
+// bpf_iter_link_info the iterator target takes. The call sends a copy of
+// attr whose IterInfo and IterInfoLen point at info, kept alive until the
+// syscall returns; attr itself is not changed. An empty info leaves both
+// zero, the target's default iterator. It returns EINVAL before the syscall
+// when attr is nil, when AttachType is not BPF_TRACE_ITER, the type that
+// selects the iterator member, when attr already sets IterInfo or
 // IterInfoLen, and for the attributes validate refuses.
 func LinkCreateIter(attr *LinkCreateAttr, info []byte) (int, error) {
+	iter, keeps, err := iterLinkAttr(attr, info)
+	if err != nil {
+		return -1, err
+	}
+	return linkCreate(iter, keeps)
+}
+
+// iterLinkAttr returns a copy of attr whose iterator fields point at info,
+// when info is not empty, and the buffers that must stay alive until the
+// syscall returns. It returns EINVAL for the inputs LinkCreateIter refuses
+// before validate.
+func iterLinkAttr(attr *LinkCreateAttr, info []byte) (*LinkCreateAttr, [][]byte, error) {
 	if attr == nil || attr.AttachType != BPF_TRACE_ITER || attr.IterInfo != 0 || attr.IterInfoLen != 0 {
-		return -1, unix.EINVAL
+		return nil, nil, unix.EINVAL
 	}
+	iter := *attr
 	if len(info) > 0 {
-		attr.IterInfo = uint64(addr(info))
-		attr.IterInfoLen = uint32(len(info))
+		iter.IterInfo = uint64(addr(info))
+		iter.IterInfoLen = uint32(len(info))
 	}
-	return linkCreate(attr, [][]byte{info})
+	return &iter, [][]byte{info}, nil
 }
 
 // setUprobeMulti validates um, copies its path and arrays into new buffers and

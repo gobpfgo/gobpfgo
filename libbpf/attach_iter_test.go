@@ -18,7 +18,8 @@ import (
 // definitions: an iterator is a tracing program with BPF_TRACE_ITER whose
 // target is a kernel BTF function, iter.s is its sleepable form, and a
 // freplace program is BPF_PROG_TYPE_EXT with attach type 0 whose target is a
-// function of another BPF program.
+// function of another BPF program. The bare sections, which name no target,
+// take the same definitions, and a bare iter.s stays sleepable.
 func TestSecDefIterFreplace(t *testing.T) {
 	tests := []struct {
 		section    string
@@ -30,6 +31,9 @@ func TestSecDefIterFreplace(t *testing.T) {
 		{"iter/bpf_map", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, 0, secAttachBTF},
 		{"iter.s/bpf_map", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, BPF_F_SLEEPABLE, secAttachBTF},
 		{"freplace/xdp_pass", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, 0, secAttachProg},
+		{"iter", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, 0, secAttachBTF},
+		{"iter.s", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, BPF_F_SLEEPABLE, secAttachBTF},
+		{"freplace", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, 0, secAttachProg},
 	}
 	for _, tt := range tests {
 		t.Run(tt.section, func(t *testing.T) {
@@ -45,10 +49,11 @@ func TestSecDefIterFreplace(t *testing.T) {
 	}
 }
 
-// TestOpenIterFreplaceObjects opens iter.bpf.o and freplace.bpf.o and
-// checks that their programs take the type, attach type and attach target of
-// their section: the iterator's target is resolved in the kernel BTF, the
-// freplace program's in the BTF of a program.
+// TestOpenIterFreplaceObjects opens iter.bpf.o, freplace.bpf.o and their
+// bare-section forms and checks that their programs take the type, attach
+// type and attach target of their section: the iterator's target is
+// resolved in the kernel BTF, the freplace program's in the BTF of a
+// program, and a bare section has no target.
 func TestOpenIterFreplaceObjects(t *testing.T) {
 	tests := []struct {
 		object, name string
@@ -60,6 +65,8 @@ func TestOpenIterFreplaceObjects(t *testing.T) {
 	}{
 		{"iter.bpf.o", "dump_bpf_map", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, true, false, "bpf_map"},
 		{"freplace.bpf.o", "replace_xdp", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, false, true, "xdp_pass"},
+		{"iter_bare.bpf.o", "dump_bare", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, true, false, ""},
+		{"freplace_bare.bpf.o", "replace_bare", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, false, true, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.object, func(t *testing.T) {
@@ -148,6 +155,93 @@ func TestResolveAttachBTFIDFreplaceNoTarget(t *testing.T) {
 	prog.attachBTFID = 42
 	if err := resolveAttachBTFID(prog); err != nil || prog.attachBTFID != 42 {
 		t.Fatalf("resolveAttachBTFID with id 42 set = %v, id %d; want nil and 42", err, prog.attachBTFID)
+	}
+}
+
+// TestResolveAttachBTFIDBareSection checks that a program of a bare
+// section, which names no target, fails the load with EINVAL before any
+// lookup when BpfProgramSetAttachTarget gave it no function, as libbpf's
+// prepare step does: a bare freplace program with only an attach program
+// descriptor, which would fail the program-BTF lookup with the kernel's
+// errno, and a bare iterator, which would fail the vmlinux lookup with
+// ENOENT. A function id set before the load is kept.
+func TestResolveAttachBTFIDBareSection(t *testing.T) {
+	freplace := findProgram(t, openProg(t, "freplace_bare.bpf.o"), "replace_bare")
+	if err := BpfProgramSetAttachTarget(freplace, fakeLoadedFD, ""); err != nil {
+		t.Fatalf("set attach target: %v", err)
+	}
+	iter := findProgram(t, openProg(t, "iter_bare.bpf.o"), "dump_bare")
+
+	for _, prog := range []*BpfProgram{freplace, iter} {
+		t.Run(prog.sectionName+" "+prog.name, func(t *testing.T) {
+			err := resolveAttachBTFID(prog)
+			if !errors.Is(err, unix.EINVAL) {
+				t.Fatalf("resolveAttachBTFID = %v, want EINVAL", err)
+			}
+			if prog.attachBTFID != 0 {
+				t.Fatalf("attach BTF id = %d after a failed resolve, want 0", prog.attachBTFID)
+			}
+
+			prog.attachBTFID = 42
+			if err := resolveAttachBTFID(prog); err != nil || prog.attachBTFID != 42 {
+				t.Fatalf("resolveAttachBTFID with id 42 set = %v, id %d; want nil and 42", err, prog.attachBTFID)
+			}
+		})
+	}
+}
+
+// TestResolveAttachBTFIDEmptyKernelTarget checks that an empty target after
+// the slash is looked up in the vmlinux BTF like any other name and fails
+// with ENOENT, not EINVAL: fentry/ looks up a FUNC with no name and iter/
+// the FUNC bpf_iter_. libbpf goes on to search the module BTFs and returns
+// ESRCH; this package has no module attach targets yet and reports any
+// missing kernel name as ENOENT. The root test
+// TestResolveAttachBTFIDEmptyProgTarget covers the program-BTF lookup. It
+// skips when the kernel BTF cannot be read.
+func TestResolveAttachBTFIDEmptyKernelTarget(t *testing.T) {
+	if _, err := vmlinuxBTF(); err != nil {
+		t.Skipf("kernel BTF: %v", err)
+	}
+
+	progs := []*BpfProgram{
+		{name: "empty_fentry", sectionName: "fentry/", attachBTF: true,
+			progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_FENTRY},
+		{name: "empty_iter", sectionName: "iter/", attachBTF: true,
+			progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_ITER},
+	}
+	for _, prog := range progs {
+		t.Run(prog.sectionName, func(t *testing.T) {
+			if err := resolveAttachBTFID(prog); !errors.Is(err, unix.ENOENT) {
+				t.Fatalf("resolveAttachBTFID = %v, want ENOENT", err)
+			}
+			if prog.attachBTFID != 0 {
+				t.Fatalf("attach BTF id = %d after a failed resolve, want 0", prog.attachBTFID)
+			}
+		})
+	}
+}
+
+// TestResolveAttachBTFIDProgramGate checks that the load looks the target
+// up in a program's BTF for a BPF_PROG_TYPE_EXT program or a program with an
+// attach program descriptor, as libbpf_find_attach_btf_id does, whatever its
+// section: an EXT program of a kernel-target section without a descriptor
+// fails with EINVAL before any lookup, and a tracing program with an attach
+// program descriptor fails the program-BTF lookup with the kernel's errno
+// for the descriptor no process has open, EBADFD, or EPERM where
+// unprivileged bpf() is refused.
+func TestResolveAttachBTFIDProgramGate(t *testing.T) {
+	ext := &BpfProgram{name: "ext_fentry", sectionName: "fentry/do_sys_openat2", attachBTF: true,
+		attachTarget: "do_sys_openat2", progType: BPF_PROG_TYPE_EXT}
+	if err := resolveAttachBTFID(ext); !errors.Is(err, unix.EINVAL) {
+		t.Fatalf("resolveAttachBTFID for EXT without a descriptor = %v, want EINVAL", err)
+	}
+
+	tracing := &BpfProgram{name: "fentry_prog", sectionName: "fentry/xdp_pass", attachBTF: true,
+		attachTarget: "xdp_pass", progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_FENTRY,
+		attachProgFD: fakeLoadedFD}
+	err := resolveAttachBTFID(tracing)
+	if !errors.Is(err, unix.EBADFD) && !errors.Is(err, unix.EPERM) {
+		t.Fatalf("resolveAttachBTFID for fentry with a descriptor = %v, want EBADFD or EPERM", err)
 	}
 }
 
@@ -255,9 +349,51 @@ func TestBpfProgramSetAttachTargetKernel(t *testing.T) {
 	}
 }
 
+// TestBpfProgramSetAttachTargetRetarget sets a function target, then an
+// attach program descriptor alone. The second call must drop the function's
+// BTF id and BTF object descriptor, so the load resolves the section target
+// in the new program's BTF instead of loading against the old function: the
+// resolve fails the program-BTF lookup with the kernel's errno for the
+// descriptor no process has open, EBADFD, or EPERM where unprivileged bpf()
+// is refused, where the old id would have passed without a lookup. libbpf
+// keeps the old id. It skips when the kernel BTF cannot be read and when it
+// has no bpf_map iterator.
+func TestBpfProgramSetAttachTargetRetarget(t *testing.T) {
+	kernel, err := vmlinuxBTF()
+	if err != nil {
+		t.Skipf("kernel BTF: %v", err)
+	}
+	if kernel.Find("bpf_iter_bpf_map", btf.KindFunc) == nil {
+		t.Skip("kernel BTF has no bpf_iter_bpf_map")
+	}
+
+	prog := openIterProgram(t)
+	if err := BpfProgramSetAttachTarget(prog, 0, "bpf_map"); err != nil {
+		t.Fatalf("set attach target bpf_map: %v", err)
+	}
+	if prog.attachBTFID == 0 {
+		t.Fatal("BTF id = 0 after the function target, want the bpf_iter_bpf_map id")
+	}
+	// A module function would leave its BTF object here.
+	prog.attachBTFObjFD = 7
+
+	if err := BpfProgramSetAttachTarget(prog, fakeLoadedFD, ""); err != nil {
+		t.Fatalf("set attach target descriptor only: %v", err)
+	}
+	if prog.attachProgFD != fakeLoadedFD || prog.attachBTFID != 0 || prog.attachBTFObjFD != 0 {
+		t.Fatalf("program fd %d, BTF id %d, BTF object fd %d; want %d, 0 and 0",
+			prog.attachProgFD, prog.attachBTFID, prog.attachBTFObjFD, fakeLoadedFD)
+	}
+
+	err = resolveAttachBTFID(prog)
+	if !errors.Is(err, unix.EBADFD) && !errors.Is(err, unix.EPERM) {
+		t.Fatalf("resolveAttachBTFID after the retarget = %v, want the lookup's EBADFD or EPERM", err)
+	}
+}
+
 // TestIterAttr checks the link attribute of an iterator: the program, no
 // target descriptor and BPF_TRACE_ITER. internal/sys tests that
-// sys.LinkCreateIter points it at the link info.
+// sys.LinkCreateIter sends a copy that points at the link info.
 func TestIterAttr(t *testing.T) {
 	want := sys.LinkCreateAttr{ProgFD: 5, AttachType: sys.BPF_TRACE_ITER}
 	if got := iterAttr(&BpfProgram{fd: 5, expectedAttachType: BPF_TRACE_ITER}); *got != want {
@@ -266,9 +402,11 @@ func TestIterAttr(t *testing.T) {
 }
 
 // TestBpfProgramAttachIterInvalid checks that the iterator attach rejects a
-// nil or unloaded program and a non-nil empty LinkInfo with EINVAL before
-// bpf(), and that LinkInfo bytes reach the kernel, which refuses the
-// descriptor no process has open with an error other than EINVAL.
+// nil or unloaded program with EINVAL before bpf(), and that every link info
+// reaches the kernel, which refuses the descriptor no process has open with
+// an error other than EINVAL: info bytes, and an empty non-nil LinkInfo,
+// which is the default iterator like nil. internal/sys tests that empty
+// info sends no pointer and a zero length.
 func TestBpfProgramAttachIterInvalid(t *testing.T) {
 	const op = "bpf_program__attach_iter"
 	loaded := &BpfProgram{fd: fakeLoadedFD, expectedAttachType: BPF_TRACE_ITER}
@@ -277,10 +415,9 @@ func TestBpfProgramAttachIterInvalid(t *testing.T) {
 		prog *BpfProgram
 		opts *BpfIterOpts
 	}{
-		"nil program":      {nil, nil},
-		"unloaded":         {&BpfProgram{fd: -1}, nil},
-		"empty link info":  {loaded, &BpfIterOpts{LinkInfo: []byte{}}},
-		"unloaded no info": {&BpfProgram{fd: -1}, &BpfIterOpts{LinkInfo: []byte{1, 0, 0, 0}}},
+		"nil program":        {nil, nil},
+		"unloaded":           {&BpfProgram{fd: -1}, nil},
+		"unloaded with info": {&BpfProgram{fd: -1}, &BpfIterOpts{LinkInfo: []byte{1, 0, 0, 0}}},
 	}
 	for name, c := range refused {
 		t.Run(name, func(t *testing.T) {
@@ -289,9 +426,13 @@ func TestBpfProgramAttachIterInvalid(t *testing.T) {
 		})
 	}
 
-	link, err := BpfProgramAttachIter(loaded, &BpfIterOpts{LinkInfo: []byte{1, 0, 0, 0}})
-	if link != nil || err == nil || errors.Is(err, unix.EINVAL) {
-		t.Fatalf("link info on a closed descriptor = %v, %v; want a kernel error other than EINVAL", link, err)
+	for name, info := range map[string][]byte{"link info": {1, 0, 0, 0}, "empty link info": {}} {
+		t.Run(name, func(t *testing.T) {
+			link, err := BpfProgramAttachIter(loaded, &BpfIterOpts{LinkInfo: info})
+			if link != nil || err == nil || errors.Is(err, unix.EINVAL) {
+				t.Fatalf("%s on a closed descriptor = %v, %v; want a kernel error other than EINVAL", name, link, err)
+			}
+		})
 	}
 }
 
@@ -312,8 +453,10 @@ func TestFreplaceAttr(t *testing.T) {
 // attach, which fail with EINVAL before any system call: a nil program, a
 // target descriptor without a function name, a function name without a
 // target descriptor, and a program that is not BPF_PROG_TYPE_EXT, with or
-// without a target. An unloaded freplace program without a target fails
-// with EINVAL too, reported as the freplace attach.
+// without a target. An unloaded freplace program fails with EINVAL too,
+// reported as the freplace attach: without a target, and with one before
+// the target lookup, which would fail with the kernel's errno for the
+// descriptor no process has open.
 func TestBpfProgramAttachFreplaceInputs(t *testing.T) {
 	const op = "bpf_program__attach_freplace"
 	ext := &BpfProgram{fd: fakeLoadedFD, progType: BPF_PROG_TYPE_EXT}
@@ -330,6 +473,7 @@ func TestBpfProgramAttachFreplaceInputs(t *testing.T) {
 		"not ext with target":      {kprobe, fakeLoadedFD, "xdp_pass"},
 		"not ext without target":   {kprobe, 0, ""},
 		"unloaded without target":  {&BpfProgram{fd: -1, progType: BPF_PROG_TYPE_EXT}, 0, ""},
+		"unloaded with target":     {&BpfProgram{fd: -1, progType: BPF_PROG_TYPE_EXT}, fakeLoadedFD, "xdp_pass"},
 		"tracing program as ext":   {&BpfProgram{fd: fakeLoadedFD, progType: BPF_PROG_TYPE_TRACING}, fakeLoadedFD, "xdp_pass"},
 		"negative target, no name": {ext, -1, ""},
 	}
@@ -360,9 +504,9 @@ func TestBpfProgramAttachFreplaceBadTarget(t *testing.T) {
 
 // TestBpfProgramAttachIterFreplaceSection checks that the automatic attach
 // dispatches iter to the iterator attach and freplace to the tracing
-// attach, as libbpf's attach_iter and attach_trace do: with a descriptor no
-// process has open, each fails in the kernel under its own operation name
-// instead of returning EOPNOTSUPP.
+// attach, in their namespaced and bare forms, as libbpf's attach_iter and
+// attach_trace do: with a descriptor no process has open, each fails in the
+// kernel under its own operation name instead of returning EOPNOTSUPP.
 func TestBpfProgramAttachIterFreplaceSection(t *testing.T) {
 	tests := []struct {
 		section string
@@ -372,6 +516,9 @@ func TestBpfProgramAttachIterFreplaceSection(t *testing.T) {
 		{"iter/bpf_map", BpfProgram{progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_ITER}, "bpf_program__attach_iter"},
 		{"iter.s/bpf_map", BpfProgram{progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_ITER}, "bpf_program__attach_iter"},
 		{"freplace/xdp_pass", BpfProgram{progType: BPF_PROG_TYPE_EXT}, "bpf_program__attach_trace"},
+		{"iter", BpfProgram{progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_ITER}, "bpf_program__attach_iter"},
+		{"iter.s", BpfProgram{progType: BPF_PROG_TYPE_TRACING, expectedAttachType: BPF_TRACE_ITER}, "bpf_program__attach_iter"},
+		{"freplace", BpfProgram{progType: BPF_PROG_TYPE_EXT}, "bpf_program__attach_trace"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.section, func(t *testing.T) {

@@ -536,9 +536,9 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 		return BpfProgramAttachTrace(prog)
 	case "lsm/", "lsm.s/":
 		return BpfProgramAttachLsm(prog)
-	case "iter/", "iter.s/":
+	case "iter/", "iter.s/", "iter", "iter.s":
 		return BpfProgramAttachIter(prog, nil)
-	case "freplace/":
+	case "freplace/", "freplace":
 		return BpfProgramAttachTrace(prog)
 	default:
 		return nil, attachErr(op, unix.EOPNOTSUPP)

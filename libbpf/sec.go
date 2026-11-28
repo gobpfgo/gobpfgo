@@ -13,6 +13,7 @@ type secFlags uint32
 const (
 	// secAttachBTF marks sections whose target is a function name in the
 	// kernel BTF; the program's attach target is the text after the prefix.
+	// The bare iter sections name none, so BpfProgramSetAttachTarget must.
 	secAttachBTF secFlags = 1 << iota
 	// secUSDT marks USDT sections. Their programs are loaded with the
 	// uprobe multi expected attach type when the kernel has that link, so
@@ -21,8 +22,10 @@ const (
 	// secAttachProg marks sections whose target is a function of another
 	// BPF program, freplace. The program's attach target is the text after
 	// the prefix; the load looks it up in the BTF of the program
-	// BpfProgramSetAttachTarget names, never in the kernel BTF. libbpf
-	// marks freplace SEC_ATTACH_BTF and tells it apart by program type.
+	// BpfProgramSetAttachTarget names, never in the kernel BTF. The bare
+	// freplace section names no function, so BpfProgramSetAttachTarget
+	// must. libbpf marks freplace SEC_ATTACH_BTF and tells it apart by
+	// program type.
 	secAttachProg
 )
 
@@ -91,6 +94,9 @@ var secDefs = []secDef{
 	{"uprobe", BPF_PROG_TYPE_KPROBE, BPF_ATTACH_TYPE_UNSPEC, 0, 0},
 	{"uretprobe", BPF_PROG_TYPE_KPROBE, BPF_ATTACH_TYPE_UNSPEC, 0, 0},
 	{"kprobe.session", BPF_PROG_TYPE_KPROBE, BPF_TRACE_KPROBE_SESSION, 0, 0},
+	{"iter.s", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, BPF_F_SLEEPABLE, secAttachBTF},
+	{"iter", BPF_PROG_TYPE_TRACING, BPF_TRACE_ITER, 0, secAttachBTF},
+	{"freplace", BPF_PROG_TYPE_EXT, BPF_ATTACH_TYPE_UNSPEC, 0, secAttachProg},
 	{"kprobe", BPF_PROG_TYPE_KPROBE, BPF_ATTACH_TYPE_UNSPEC, 0, 0},
 	{"kretprobe", BPF_PROG_TYPE_KPROBE, BPF_ATTACH_TYPE_UNSPEC, 0, 0},
 	{"xdp", BPF_PROG_TYPE_XDP, BPF_XDP, 0, 0},
