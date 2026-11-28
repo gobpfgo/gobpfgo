@@ -448,9 +448,10 @@ func kconfigExterns(externs ...externDesc) ([]externDesc, []byte) {
 }
 
 // TestResolveVirtualExterns resolves the LINUX_ externs: the kernel version,
-// the BPF cookie probe result, the unported syscall wrapper extern as zero,
-// weak unknown ones as zero, and errors for strong unknown ones and other
-// names.
+// the BPF cookie and syscall wrapper probe results, weak unknown ones as
+// zero, and errors for strong unknown ones and other names. The syscall
+// wrapper probe needs root; TestProbeSyscallWrapperKernel checks its result
+// against the running kernel.
 func TestResolveVirtualExterns(t *testing.T) {
 	u32 := func(name string, weak bool) externDesc {
 		return externDesc{name: name, isWeak: weak, kcfg: kcfgExtern{typ: kcfgInt, sz: 4, align: 4}}
@@ -470,6 +471,9 @@ func TestResolveVirtualExterns(t *testing.T) {
 	binary.NativeEndian.PutUint32(want, getKernelVersion())
 	if featBpfCookie.supported() {
 		binary.NativeEndian.PutUint32(want[4:], 1)
+	}
+	if featSyscallWrapper.supported() {
+		binary.NativeEndian.PutUint32(want[8:], 1)
 	}
 	if got := obj.kconfigMap.initialValue; !bytes.Equal(got, want) {
 		t.Errorf("value = %x, want %x", got, want)

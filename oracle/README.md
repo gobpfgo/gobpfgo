@@ -36,7 +36,7 @@ The C harness that produces the golden files under `testdata/oracle/`. It is one
 make -C oracle fixtures
 ```
 
-This writes `layout.json`, `attr.json`, `open.json`, `open-global-data.json`, `open-kconfig.json`, `open-kconfig-types.json`, `open-ksyms.json`, `open-ksyms-addr.json`, `open-ksyms-weak.json`, `open-subprog-hidden.json`, `open-subprog-arg-ctx.json`, `kconfig.json`, the `dump` texts, `core.json`, `core-reloc.json`, `linfo.json`, `zip.json` and `dedup.json`, whose objects are listed in `DEDUP_OBJECTS` in the Makefile.
+This writes `layout.json`, `attr.json`, `open.json`, `open-global-data.json`, `open-kconfig.json`, `open-kconfig-types.json`, `open-ksyms.json`, `open-ksyms-addr.json`, `open-ksyms-weak.json`, `open-subprog-hidden.json`, `open-subprog-arg-ctx.json`, `kconfig.json`, the `dump` texts, `core.json`, `core-reloc.json`, `core-reloc-subprog.json` for `subprog_core.bpf.o`, whose CO-RE relocations sit in `.text` subprograms, `linfo.json`, `zip.json` and `dedup.json`, whose objects are listed in `DEDUP_OBJECTS` in the Makefile.
 
 ```sh
 make -C oracle linker-fixture
@@ -48,7 +48,7 @@ This writes `linker.json` for `kprobe.bpf.o` alone, `linker-merge.json` for `lin
 make -C oracle subprog-fixture
 ```
 
-This writes `subprog.json` for `subprog.bpf.o`, `subprog-callback.json` for `subprog_callback.bpf.o`, `subprog-hidden.json` for `subprog_hidden.bpf.o`, whose global subprogram with hidden visibility the load marks static, `subprog-arg-ctx.json` for `subprog_arg_ctx.bpf.o`, whose global subprogram takes an `__arg_ctx` argument, `subprog-callx.json` for `callx.bpf.o`, whose callx programs get per-program copies of their function tables, `subprog-exception-cb.json` for `exception_cb.bpf.o`, whose tagged program gets its exception callback appended, `subprog-exception-cb-direct.json` for `exception_cb_direct.bpf.o`, whose program calls its callback directly, `subprog-link-text.json` and `subprog-link-text-reverse.json` for `link_text_a.bpf.o` and `link_text_b.bpf.o` linked in each order, and `subprog-link-extern.json` and `subprog-link-extern-reverse.json` for `link_extern_a.bpf.o` and `link_extern_b.bpf.o` linked in each order. It needs no privileges.
+This writes `subprog.json` for `subprog.bpf.o`, `subprog-callback.json` for `subprog_callback.bpf.o`, `subprog-hidden.json` for `subprog_hidden.bpf.o`, whose global subprogram with hidden visibility the load marks static, `subprog-arg-ctx.json` for `subprog_arg_ctx.bpf.o`, whose global subprogram takes an `__arg_ctx` argument, `subprog-callx.json` for `callx.bpf.o`, whose callx programs get per-program copies of their function tables, `subprog-exception-cb.json` for `exception_cb.bpf.o`, whose tagged program gets its exception callback appended, `subprog-exception-cb-direct.json` for `exception_cb_direct.bpf.o`, whose program calls its callback directly, `subprog-core.json` for `subprog_core.bpf.o`, whose subprograms carry CO-RE relocations that the generated loader leaves unpatched, `subprog-link-text.json` and `subprog-link-text-reverse.json` for `link_text_a.bpf.o` and `link_text_b.bpf.o` linked in each order, and `subprog-link-extern.json` and `subprog-link-extern-reverse.json` for `link_extern_a.bpf.o` and `link_extern_b.bpf.o` linked in each order. It needs no privileges.
 
 ```sh
 make -C testdata/progs usdt_target

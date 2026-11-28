@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -407,4 +408,91 @@ func kallsymsAddress(t *testing.T, name string) uint64 {
 		t.Skipf("%s has no address for %s", kallsymsPath, name)
 	}
 	return addr
+}
+
+// TestArchSyscallPrefix checks libbpf's syscall entry prefix for the
+// architectures the package builds for.
+func TestArchSyscallPrefix(t *testing.T) {
+	want := map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
+	if got := archSyscallPrefix(); got != want || got == "" {
+		t.Errorf("prefix on %s = %q, want %q", runtime.GOARCH, got, want)
+	}
+}
+
+// TestProbeSyscallWrapperTracefs runs the syscall wrapper probe without the
+// kprobe PMU, against a temporary tracefs. The probe adds a kprobe event on
+// __<prefix>_sys_bpf, named as libbpf names it, removes it again and reports
+// the feature; the two commands land back to back, as the probe writes no
+// newline. A tracefs without kprobe_events reports it missing, and the
+// probe creates no file there.
+func TestProbeSyscallWrapperTracefs(t *testing.T) {
+	fakeKprobePMU(t, nil)
+	target := "__" + archSyscallPrefix() + "_sys_bpf"
+
+	events := filepath.Join(fakeTracefs(t), kprobeEventsFile)
+	if !probeSyscallWrapper() {
+		t.Fatal("probe = false with a writable kprobe_events")
+	}
+	data, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add, remove, ok := strings.Cut(string(data), "-:")
+	name, _, _ := strings.Cut(strings.TrimPrefix(add, "p:kprobes/"), " ")
+	prefix := fmt.Sprintf("libbpf_%d_", os.Getpid())
+	seq := strings.TrimSuffix(strings.TrimPrefix(name, prefix), "_"+target+"_0x0")
+	if !ok || add != "p:kprobes/"+name+" "+target+"+0x0" || remove != "kprobes/"+name ||
+		!strings.HasPrefix(name, prefix) || seq == "" || strings.Trim(seq, "0123456789") != "" {
+		t.Errorf("kprobe_events = %q, want the add and remove of kprobes/%s<seq>_%s_0x0", data, prefix, target)
+	}
+
+	noEvents := t.TempDir()
+	setTracefsDirs(t, noEvents, noEvents)
+	if probeSyscallWrapper() {
+		t.Error("probe = true without kprobe_events")
+	}
+	if entries, err := os.ReadDir(noEvents); err != nil || len(entries) != 0 {
+		t.Errorf("tracefs without kprobe_events now holds %v, %v", entries, err)
+	}
+}
+
+// TestProbeSyscallWrapperKernel runs the syscall wrapper probe on the running
+// kernel. With root it must report the feature exactly when /proc/kallsyms
+// lists __<prefix>_sys_bpf, which every amd64 and arm64 kernel the package
+// supports has. The cached feature, which LINUX_HAS_SYSCALL_WRAPPER reads,
+// agrees with the probe. Without root the kprobe cannot be created, so the
+// test skips.
+func TestProbeSyscallWrapperKernel(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("the probe needs root to create the kprobe")
+	}
+	got := probeSyscallWrapper()
+	if want := kallsymsHas(t, "__"+archSyscallPrefix()+"_sys_bpf"); got != want {
+		t.Errorf("probe = %v, want %v from %s", got, want, kallsymsPath)
+	}
+	if cached := featSyscallWrapper.supported(); cached != got {
+		t.Errorf("cached feature = %v, probe = %v", cached, got)
+	}
+}
+
+// kallsymsHas reports whether /proc/kallsyms lists the kernel symbol name.
+// The names are visible without CAP_SYSLOG.
+func kallsymsHas(t *testing.T, name string) bool {
+	t.Helper()
+
+	f, err := os.Open(kallsymsPath)
+	if err != nil {
+		t.Fatalf("open %s: %v", kallsymsPath, err)
+	}
+	defer f.Close()
+
+	found := false
+	err = kallsymsParse(f, func(_ uint64, _ byte, symName string) error {
+		found = found || symName == name
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parse %s: %v", kallsymsPath, err)
+	}
+	return found
 }

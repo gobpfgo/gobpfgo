@@ -2,7 +2,7 @@
 // libbpf-source: src/libbpf.h
 // libbpf-source: src/libbpf.c
 // libbpf-commit: 4f05fb027a08a8a66d03916cf6a68a91e2c720ea
-// libbpf-symbols: struct bpf_kprobe_opts, bpf_program__attach_kprobe, bpf_program__attach_kprobe_opts, add_kprobe_event_legacy
+// libbpf-symbols: struct bpf_kprobe_opts, bpf_program__attach_kprobe, bpf_program__attach_kprobe_opts, add_kprobe_event_legacy, arch_specific_syscall_pfx, probe_kern_syscall_wrapper
 
 //go:build linux && (amd64 || arm64)
 
@@ -10,6 +10,8 @@ package libbpf
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 
 	"golang.org/x/sys/unix"
 )
@@ -115,16 +117,71 @@ func BpfProgramAttachKprobeOpts(prog *BpfProgram, funcName string, opts *BpfKpro
 // again.
 func openLegacyKprobe(retprobe bool, funcName string, offset uint64) (*legacyEvent, int, error) {
 	kind := probeKprobe
-	prefix := byte('p')
 	if retprobe {
 		kind = probeKretprobe
-		prefix = 'r'
 	}
 	event := &legacyEvent{root: tracefsRoot(), kind: kind, name: probeEventName(funcName, offset)}
-	line := fmt.Sprintf("%c:%s/%s %s+0x%x", prefix, event.group(), event.name, funcName, offset)
-	pfd, err := event.open(line, -1)
+	pfd, err := event.open(kprobeEventLine(event, funcName, offset), -1)
 	if err != nil {
 		return nil, -1, err
 	}
 	return event, pfd, nil
+}
+
+// kprobeEventLine returns the kprobe_events command that adds event, a
+// kprobe or kretprobe at offset into funcName, as libbpf's
+// add_kprobe_event_legacy writes it.
+func kprobeEventLine(event *legacyEvent, funcName string, offset uint64) string {
+	prefix := byte('p')
+	if event.kind == probeKretprobe {
+		prefix = 'r'
+	}
+	return fmt.Sprintf("%c:%s/%s %s+0x%x", prefix, event.group(), event.name, funcName, offset)
+}
+
+// archSyscallPrefix returns libbpf's arch_specific_syscall_pfx for the
+// architecture the package is built for: the infix of the kernel's
+// arch-specific syscall entry points, as in __x64_sys_bpf, or "" for an
+// architecture without one.
+func archSyscallPrefix() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	}
+	return ""
+}
+
+// probeSyscallWrapper reports whether the kernel enters syscalls through
+// arch-specific wrappers, CONFIG_ARCH_HAS_SYSCALL_WRAPPER, by checking that
+// a kprobe on __<prefix>_sys_bpf can be created, as libbpf's
+// probe_kern_syscall_wrapper does. With the kprobe perf PMU it opens the
+// kprobe for the calling process and closes it again. Without the PMU it
+// adds a tracefs kprobe event and removes it; libbpf ignores a failed
+// removal, and so does the probe. It needs root, or CAP_PERFMON and for the
+// tracefs path write access to tracefs; without them, and on an
+// architecture without a prefix, the feature is reported missing.
+func probeSyscallWrapper() bool {
+	prefix := archSyscallPrefix()
+	if prefix == "" {
+		return false
+	}
+	name := "__" + prefix + "_sys_bpf"
+
+	if _, err := determineKprobePerfType(); err == nil {
+		pfd, err := perfEventOpenProbe(false, false, name, 0, os.Getpid(), 0)
+		if err != nil {
+			return false
+		}
+		unix.Close(pfd)
+		return true
+	}
+
+	event := &legacyEvent{root: tracefsRoot(), kind: probeKprobe, name: probeEventName(name, 0)}
+	if err := event.add(kprobeEventLine(event, name, 0)); err != nil {
+		return false
+	}
+	_ = event.remove()
+	return true
 }

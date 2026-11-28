@@ -61,6 +61,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) dump-decl-strip ../testdata/progs/dump.bpf.o > ../testdata/oracle/dump-decl-strip.txt
 	$(ORACLE) core ../testdata/progs/core.bpf.o > ../testdata/oracle/core.json
 	$(ORACLE) core-reloc ../testdata/progs/core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc.json
+	$(ORACLE) core-reloc ../testdata/progs/subprog_core.bpf.o ../testdata/progs/core_target.bpf.o > ../testdata/oracle/core-reloc-subprog.json
 	$(ORACLE) linfo > ../testdata/oracle/linfo.json
 	$(ORACLE) zip > ../testdata/oracle/zip.json
 	$(ORACLE) dedup $(DEDUP_OBJECTS) > ../testdata/oracle/dedup.json
@@ -115,6 +116,7 @@ subprog-fixture: $(ORACLE)
 	$(ORACLE) subprog ../testdata/progs/callx.bpf.o > ../testdata/oracle/subprog-callx.json
 	$(ORACLE) subprog ../testdata/progs/exception_cb.bpf.o > ../testdata/oracle/subprog-exception-cb.json
 	$(ORACLE) subprog ../testdata/progs/exception_cb_direct.bpf.o > ../testdata/oracle/subprog-exception-cb-direct.json
+	$(ORACLE) subprog ../testdata/progs/subprog_core.bpf.o > ../testdata/oracle/subprog-core.json
 	$(ORACLE) subprog ../testdata/progs/link_text_a.bpf.o ../testdata/progs/link_text_b.bpf.o > ../testdata/oracle/subprog-link-text.json
 	$(ORACLE) subprog ../testdata/progs/link_text_b.bpf.o ../testdata/progs/link_text_a.bpf.o > ../testdata/oracle/subprog-link-text-reverse.json
 	$(ORACLE) subprog ../testdata/progs/link_extern_a.bpf.o ../testdata/progs/link_extern_b.bpf.o > ../testdata/oracle/subprog-link-extern.json

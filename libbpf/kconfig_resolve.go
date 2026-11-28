@@ -57,8 +57,10 @@ func resolveError(errno syscall.Errno, format string, args ...any) error {
 // The LINUX_ externs are virtual. LINUX_KERNEL_VERSION is the running
 // kernel's KERNEL_VERSION code; LINUX_HAS_BPF_COOKIE is 1 when the kernel
 // lets a program read a BPF cookie and 0 otherwise; LINUX_HAS_SYSCALL_WRAPPER
-// is zero because its feature probe is not ported; any other weak LINUX_
-// extern is zero, and a strong one is EINVAL. The CONFIG_ externs come from
+// is 1 when a kprobe on the arch-specific bpf syscall entry, such as
+// __x64_sys_bpf, can be created and 0 otherwise, which includes a caller
+// without the privileges the probe needs; any other weak LINUX_ extern is
+// zero, and a strong one is EINVAL. The CONFIG_ externs come from
 // obj.kconfig first and then, while any .kconfig extern is unset, from the
 // system config; a parse error, or a missing system config when it is
 // needed, is EINVAL.
@@ -153,6 +155,9 @@ func virtualKcfgValue(ext *externDesc) (uint64, error) {
 		}
 		return 0, nil
 	case "LINUX_HAS_SYSCALL_WRAPPER":
+		if featSyscallWrapper.supported() {
+			return 1, nil
+		}
 		return 0, nil
 	}
 	if !strings.HasPrefix(ext.name, linuxPrefix) || !ext.isWeak {

@@ -17,22 +17,34 @@ func newLogBuf(log string, size int) []byte {
 }
 
 // TestFixupVerifierLog runs the log fixup over verifier logs of an object
-// with two maps. A poisoned call for an existing map in the last ten lines
-// becomes the instruction index and the map name; every other log stays as
+// with two maps and two externs. A poisoned call for an existing map or
+// extern in the last ten lines becomes the instruction index and the map or
+// kernel function name; every other log, including a CO-RE poison, stays as
 // it is.
 func TestFixupVerifierLog(t *testing.T) {
-	obj := &BpfObject{maps: []*BpfMap{{name: ".percpu"}, {name: "percpu.bss"}}}
+	longName := strings.Repeat("k", 100)
+	obj := &BpfObject{
+		maps:    []*BpfMap{{name: ".percpu"}, {name: "percpu.bss"}},
+		externs: []externDesc{{name: "bpf_missing_kfunc"}, {name: longName}},
+	}
 
 	const (
-		head   = "func#0 @0\n0: R1=ctx() R10=fp0\n; percpu_last = tid; @ percpu.bpf.c:27\n"
-		call0  = "9: (85) call unknown#2001000000\n"
-		error0 = "invalid func unknown#2001000000\n"
-		call1  = "9: (85) call unknown#2001000001\n"
-		error1 = "invalid func unknown#2001000001\n"
-		stats  = "processed 10 insns (limit 1000000) max_states_per_insn 0 total_states 1 peak_states 1 mark_read 1\n"
-		fixed0 = "9: <invalid BPF map reference>\nBPF map '.percpu' is referenced but wasn't created\n"
-		fixed1 = "9: <invalid BPF map reference>\nBPF map 'percpu.bss' is referenced but wasn't created\n"
+		head    = "func#0 @0\n0: R1=ctx() R10=fp0\n; percpu_last = tid; @ percpu.bpf.c:27\n"
+		call0   = "9: (85) call unknown#2001000000\n"
+		error0  = "invalid func unknown#2001000000\n"
+		call1   = "9: (85) call unknown#2001000001\n"
+		error1  = "invalid func unknown#2001000001\n"
+		kcall0  = "18: (85) call unknown#2002000000\n"
+		kerror0 = "invalid func unknown#2002000000\n"
+		stats   = "processed 10 insns (limit 1000000) max_states_per_insn 0 total_states 1 peak_states 1 mark_read 1\n"
+		fixed0  = "9: <invalid BPF map reference>\nBPF map '.percpu' is referenced but wasn't created\n"
+		fixed1  = "9: <invalid BPF map reference>\nBPF map 'percpu.bss' is referenced but wasn't created\n"
+		kfixed0 = "18: <invalid kfunc call>\nkfunc 'bpf_missing_kfunc' is referenced but wasn't resolved\n"
 	)
+	// libbpf formats the patch into a 128-byte buffer, so a long name
+	// loses the end of the second line, newline included.
+	kfixed1 := ("18: <invalid kfunc call>\nkfunc '" + longName + "' is referenced but wasn't resolved\n")[:maxLogPatchLen]
+
 	for _, tc := range []struct {
 		name string
 		log  string
@@ -47,7 +59,17 @@ func TestFixupVerifierLog(t *testing.T) {
 		{"no instruction line", error0 + stats, ""},
 		{"other call line", head + "9: (85) call bpf_get_current_pid_tgid#14\n" + error0, ""},
 		{"CO-RE poison", head + "9: (85) call unknown#195896080\ninvalid func unknown#195896080\n", ""},
-		{"kfunc poison", head + "9: (85) call unknown#2002000000\ninvalid func unknown#2002000000\n", ""},
+		{"kfunc poison", head + kcall0 + kerror0, head + kfixed0},
+		{"kfunc before the stats", head + kcall0 + kerror0 + strings.Repeat(stats, 9), head + kfixed0 + strings.Repeat(stats, 9)},
+		{"kfunc ten lines after", head + kcall0 + kerror0 + strings.Repeat(stats, 10), ""},
+		{"kfunc scanf whitespace", "  18:(  85)call unknown# 2002000000\n" + kerror0, kfixed0},
+		{"kfunc space before colon", " 18 : (85) call unknown#2002000000\n" + kerror0, ""},
+		{"kfunc long name", head + "18: (85) call unknown#2002000001\ninvalid func unknown#2002000001\n" + stats, head + kfixed1 + stats},
+		{"no extern", head + "18: (85) call unknown#2002000002\ninvalid func unknown#2002000002\n", ""},
+		{"below the kfunc base", head + "18: (85) call unknown#2002\ninvalid func unknown#2002\n", ""},
+		{"kfunc without instruction line", kerror0 + stats, ""},
+		{"kfunc after a map poison", head + call0 + error0 + kcall0 + kerror0, head + call0 + error0 + kfixed0},
+		{"map after a kfunc poison", head + kcall0 + kerror0 + call0 + error0, head + kcall0 + kerror0 + fixed0},
 		{"empty", "", ""},
 	} {
 		buf := newLogBuf(tc.log, 4096)
@@ -94,20 +116,30 @@ func TestPatchLog(t *testing.T) {
 	}
 }
 
-// TestFixupVerifierLogFullBuffer fixes a log that fills its buffer, as a
-// truncated kernel log does: the longer text pushes the end of the log out
-// of the buffer, and the log then fills it without a NUL.
+// TestFixupVerifierLogFullBuffer fixes logs that fill their buffer, as a
+// truncated kernel log does. The longer map text pushes the end of the log
+// out of the buffer, and the log then fills it without a NUL. The kfunc text
+// alone reaches the end of the buffer, so it is cut one byte short of it,
+// before the old NUL, and the rest of the log is dropped.
 func TestFixupVerifierLogFullBuffer(t *testing.T) {
-	obj := &BpfObject{maps: []*BpfMap{{name: ".percpu"}}}
+	obj := &BpfObject{maps: []*BpfMap{{name: ".percpu"}}, externs: []externDesc{{name: "bpf_missing_kfunc"}}}
 	const (
-		log   = "9: (85) call unknown#2001000000\ninvalid func unknown#2001000000\nprocessed 3 insns\n"
-		fixed = "9: <invalid BPF map reference>\nBPF map '.percpu' is referenced but wasn't created\nprocessed 3 insns\n"
+		mapLog     = "9: (85) call unknown#2001000000\ninvalid func unknown#2001000000\nprocessed 3 insns\n"
+		mapFixed   = "9: <invalid BPF map reference>\nBPF map '.percpu' is referenced but wasn't created\nprocessed 3 insns\n"
+		kfuncLog   = "18: (85) call unknown#2002000000\ninvalid func unknown#2002000000\nprocessed 3 insns\n"
+		kfuncFixed = "18: <invalid kfunc call>\nkfunc 'bpf_missing_kfunc' is referenced but wasn't resolved\n"
 	)
-
-	buf := newLogBuf(log, len(log)+1)
-	fixupVerifierLog(obj, buf)
-	if got, want := verifierLogString(buf), fixed[:len(log)+1]; got != want {
-		t.Errorf("log = %q, want %q", got, want)
+	for _, tc := range []struct {
+		name, log, want string
+	}{
+		{"map", mapLog, mapFixed[:len(mapLog)+1]},
+		{"kfunc", kfuncLog, kfuncFixed[:len(kfuncLog)]},
+	} {
+		buf := newLogBuf(tc.log, len(tc.log)+1)
+		fixupVerifierLog(obj, buf)
+		if got := verifierLogString(buf); got != tc.want {
+			t.Errorf("%s: log = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

@@ -117,7 +117,9 @@ func mapTakesBTF(mapType BpfMapType) bool {
 // possible CPU. A subprogram is loaded only as part of the programs that
 // call it and has no descriptor. The .rodata and .kconfig maps are frozen
 // after their contents are written, so user space can read but not change
-// them. After the load, BpfProgramInsns returns each program's final code.
+// them. After the load, BpfProgramInsns returns each main program's final
+// code and each subprogram's own instructions with its CO-RE relocations
+// applied and its subprogram address loads marked BPF_PSEUDO_FUNC.
 //
 // The functions sit at a different offset in each program, so a program
 // with callx loads its own copy of each read-only data map with function
@@ -170,7 +172,7 @@ func BpfObjectLoad(obj *BpfObject) error {
 			Log:   err.Error(),
 		}
 	}
-	codes, err := relocateObject(obj, ext, kernelBTFs, featArgCtxTag.supported, featBtfDeclTag.supported)
+	codes, subprogInsns, err := relocateObject(obj, ext, kernelBTFs, featArgCtxTag.supported, featBtfDeclTag.supported)
 	if err != nil {
 		return err
 	}
@@ -210,17 +212,21 @@ func BpfObjectLoad(obj *BpfObject) error {
 		}
 	}
 
-	setFinalInsns(codes)
+	setFinalInsns(codes, subprogInsns)
 	obj.loaded = true
 	return nil
 }
 
-// setFinalInsns makes each main program's code, as loaded, the instructions
-// that BpfProgramInsns returns. The code is the load's own copy, so the
-// object file's section data stays unchanged.
-func setFinalInsns(codes []*progCode) {
+// setFinalInsns makes each main program's code, as loaded, and each
+// subprogram's own relocated instructions from subprogInsns the instructions
+// that BpfProgramInsns returns, as libbpf leaves them after a load. Both are
+// the load's own copies, so the object file's section data stays unchanged.
+func setFinalInsns(codes []*progCode, subprogInsns map[*BpfProgram][]byte) {
 	for _, code := range codes {
 		code.prog.insns = code.insns
+	}
+	for p, insns := range subprogInsns {
+		p.insns = insns
 	}
 }
 
@@ -243,28 +249,7 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 		p.expectedAttachType = BPF_TRACE_UPROBE_MULTI
 	}
 
-	attr := &sys.ProgLoadAttr{
-		ProgType:           uint32(p.progType),
-		InsnCnt:            uint32(len(code.insns) / bpfInsnLength),
-		LogLevel:           1,
-		ProgFlags:          p.progFlags,
-		ExpectedAttachType: uint32(p.expectedAttachType),
-		ProgBtfFD:          uint32(obj.btfFD),
-		AttachBtfID:        p.attachBTFID,
-		AttachBtfObjFD:     int32(p.attachBTFObjFD),
-		FuncInfoRecSize:    btf.FuncInfoMinSize,
-		FuncInfoCnt:        uint32(len(code.funcInfo) / btf.FuncInfoMinSize),
-		LineInfoRecSize:    btf.LineInfoMinSize,
-		LineInfoCnt:        uint32(len(code.lineInfo) / btf.LineInfoMinSize),
-	}
-	if len(code.funcInfo) == 0 {
-		attr.FuncInfoRecSize = 0
-	}
-	if len(code.lineInfo) == 0 {
-		attr.LineInfoRecSize = 0
-	}
-	attr.SetProgName(p.name)
-
+	attr := progLoadAttr(obj, code)
 	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
 	if err != nil {
 		fixupVerifierLog(obj, logBuf)
@@ -288,6 +273,39 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 	p.xlatedInsnCnt = int(info.XlatedProgLen / bpfInsnLength)
 	p.jitedLen = info.JitedProgLen
 	return nil
+}
+
+// progLoadAttr returns the BPF_PROG_LOAD attributes of code, the relocated
+// code of a main program of obj: the program's type, flags, name and attach
+// settings, the instruction count, verifier log level 1, the object BTF and
+// the function and line record counts, with a record size only for a kind
+// that has records, and obj's kern_version, as libbpf sends it. The caller
+// passes the instructions, license, log and records themselves.
+func progLoadAttr(obj *BpfObject, code *progCode) *sys.ProgLoadAttr {
+	p := code.prog
+	attr := &sys.ProgLoadAttr{
+		ProgType:           uint32(p.progType),
+		InsnCnt:            uint32(len(code.insns) / bpfInsnLength),
+		LogLevel:           1,
+		KernVersion:        obj.kernVersion,
+		ProgFlags:          p.progFlags,
+		ExpectedAttachType: uint32(p.expectedAttachType),
+		ProgBtfFD:          uint32(obj.btfFD),
+		AttachBtfID:        p.attachBTFID,
+		AttachBtfObjFD:     int32(p.attachBTFObjFD),
+		FuncInfoRecSize:    btf.FuncInfoMinSize,
+		FuncInfoCnt:        uint32(len(code.funcInfo) / btf.FuncInfoMinSize),
+		LineInfoRecSize:    btf.LineInfoMinSize,
+		LineInfoCnt:        uint32(len(code.lineInfo) / btf.LineInfoMinSize),
+	}
+	if len(code.funcInfo) == 0 {
+		attr.FuncInfoRecSize = 0
+	}
+	if len(code.lineInfo) == 0 {
+		attr.LineInfoRecSize = 0
+	}
+	attr.SetProgName(p.name)
+	return attr
 }
 
 // createMaps creates the maps of obj in order with the object BTF btfFD.
