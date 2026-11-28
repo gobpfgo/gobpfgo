@@ -300,7 +300,8 @@ func BpfMapGetNextKey(m *BpfMap, curKey, nextKey []byte) error {
 // values into the .kconfig map's buffer. After the load the slice keeps the
 // bytes the load wrote and is not the kernel map's memory, so changing it no
 // longer affects the map; use BpfMapLookupElem and BpfMapUpdateElem instead.
-// The slice is released with the object.
+// BpfObjectClose releases the buffer, and the call returns nil from then on;
+// a failed BpfObjectLoad keeps it.
 func BpfMapInitialValue(m *BpfMap) []byte {
 	if m == nil {
 		return nil
@@ -315,13 +316,14 @@ func BpfMapInitialValue(m *BpfMap) []byte {
 // data must be exactly the map value size. The call fails with EBUSY once
 // the map counts as created: after BpfMapReuseFD, and once BpfObjectLoad has
 // run on the object, even when the load failed or did not create this map. It
-// fails with EINVAL for a nil map, a map without an initial value, such as one defined in the
-// .maps section, the .kconfig map, whose values the load resolves, or data of
-// another size.
+// fails with EINVAL for a nil map, a map without an initial value, such as
+// one defined in the .maps section, the .kconfig map, whose values the load
+// resolves, or data of another size. After BpfObjectClose, which released
+// the initial value, it fails with EINVAL whatever the map's state was.
 func BpfMapSetInitialValue(m *BpfMap, data []byte) error {
 	const op = "bpf_map__set_initial_value"
 
-	if m == nil {
+	if m == nil || (m.obj != nil && m.obj.closed) {
 		return &Error{Op: op, Errno: unix.EINVAL}
 	}
 	if mapIsCreated(m) {

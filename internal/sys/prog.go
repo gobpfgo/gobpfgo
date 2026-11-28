@@ -145,6 +145,20 @@ func progLoadFieldLayout() []fieldLayout {
 // libbpf's PROG_LOAD_ATTEMPTS.
 const progLoadAttempts = 5
 
+// retryProgLoad calls load until it does not return EAGAIN or attempts runs
+// out, and returns the last result.
+func retryProgLoad(attempts int, load func() (uintptr, error)) (uintptr, error) {
+	var fd uintptr
+	var err error
+	for range attempts {
+		fd, err = load()
+		if err == nil || !errors.Is(err, unix.EAGAIN) {
+			return fd, err
+		}
+	}
+	return fd, err
+}
+
 // ProgLoad loads a BPF program into the kernel and returns its file
 // descriptor. insns and license are copied by the kernel during the call;
 // logBuf may be nil or a buffer for the verifier log. funcInfo and lineInfo
@@ -182,14 +196,9 @@ func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo, fd
 		attr.FdArray = uint64(addr(fdArray))
 	}
 
-	var fd uintptr
-	var err error
-	for attempt := 0; attempt < progLoadAttempts; attempt++ {
-		fd, err = bpf(BPF_PROG_LOAD, attr.Marshal())
-		if err == nil || !errors.Is(err, unix.EAGAIN) {
-			break
-		}
-	}
+	fd, err := retryProgLoad(progLoadAttempts, func() (uintptr, error) {
+		return bpf(BPF_PROG_LOAD, attr.Marshal())
+	})
 	runtime.KeepAlive(insns)
 	runtime.KeepAlive(license)
 	runtime.KeepAlive(logBuf)

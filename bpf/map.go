@@ -81,9 +81,11 @@ func (m *Map) IsInternal() bool {
 	return libbpf.BpfMapIsInternal(m.live())
 }
 
-// FD returns the loaded map descriptor, or -1 before Load, after the Object
-// is closed and for a map the load did not create. The descriptor belongs to
-// the Object.
+// FD returns the map descriptor: the one Load created, or for a map given
+// an existing map with ReuseFD, the duplicate it made, already before Load.
+// It is -1 for any other map before Load, for a map the load did not create,
+// after a failed Load, which closed the descriptors, and after the Object is
+// closed. The descriptor belongs to the Object.
 func (m *Map) FD() int {
 	return libbpf.BpfMapFD(m.live())
 }
@@ -157,9 +159,11 @@ func (m *Map) NextKey(curKey, nextKey []byte) error {
 
 // InitialValue returns the initial value of an internal data or .kconfig
 // map, ValueSize bytes that alias the Object's buffer, or nil for a .maps
-// definition and after the Object is closed. Before Load, changing the bytes
-// changes what Load writes into the map; after Load they no longer affect
-// the map. See libbpf.BpfMapInitialValue.
+// definition. Before Load, changing the bytes changes what Load writes into
+// the map; after Load they no longer affect the map. A failed Load keeps the
+// buffer. Close releases it, and InitialValue returns nil from then on, so
+// do not use a slice it returned earlier after Close. See
+// libbpf.BpfMapInitialValue.
 func (m *Map) InitialValue() []byte {
 	return libbpf.BpfMapInitialValue(m.live())
 }

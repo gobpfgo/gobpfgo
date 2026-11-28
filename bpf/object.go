@@ -101,6 +101,14 @@ func (o *Object) BTF() *libbpf.Btf {
 // Load creates the object's maps and loads its programs into the kernel. It
 // returns ErrClosed after Close; a load failure returns the core
 // *libbpf.Error, which carries the verifier log when the kernel produced one.
+//
+// An Object loads only once: a second Load returns EINVAL with "load can't
+// be attempted twice" in the log, whether the first one succeeded or
+// failed. A failed Load leaves the Object unloaded, with every map and
+// program descriptor closed, including the duplicates ReuseFD made, and the
+// BTF fixups it applied stay in the object BTF. Its Maps still count as
+// created: SetInitialValue returns EBUSY and the element operations EINVAL.
+// Close the failed Object as usual. See libbpf.BpfObjectLoad.
 func (o *Object) Load() error {
 	if o.isClosed() {
 		return ErrClosed

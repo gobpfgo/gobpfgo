@@ -6,6 +6,8 @@
 package libbpf
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -181,4 +183,79 @@ func TestCoreLocalFieldLoad(t *testing.T) {
 	if !strings.Contains(lerr.Log, "array access") {
 		t.Errorf("load log = %q, want the array access error", lerr.Log)
 	}
+}
+
+// TestCoreReloResultOrder checks the order of the first two steps of a
+// CO-RE relocation on a synthetic local BTF, the order libbpf's
+// bpf_core_resolve_relo has: the candidate search runs before the access
+// string is parsed. A malformed access string on an anonymous local type
+// therefore reports the failed search, which rejects a type without a name,
+// and the same string on a named type reports the parse error. A
+// TYPE_ID_LOCAL record has no search and reports the parse error even for an
+// anonymous type.
+func TestCoreReloResultOrder(t *testing.T) {
+	// [1] int, [2] struct { int a; } and [3] struct s { int a; }. The access
+	// string at offset 9 names member 7, which neither struct has.
+	const strs = "\x00int\x00a\x00s\x000:7\x00"
+	types := []uint32{
+		1, btfTypeInfo(btf.KindInt, 0), 4, 1<<24 | 32,
+		0, btfTypeInfo(btf.KindStruct, 1), 4, 5, 1, 0,
+		7, btfTypeInfo(btf.KindStruct, 1), 4, 5, 1, 0,
+	}
+	local, err := btf.Parse(rawBTF(types, strs), binary.NativeEndian)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	const badAccess = 9
+
+	for _, tc := range []struct {
+		name string
+		relo btf.CoreRelo
+		want string
+	}{
+		{"anonymous field", btf.CoreRelo{TypeID: 2, AccessStrOff: badAccess, Kind: btf.CoreFieldByteOffset},
+			"target candidate search failed for [2] struct: anonymous type"},
+		{"named field", btf.CoreRelo{TypeID: 3, AccessStrOff: badAccess, Kind: btf.CoreFieldByteOffset},
+			"btf: struct index 7 out of range"},
+		{"anonymous local type ID", btf.CoreRelo{TypeID: 2, AccessStrOff: badAccess, Kind: btf.CoreTypeIDLocal},
+			`btf: type-based relocation access string "0:7"`},
+	} {
+		_, err := coreReloResult(local, tc.relo, []*btf.Spec{local}, make(coreCandCache))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestRelocateCoreUnknownSection relocates core_cands.bpf.o with its CO-RE
+// section renamed to one the object does not have. libbpf maps that section
+// to ELF index 0, which no program has, so bpf_object__relocate_core skips
+// every record of it as it skips a record of an eliminated weak function:
+// the relocation succeeds and the instructions keep the values clang wrote.
+// The real section name relocates the same records.
+func TestRelocateCoreUnknownSection(t *testing.T) {
+	obj, ext, relos, kernels := coreCandsObject(t, "core_cands.bpf.o", "core_cands_target.bpf.o")
+	const missing = "kprobe/gobpfgo_missing"
+	if idx := elfSecIdxByName(obj, missing); idx != 0 {
+		t.Fatalf("section %s has index %d, want 0", missing, idx)
+	}
+	renamed := &btf.ExtSpec{CoreRelos: []btf.CoreReloSection{{Section: missing, Relos: relos}}}
+
+	p := obj.programs[0]
+	insns, err := coreRelocatedInsns(obj, renamed, kernels)
+	if err != nil {
+		t.Fatalf("relocation of the unknown section: %v", err)
+	}
+	if !bytes.Equal(insns[p], p.insns) {
+		t.Error("the unknown section changed the instructions")
+	}
+
+	insns, err = coreRelocatedInsns(obj, ext, kernels)
+	if err != nil {
+		t.Fatalf("relocation of %s: %v", ext.CoreRelos[0].Section, err)
+	}
+	if bytes.Equal(insns[p], p.insns) {
+		t.Errorf("relocation of %s left the instructions unchanged", ext.CoreRelos[0].Section)
+	}
+	checkCoreImms(t, obj, insns, relos, []int32{1, 4, 1, 0})
 }

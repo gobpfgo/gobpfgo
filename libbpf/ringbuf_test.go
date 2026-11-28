@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -58,10 +59,15 @@ func TestRingBuffer(t *testing.T) {
 	if prog == nil || ringMap == nil || ringMap2 == nil || data == nil {
 		t.Fatal("program, ring buffer or .data maps not found")
 	}
-	// Only this process's opens produce records, so other processes cannot
-	// add any between the trigger and the reads.
-	if err := BpfMapUpdateElem(data, u32Key(0), u32Key(uint32(os.Getpid())), BPF_ANY); err != nil {
-		t.Fatalf("set target_tgid: %v", err)
+	// Only the opens of processes with this test's command name produce
+	// records, so other processes cannot add any between the trigger and the
+	// reads, and the filter holds inside a PID namespace too. Start with a
+	// name no process has, so the negative case below proves the filter
+	// drops the trigger's own opens.
+	wrongComm := make([]byte, taskCommLen)
+	copy(wrongComm, "gobpfgo-none")
+	if err := BpfMapUpdateElem(data, u32Key(0), wrongComm, BPF_ANY); err != nil {
+		t.Fatalf("set wrong target_comm: %v", err)
 	}
 
 	link, err := BpfProgramAttachKprobe(prog, false, "do_sys_openat2")
@@ -101,6 +107,17 @@ func TestRingBuffer(t *testing.T) {
 	}
 
 	triggerOpen(t)
+	if count, err := RingBufferPoll(rb, 100); err != nil {
+		t.Fatalf("RingBufferPoll with the wrong comm: %v", err)
+	} else if count != 0 || len(first) != 0 || len(second) != 0 {
+		t.Fatalf("wrong comm consumed %d records, samples %#x and %#x, want none", count, first, second)
+	}
+
+	if err := BpfMapUpdateElem(data, u32Key(0), selfComm(t), BPF_ANY); err != nil {
+		t.Fatalf("set target_comm: %v", err)
+	}
+
+	triggerOpen(t)
 	count, err := RingBufferPoll(rb, 1000)
 	if err != nil {
 		t.Fatalf("RingBufferPoll: %v", err)
@@ -131,4 +148,26 @@ func TestRingBuffer(t *testing.T) {
 	if fd := RingBufferEpollFD(rb); fd != -1 {
 		t.Fatalf("epoll fd after free = %d, want -1", fd)
 	}
+}
+
+// taskCommLen is the kernel's TASK_COMM_LEN, the size of target_comm.
+const taskCommLen = 16
+
+// selfComm returns the command name of this process as bpf_get_current_comm
+// returns it: the 16-byte kernel comm, NUL-padded. The name comes from
+// /proc/self/comm, so unlike a PID it is the same in every PID namespace.
+func selfComm(t *testing.T) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile("/proc/self/comm")
+	if err != nil {
+		t.Fatalf("read /proc/self/comm: %v", err)
+	}
+	name := strings.TrimSuffix(string(data), "\n")
+	if name == "" {
+		t.Fatal("/proc/self/comm is empty")
+	}
+	comm := make([]byte, taskCommLen)
+	copy(comm[:taskCommLen-1], name)
+	return comm
 }

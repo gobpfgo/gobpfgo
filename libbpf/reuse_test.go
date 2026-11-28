@@ -158,3 +158,49 @@ func TestBpfMapReuseFailedLoad(t *testing.T) {
 		t.Errorf("the caller's descriptor after the failed load: %v", err)
 	}
 }
+
+// TestBpfMapReuseClosedObject reuses an existing array for kprobe.bpf.o's
+// counts map after BpfObjectClose, for an object that was only opened and
+// for one that was loaded. The closed object released the map, so the reuse
+// fails with EBADF, closes its duplicate of the array and leaves the map
+// without a descriptor. The caller's descriptor stays open. It needs root or
+// CAP_BPF and skips otherwise.
+func TestBpfMapReuseClosedObject(t *testing.T) {
+	fd, err := BpfMapCreate(BPF_MAP_TYPE_ARRAY, "gobpfgo_reuse", 4, 8, 4, nil)
+	skipIfNotPermitted(t, err)
+	if err != nil {
+		t.Fatalf("BpfMapCreate: %v", err)
+	}
+	defer unix.Close(fd)
+
+	for _, tc := range []struct {
+		name string
+		load bool
+	}{{"opened", false}, {"loaded", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := openProg(t, "kprobe.bpf.o")
+			m := BpfObjectFindMapByName(obj, "counts")
+			if m == nil {
+				t.Fatal("map counts not found")
+			}
+			if tc.load {
+				if err := BpfObjectLoad(obj); err != nil {
+					t.Fatalf("BpfObjectLoad: %v", err)
+				}
+			}
+			BpfObjectClose(obj)
+
+			maps := len(openMapNames(t))
+			checkMapOpError(t, "reuse after close", BpfMapReuseFD(m, fd), "bpf_map__reuse_fd", unix.EBADF)
+			if got := len(openMapNames(t)); got != maps {
+				t.Errorf("%d BPF map descriptors open after the reuse, want %d", got, maps)
+			}
+			if got := BpfMapName(m); got != "counts" || m.fd != -1 || m.reused {
+				t.Errorf("map after the reuse: name %q, fd %d, reused %v, want counts, -1, false", got, m.fd, m.reused)
+			}
+			if _, err := sys.MapInfoByFD(fd); err != nil {
+				t.Errorf("the caller's descriptor after the reuse: %v", err)
+			}
+		})
+	}
+}

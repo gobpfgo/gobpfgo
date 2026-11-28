@@ -360,8 +360,8 @@ func TestBpfObjectOpenInvalid(t *testing.T) {
 // definitions as well as the internal data and .kconfig maps, points at the
 // object that opened it, so its created state follows that object's load.
 // No map counts as created after the open, and the maps keep their object
-// and have no descriptor after the close. An object that fails to open is
-// logged and skipped.
+// and have no descriptor after the close. Every object must open, so an
+// open regression fails the test instead of reducing its coverage.
 func TestOpenMapsPointAtObject(t *testing.T) {
 	paths, err := filepath.Glob(progsDir + "/*.bpf.o")
 	if err != nil || len(paths) == 0 {
@@ -371,14 +371,20 @@ func TestOpenMapsPointAtObject(t *testing.T) {
 	maps := 0
 	for _, path := range paths {
 		name := filepath.Base(path)
+		// These are linker inputs: their .extern or .maps extern
+		// declarations are resolved by BpfLinker and cannot be opened on
+		// their own. The linker tests cover them.
+		switch name {
+		case "link_extern_a.bpf.o", "link_extern_weak.bpf.o", "link_map_extern.bpf.o":
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
 		fileObj, err := BpfObjectOpenFile(path, nil)
 		if err != nil {
-			t.Logf("%s does not open: %v", name, err)
-			continue
+			t.Fatalf("%s does not open: %v", name, err)
 		}
 		memObj, err := BpfObjectOpenMem(data, nil)
 		if err != nil {
