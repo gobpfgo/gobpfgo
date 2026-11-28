@@ -164,10 +164,23 @@ func openModuleBTF(id uint32, vmlinux *btf.Spec) (mod moduleBTF, skip bool, err 
 }
 
 // btfGetFromFD reads the raw BTF of the descriptor fd from the kernel and
-// parses it as split BTF on top of base. The first request offers 4 KiB; a
-// larger BTF is requested again with a buffer of its size, and a BTF that
-// grew in between returns E2BIG.
+// parses it as split BTF on top of base. See btfRawFromFD for the read.
 func btfGetFromFD(fd int, base *btf.Spec) (*btf.Spec, error) {
+	data, err := btfRawFromFD(fd)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := btf.ParseSplit(data, binary.NativeEndian, base)
+	if err != nil {
+		return nil, fmt.Errorf("%v: %w", err, unix.EINVAL)
+	}
+	return spec, nil
+}
+
+// btfRawFromFD reads the raw BTF of the descriptor fd from the kernel. The
+// first request offers 4 KiB; a larger BTF is requested again with a buffer
+// of its size, and a BTF that grew in between returns E2BIG.
+func btfRawFromFD(fd int) ([]byte, error) {
 	data := make([]byte, btfGetFromFDSize)
 	info, err := sys.BtfInfoByFD(fd, data, nil)
 	if err == nil && int(info.BtfSize) > len(data) {
@@ -180,11 +193,7 @@ func btfGetFromFD(fd int, base *btf.Spec) (*btf.Spec, error) {
 	if int(info.BtfSize) > len(data) {
 		return nil, unix.E2BIG
 	}
-	spec, err := btf.ParseSplit(data[:info.BtfSize], binary.NativeEndian, base)
-	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, unix.EINVAL)
-	}
-	return spec, nil
+	return data[:info.BtfSize], nil
 }
 
 // closeModuleBTFs releases the module BTFs, the vmlinux BTF and the fd

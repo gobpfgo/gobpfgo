@@ -111,8 +111,9 @@ func newProgram(sec objelf.Program, sym objelf.Symbol, def secDef) *BpfProgram {
 		insns:              sec.Insns[sym.Value:end:end],
 		fd:                 -1,
 	}
-	if def.flags&secAttachBTF != 0 {
-		prog.attachBTF = true
+	if def.flags&(secAttachBTF|secAttachProg) != 0 {
+		prog.attachBTF = def.flags&secAttachBTF != 0
+		prog.attachProg = def.flags&secAttachProg != 0
 		prog.attachTarget = strings.TrimPrefix(sec.Name, def.prefix)
 	}
 	return prog

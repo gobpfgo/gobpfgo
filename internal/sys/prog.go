@@ -41,6 +41,7 @@ const (
 	progLoadOffLineInfo           = 96
 	progLoadOffLineInfoCnt        = 104
 	progLoadOffAttachBtfID        = 108
+	progLoadOffAttachProgFD       = 112
 	progLoadOffAttachBtfObjFD     = 112
 	progLoadOffFdArray            = 120
 )
@@ -48,6 +49,13 @@ const (
 // ProgLoadAttr is the BPF_PROG_LOAD view of union bpf_attr. Insns, License,
 // LogBuf, FuncInfo, LineInfo and FdArray are addresses written by ProgLoad;
 // the remaining fields are scalar and default to zero.
+//
+// AttachProgFD and AttachBtfObjFD share one field of the attribute: the
+// descriptor of the BPF program whose function AttachBtfID names, for a
+// freplace program or a tracing program attached to another program, or
+// the module BTF that holds the AttachBtfID type. Marshal writes
+// AttachProgFD when it is nonzero and AttachBtfObjFD otherwise, and
+// ProgLoad refuses both with EINVAL, as libbpf's bpf_prog_load does.
 type ProgLoadAttr struct {
 	ProgType           uint32
 	InsnCnt            uint32
@@ -69,6 +77,7 @@ type ProgLoadAttr struct {
 	LineInfo           uint64
 	LineInfoCnt        uint32
 	AttachBtfID        uint32
+	AttachProgFD       uint32
 	AttachBtfObjFD     int32
 	FdArray            uint64
 }
@@ -107,7 +116,11 @@ func (a *ProgLoadAttr) Marshal() []byte {
 	binary.NativeEndian.PutUint64(buf[progLoadOffLineInfo:], a.LineInfo)
 	binary.NativeEndian.PutUint32(buf[progLoadOffLineInfoCnt:], a.LineInfoCnt)
 	binary.NativeEndian.PutUint32(buf[progLoadOffAttachBtfID:], a.AttachBtfID)
-	binary.NativeEndian.PutUint32(buf[progLoadOffAttachBtfObjFD:], uint32(a.AttachBtfObjFD))
+	if a.AttachProgFD != 0 {
+		binary.NativeEndian.PutUint32(buf[progLoadOffAttachProgFD:], a.AttachProgFD)
+	} else {
+		binary.NativeEndian.PutUint32(buf[progLoadOffAttachBtfObjFD:], uint32(a.AttachBtfObjFD))
+	}
 	binary.NativeEndian.PutUint64(buf[progLoadOffFdArray:], a.FdArray)
 
 	return buf
@@ -135,6 +148,7 @@ func progLoadFieldLayout() []fieldLayout {
 		{"line_info", progLoadOffLineInfo, 8},
 		{"line_info_cnt", progLoadOffLineInfoCnt, 4},
 		{"attach_btf_id", progLoadOffAttachBtfID, 4},
+		{"attach_prog_fd", progLoadOffAttachProgFD, 4},
 		{"attach_btf_obj_fd", progLoadOffAttachBtfObjFD, 4},
 		{"fd_array", progLoadOffFdArray, 8},
 	}
@@ -174,9 +188,13 @@ func retryProgLoad(attempts int, load func() (uintptr, error)) (uintptr, error) 
 // The caller sets ProgType, InsnCnt, ProgFlags, ExpectedAttachType and
 // ProgBtfFD before calling, plus the record size and count of each record
 // array it passes. The caller owns the descriptor and must close it with
-// unix.Close.
+// unix.Close. It returns EINVAL before the syscall when insns or license is
+// empty or both AttachProgFD and AttachBtfObjFD are set.
 func ProgLoad(attr *ProgLoadAttr, insns, license, logBuf, funcInfo, lineInfo, fdArray []byte) (int, error) {
 	if len(insns) == 0 || len(license) == 0 {
+		return -1, unix.EINVAL
+	}
+	if attr.AttachProgFD != 0 && attr.AttachBtfObjFD != 0 {
 		return -1, unix.EINVAL
 	}
 

@@ -413,6 +413,7 @@ func errorMethods(obj *bpf.Object, prog *bpf.Program, counts *bpf.Map) []methodC
 		{"Program.Pin", func() error { return prog.Pin(path) }},
 		{"Program.Unpin", func() error { return prog.Unpin(path) }},
 		{"Program.Info", func() error { _, err := prog.Info(); return err }},
+		{"Program.SetAttachTarget", func() error { return prog.SetAttachTarget(3, "xdp_pass") }},
 		{"Program.AttachKprobe", func() error { return attach(prog.AttachKprobe(false, "do_sys_openat2")) }},
 		{"Program.AttachKprobeOpts", func() error { return attach(prog.AttachKprobeOpts("do_sys_openat2", nil)) }},
 		{"Program.AttachUprobe", func() error { return attach(prog.AttachUprobe(-1, "/bin/true", 0)) }},
@@ -433,6 +434,8 @@ func errorMethods(obj *bpf.Object, prog *bpf.Program, counts *bpf.Map) []methodC
 		{"Program.AttachNetns", func() error { return attach(prog.AttachNetns(0)) }},
 		{"Program.AttachXDP", func() error { return attach(prog.AttachXDP(1)) }},
 		{"Program.AttachSockmap", func() error { return attach(prog.AttachSockmap(0)) }},
+		{"Program.AttachIter", func() error { return attach(prog.AttachIter(nil)) }},
+		{"Program.AttachFreplace", func() error { return attach(prog.AttachFreplace(3, "xdp_pass")) }},
 		{"Program.AttachTrace", func() error { return attach(prog.AttachTrace()) }},
 		{"Program.AttachTraceOpts", func() error { return attach(prog.AttachTraceOpts(nil)) }},
 		{"Program.AttachLsm", func() error { return attach(prog.AttachLsm()) }},
@@ -509,6 +512,12 @@ func TestNilReceivers(t *testing.T) {
 		"Program.AttachKprobe": func() error { _, err := prog.AttachKprobe(false, "x"); return err }(),
 		"Program.AttachCgroup": func() error { _, err := prog.AttachCgroup(0); return err }(),
 		"Program.AttachXDP":    func() error { _, err := prog.AttachXDP(1); return err }(),
+		"Program.AttachIter":   func() error { _, err := prog.AttachIter(nil); return err }(),
+		"Program.AttachFreplace": func() error {
+			_, err := prog.AttachFreplace(3, "xdp_pass")
+			return err
+		}(),
+		"Program.SetAttachTarget": prog.SetAttachTarget(3, "xdp_pass"),
 	} {
 		var coreErr *libbpf.Error
 		if !errors.As(err, &coreErr) || coreErr.Errno != syscall.EINVAL {

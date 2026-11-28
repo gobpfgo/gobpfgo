@@ -86,6 +86,7 @@ int oracle_layout(void) {
 		F(line_info),
 		F(line_info_cnt),
 		F(attach_btf_id),
+		F(attach_prog_fd),
 		F(attach_btf_obj_fd),
 		F(fd_array),
 	};
@@ -176,6 +177,7 @@ int oracle_layout(void) {
 		FPROG(id),
 		FPROG(jited_prog_len),
 		FPROG(xlated_prog_len),
+		FPROG(btf_id),
 		FPROG(name),
 		FPROG(nr_jited_ksyms),
 		FPROG(nr_jited_func_lens),

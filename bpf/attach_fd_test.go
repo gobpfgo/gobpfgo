@@ -151,6 +151,107 @@ func TestAttachCgroupPlacement(t *testing.T) {
 	}
 }
 
+// TestAttachIter attaches the iter/bpf_map program of iter.bpf.o through the
+// object layer with nil options and with nil link info. Each Link must have
+// a descriptor, which Destroy releases. It needs root and skips when the
+// kernel refuses bpf(), and with the load error when the kernel BTF has no
+// bpf_iter_bpf_map function.
+func TestAttachIter(t *testing.T) {
+	obj, err := bpf.OpenFile(progsDir+"/iter.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer obj.Close()
+	if err := obj.Load(); err != nil {
+		skipIfNotPermitted(t, "bpf()", err)
+		if kernelBTF(t).Find("bpf_iter_bpf_map", btf.KindFunc) == nil {
+			t.Skipf("kernel lacks the bpf_map iterator: %v", err)
+		}
+		t.Fatalf("Load: %v", err)
+	}
+	prog := obj.Program("dump_bpf_map")
+
+	for name, opts := range map[string]*libbpf.BpfIterOpts{"nil options": nil, "nil link info": {}} {
+		t.Run(name, func(t *testing.T) {
+			link, err := prog.AttachIter(opts)
+			if err != nil {
+				skipIfNotPermitted(t, "iter attach", err)
+				t.Fatalf("AttachIter: %v", err)
+			}
+			checkLinkDestroy(t, link)
+		})
+	}
+}
+
+// TestAttachFreplace loads xdp.bpf.o as the target, sets the freplace
+// program of freplace.bpf.o to the target's xdp_pass with SetAttachTarget,
+// loads it and attaches it with AttachFreplace and the target's descriptor
+// and function name. The Link must have a descriptor, which Destroy
+// releases. It needs root and skips when the kernel refuses bpf(), and with
+// the kernel's errno when the kernel BTF has no program extensions.
+func TestAttachFreplace(t *testing.T) {
+	target, err := bpf.OpenFile(progsDir+"/xdp.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("OpenFile target: %v", err)
+	}
+	defer target.Close()
+	if err := target.Load(); err != nil {
+		skipIfNotPermitted(t, "bpf()", err)
+		t.Fatalf("Load target: %v", err)
+	}
+	targetFD := target.Program("xdp_pass").FD()
+
+	obj, err := bpf.OpenFile(progsDir+"/freplace.bpf.o", nil)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer obj.Close()
+	prog := obj.Program("replace_xdp")
+	if err := prog.SetAttachTarget(targetFD, ""); err != nil {
+		t.Fatalf("SetAttachTarget: %v", err)
+	}
+	if err := obj.Load(); err != nil {
+		skipIfNotPermitted(t, "bpf()", err)
+		skipIfKernelLacksExt(t, err)
+		t.Fatalf("Load: %v", err)
+	}
+	if err := prog.SetAttachTarget(targetFD, ""); err == nil {
+		t.Error("SetAttachTarget after Load succeeded, want the core EINVAL error")
+	}
+
+	link, err := prog.AttachFreplace(targetFD, "xdp_pass")
+	if err != nil {
+		skipIfNotPermitted(t, "freplace attach", err)
+		skipIfKernelLacksExt(t, err)
+		t.Fatalf("AttachFreplace: %v", err)
+	}
+	checkLinkDestroy(t, link)
+}
+
+// skipIfKernelLacksExt skips with err when the running kernel's BTF has no
+// BPF_PROG_TYPE_EXT, the program type of freplace programs.
+func skipIfKernelLacksExt(t *testing.T, err error) {
+	t.Helper()
+
+	if !kernelEnumHas(t, "bpf_prog_type", "BPF_PROG_TYPE_EXT") {
+		t.Skipf("kernel lacks program extensions: %v", err)
+	}
+}
+
+// checkLinkDestroy requires link to have a descriptor, destroys it and
+// requires the descriptor to be released.
+func checkLinkDestroy(t *testing.T, link *bpf.Link) {
+	t.Helper()
+
+	if link.FD() < 0 {
+		t.Fatalf("link FD = %d", link.FD())
+	}
+	link.Destroy()
+	if link.FD() != -1 {
+		t.Errorf("link FD after Destroy = %d, want -1", link.FD())
+	}
+}
+
 // loadCgroupIngress opens and loads a new copy of cgroup.bpf.o, closed when
 // the test ends, and returns its cgroup_skb/ingress program. It skips the
 // test when the kernel refuses bpf().

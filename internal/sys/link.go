@@ -64,9 +64,9 @@ const (
 // struct_ops types. Marshal does not write the fields of the other members,
 // and LinkCreate and LinkCreateUprobeMulti refuse them with EINVAL, as
 // libbpf's bpf_link_create refuses options outside the selected member.
-// LinkCreate fills the pointer fields for the kprobe multi variant and
-// LinkCreateUprobeMulti for the uprobe multi variant; the other callers set
-// the value fields directly.
+// LinkCreate fills the pointer fields for the kprobe multi variant,
+// LinkCreateUprobeMulti for the uprobe multi variant and LinkCreateIter for
+// the iterator info; the other callers set the value fields directly.
 type LinkCreateAttr struct {
 	ProgFD                   uint32
 	TargetFD                 uint32
@@ -366,6 +366,25 @@ func LinkCreateUprobeMulti(attr *LinkCreateAttr, um *LinkUprobeMulti) (int, erro
 		return -1, err
 	}
 	return linkCreate(attr, keeps)
+}
+
+// LinkCreateIter calls BPF_LINK_CREATE for an iterator link and returns the
+// new link descriptor. info, when not empty, is the union
+// bpf_iter_link_info the iterator target takes: IterInfo and IterInfoLen
+// point at it, and it is kept alive until the syscall returns. An empty info
+// leaves both zero, the target's default iterator. It returns EINVAL before
+// the syscall when attr is nil, when AttachType is not BPF_TRACE_ITER, the
+// type that selects the iterator member, when attr already sets IterInfo or
+// IterInfoLen, and for the attributes validate refuses.
+func LinkCreateIter(attr *LinkCreateAttr, info []byte) (int, error) {
+	if attr == nil || attr.AttachType != BPF_TRACE_ITER || attr.IterInfo != 0 || attr.IterInfoLen != 0 {
+		return -1, unix.EINVAL
+	}
+	if len(info) > 0 {
+		attr.IterInfo = uint64(addr(info))
+		attr.IterInfoLen = uint32(len(info))
+	}
+	return linkCreate(attr, [][]byte{info})
 }
 
 // setUprobeMulti validates um, copies its path and arrays into new buffers and

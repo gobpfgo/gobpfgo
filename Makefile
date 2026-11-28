@@ -39,7 +39,8 @@ C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	testdata/progs/core_cands.bpf.c testdata/progs/core_cands_target.c \
 	testdata/progs/cgroup.bpf.c testdata/progs/netns.bpf.c \
 	testdata/progs/xdp.bpf.c testdata/progs/sockmap.bpf.c \
-	testdata/progs/kprobe_session.bpf.c
+	testdata/progs/kprobe_session.bpf.c testdata/progs/iter.bpf.c \
+	testdata/progs/freplace.bpf.c
 C_HDRS := oracle/json.h oracle/oracle.h oracle/usdt_notes.h
 
 .PHONY: format format-check

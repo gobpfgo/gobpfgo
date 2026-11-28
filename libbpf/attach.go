@@ -469,7 +469,9 @@ func BpfProgramAttachLsm(prog *BpfProgram) (*BpfLink, error) {
 // BpfProgramAttach attaches a loaded program using the section name, like the
 // library's automatic attach. It supports the sections this package can
 // attach: kprobe, kretprobe, kprobe.multi, kprobe.session, uprobe, uretprobe,
-// tracepoint, tp, raw tracepoint, fentry, fexit, fmod_ret, tp_btf and lsm.
+// tracepoint, tp, raw tracepoint, fentry, fexit, fmod_ret, tp_btf, lsm, iter,
+// which gets the default iterator, and freplace, which attaches to the
+// function it was loaded against, as libbpf's attach_trace does.
 // Sections without an automatic attach, such as cgroup, xdp, sk_msg and
 // flow_dissector, return EOPNOTSUPP. So does the bare kprobe.session
 // section, which names no function: libbpf's attach_kprobe_session returns
@@ -534,6 +536,10 @@ func BpfProgramAttach(prog *BpfProgram) (*BpfLink, error) {
 		return BpfProgramAttachTrace(prog)
 	case "lsm/", "lsm.s/":
 		return BpfProgramAttachLsm(prog)
+	case "iter/", "iter.s/":
+		return BpfProgramAttachIter(prog, nil)
+	case "freplace/":
+		return BpfProgramAttachTrace(prog)
 	default:
 		return nil, attachErr(op, unix.EOPNOTSUPP)
 	}

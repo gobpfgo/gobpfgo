@@ -198,6 +198,11 @@ func TestLinkCreateUnionAttrBytes(t *testing.T) {
 			values: map[string]uint64{"prog_fd": 7, "attach_type": BPF_CGROUP_INET_INGRESS, "target_btf_id": 77},
 		},
 		{
+			name:   "freplace",
+			attr:   LinkCreateAttr{ProgFD: 7, TargetFD: 9, AttachType: 0, TargetBTFID: 77},
+			values: map[string]uint64{"prog_fd": 7, "target_fd": 9, "attach_type": 0, "target_btf_id": 77},
+		},
+		{
 			name:   "xdp",
 			attr:   withLinkTarget(stray, 7, 1, linkCreateAttachXDP),
 			values: map[string]uint64{"prog_fd": 7, "target_ifindex": 1, "attach_type": linkCreateAttachXDP},
@@ -264,6 +269,8 @@ func TestLinkCreateAttrValidate(t *testing.T) {
 		{"iterator with tracing cookie", LinkCreateAttr{AttachType: BPF_TRACE_ITER, TracingCookie: 1}, unix.EINVAL},
 		{"target btf id", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, TargetBTFID: 1}, nil},
 		{"target btf id with attach type 0", LinkCreateAttr{AttachType: 0, TargetBTFID: 1}, nil},
+		{"freplace target", LinkCreateAttr{TargetFD: 9, AttachType: 0, TargetBTFID: 1}, nil},
+		{"freplace target with iterator info", LinkCreateAttr{TargetFD: 9, AttachType: 0, TargetBTFID: 1, IterInfoLen: 8}, unix.EINVAL},
 		{"target btf id and union field", LinkCreateAttr{AttachType: BPF_TRACE_FENTRY, TargetBTFID: 1, TracingCookie: 1}, unix.EINVAL},
 		{"target btf id and cgroup field", LinkCreateAttr{AttachType: BPF_CGROUP_INET_INGRESS, TargetBTFID: 1, CgroupRelativeFD: 3}, unix.EINVAL},
 
@@ -333,6 +340,70 @@ func TestLinkCreateRejectsBeforeSyscall(t *testing.T) {
 			}
 			if _, err := LinkCreate(attr, nil); !errors.Is(err, unix.EINVAL) {
 				t.Fatalf("LinkCreate = %v, want EINVAL", err)
+			}
+		})
+	}
+}
+
+// TestLinkCreateIterInfo checks that LinkCreateIter points the iterator info
+// at the caller's bytes and writes the pointer and length at the offsets
+// libbpf's headers report, with every other byte of the union zero, and
+// that nil info leaves both zero. The invalid program descriptor makes
+// bpf() fail with EBADF, or EPERM without privileges, after the fields are
+// filled.
+func TestLinkCreateIterInfo(t *testing.T) {
+	f := loadLayoutFixture(t)
+
+	info := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	attr := &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: BPF_TRACE_ITER}
+	if _, err := LinkCreateIter(attr, info); err == nil || errors.Is(err, unix.EINVAL) {
+		t.Fatalf("LinkCreateIter with a bad program = %v, want a kernel error other than EINVAL", err)
+	}
+	if attr.IterInfo != uint64(addr(info)) || attr.IterInfoLen != uint32(len(info)) {
+		t.Fatalf("iter info = %#x/%d, want %#x/%d", attr.IterInfo, attr.IterInfoLen, addr(info), len(info))
+	}
+	want := fixtureBytes(t, f.LinkCreate, map[string]uint64{
+		"prog_fd": uint64(^uint32(0)), "attach_type": BPF_TRACE_ITER,
+		"iter_info": uint64(addr(info)), "iter_info_len": uint64(len(info)),
+	})
+	if got := attr.Marshal(); !bytes.Equal(got, want) {
+		t.Fatalf("link_create bytes:\n got %x\nwant %x", got, want)
+	}
+
+	attr = &LinkCreateAttr{ProgFD: ^uint32(0), AttachType: BPF_TRACE_ITER}
+	if _, err := LinkCreateIter(attr, nil); err == nil || errors.Is(err, unix.EINVAL) {
+		t.Fatalf("LinkCreateIter without info = %v, want a kernel error other than EINVAL", err)
+	}
+	if attr.IterInfo != 0 || attr.IterInfoLen != 0 {
+		t.Fatalf("iter info without info = %#x/%d, want 0/0", attr.IterInfo, attr.IterInfoLen)
+	}
+}
+
+// TestLinkCreateIterInvalid checks that LinkCreateIter returns EINVAL
+// without calling bpf(), which would fail with EBADF for the invalid
+// descriptor or EPERM without privileges: a nil attribute, an attach type
+// other than BPF_TRACE_ITER, iterator fields already set, and fields
+// validate refuses with the iterator member.
+func TestLinkCreateIterInvalid(t *testing.T) {
+	info := []byte{1, 2, 3, 4}
+	tests := map[string]*LinkCreateAttr{
+		"nil attr":              nil,
+		"attach type 0":         {},
+		"fentry":                {AttachType: BPF_TRACE_FENTRY},
+		"iter info set":         {AttachType: BPF_TRACE_ITER, IterInfo: 1},
+		"iter info length set":  {AttachType: BPF_TRACE_ITER, IterInfoLen: 4},
+		"target btf id":         {AttachType: BPF_TRACE_ITER, TargetBTFID: 1},
+		"tracing cookie":        {AttachType: BPF_TRACE_ITER, TracingCookie: 1},
+		"cgroup relative fd":    {AttachType: BPF_TRACE_ITER, CgroupRelativeFD: 3},
+		"uprobe multi path set": {AttachType: BPF_TRACE_ITER, UprobeMultiPath: 1},
+	}
+	for name, attr := range tests {
+		t.Run(name, func(t *testing.T) {
+			if attr != nil {
+				attr.ProgFD = ^uint32(0)
+			}
+			if _, err := LinkCreateIter(attr, info); !errors.Is(err, unix.EINVAL) {
+				t.Fatalf("LinkCreateIter = %v, want EINVAL", err)
 			}
 		})
 	}
