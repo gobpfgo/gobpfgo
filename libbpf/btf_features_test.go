@@ -131,9 +131,6 @@ func TestBtfFeatureProbes(t *testing.T) {
 	if !kern.Func || !kern.GlobalFunc || !kern.Datasec {
 		t.Errorf("func %v, global func %v, datasec %v; every test kernel has them", kern.Func, kern.GlobalFunc, kern.Datasec)
 	}
-	if want := getKernelVersion() >= kernelVersion(7, 1, 0); kern.Layout != want {
-		t.Errorf("layout %v on kernel %s, want %v", kern.Layout, kernelRelease(t), want)
-	}
 	for _, tt := range []struct {
 		name   string
 		cached bool

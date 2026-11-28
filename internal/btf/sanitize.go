@@ -203,14 +203,15 @@ func (s *Spec) newSanitizer(hasLayout bool) (*sanitizer, error) {
 	z := &sanitizer{spec: s}
 	strStart := int(h.HdrLen) + int(h.StrOff)
 	layoutOff, layoutLen := s.layoutFields(s.raw)
+	if layoutOff != 0 || layoutLen != 0 {
+		if err := s.checkLayout(layoutOff, layoutLen); err != nil {
+			return nil, err
+		}
+	}
 	if hasLayout || layoutOff == 0 && layoutLen == 0 {
 		z.raw = bytes.Clone(s.raw)
 		z.strs = z.raw[strStart : strStart+int(h.StrLen)]
 		return z, nil
-	}
-
-	if err := s.checkLayout(layoutOff, layoutLen); err != nil {
-		return nil, err
 	}
 	typeEnd := int(h.HdrLen) + int(h.TypeOff) + int(h.TypeLen)
 	z.raw = make([]byte, typeEnd+int(h.StrLen))
@@ -231,6 +232,9 @@ func (s *Spec) newSanitizer(hasLayout bool) (*sanitizer, error) {
 // error wraps EINVAL, as libbpf's does.
 func (s *Spec) checkLayout(off, length uint32) error {
 	h := s.Header
+	if h.TypeOff%4 != 0 {
+		return fmt.Errorf("btf: %w: BTF type section is not aligned to 4 bytes", syscall.EINVAL)
+	}
 	typeEnd := uint64(h.TypeOff) + uint64(h.TypeLen)
 	if typeEnd > uint64(h.StrOff) {
 		return fmt.Errorf("btf: %w: invalid BTF data sections layout: type data at %d + %d, strings data at %d + %d",
@@ -381,8 +385,9 @@ func (z *sanitizer) preparePlaceholder() error {
 // header, the types, the INT, the layout section if the header still has
 // one, and the string table, which gains the name unless it already held
 // it. The header keeps its bytes but the section offsets and lengths, as
-// libbpf's btf_get_raw_data writes them; libbpf keeps the type offset,
-// which a clang blob has at 0, but the types follow the header either way.
+// libbpf's btf_get_raw_data writes them. The port writes type_off as 0
+// because the types follow the header; libbpf copies the original type_off,
+// which a clang blob has at 0.
 func (z *sanitizer) appendEnum64Placeholder() []byte {
 	s := z.spec
 	h := s.Header

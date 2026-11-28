@@ -4,6 +4,7 @@
 package btf
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 
@@ -357,6 +358,14 @@ func TestParseErrors(t *testing.T) {
 	}
 	if _, err := Parse(make([]byte, 24), binary.LittleEndian); err == nil {
 		t.Fatal("Parse accepted a zero header")
+	}
+
+	b := newSpecBuilder()
+	b.add(intType("int", 4, 1))
+	raw := bytes.Clone(b.spec(t).Raw())
+	binary.LittleEndian.PutUint32(raw[8:], 4)
+	if _, err := Parse(raw, binary.LittleEndian); err == nil {
+		t.Fatal("Parse accepted an unaligned type section")
 	}
 }
 
