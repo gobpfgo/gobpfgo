@@ -43,11 +43,11 @@ func TestProgLoadAttr(t *testing.T) {
 		lineInfo: make([]byte, 3*btf.LineInfoMinSize),
 	}
 
-	attr := progLoadAttr(obj, code)
+	attr := progLoadAttr(obj, code, 0)
 	want := &sys.ProgLoadAttr{
 		ProgType:           uint32(BPF_PROG_TYPE_TRACING),
 		InsnCnt:            5,
-		LogLevel:           1,
+		LogLevel:           0,
 		KernVersion:        kernVersion,
 		ProgFlags:          BPF_F_SLEEPABLE,
 		ExpectedAttachType: uint32(BPF_TRACE_FENTRY),
@@ -68,7 +68,7 @@ func TestProgLoadAttr(t *testing.T) {
 	}
 
 	code.funcInfo, code.lineInfo = nil, nil
-	attr = progLoadAttr(obj, code)
+	attr = progLoadAttr(obj, code, 0)
 	if attr.FuncInfoRecSize != 0 || attr.FuncInfoCnt != 0 || attr.LineInfoRecSize != 0 || attr.LineInfoCnt != 0 {
 		t.Errorf("attr without records = %+v, want zero record sizes and counts", *attr)
 	}
@@ -85,7 +85,7 @@ func TestObjectKernVersion(t *testing.T) {
 		t.Errorf("kprobe.bpf.o kern_version = %#x, want the running kernel's %#x", obj.kernVersion, want)
 	}
 	code := &progCode{prog: obj.programs[0], insns: obj.programs[0].insns}
-	if got := progLoadAttr(obj, code).KernVersion; got != obj.kernVersion {
+	if got := progLoadAttr(obj, code, 0).KernVersion; got != obj.kernVersion {
 		t.Errorf("BPF_PROG_LOAD kern_version = %#x, want %#x", got, obj.kernVersion)
 	}
 

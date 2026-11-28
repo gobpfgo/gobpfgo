@@ -263,7 +263,7 @@ func TestResolveAttachBTFIDFreplaceBadTarget(t *testing.T) {
 // descriptor.
 func TestProgLoadAttrAttachProgFD(t *testing.T) {
 	p := &BpfProgram{name: "replace_xdp", progType: BPF_PROG_TYPE_EXT, attachBTFID: 7, attachProgFD: 9}
-	attr := progLoadAttr(&BpfObject{btfFD: 3}, &progCode{prog: p, insns: make([]byte, 2*bpfInsnLength)})
+	attr := progLoadAttr(&BpfObject{btfFD: 3}, &progCode{prog: p, insns: make([]byte, 2*bpfInsnLength)}, 0)
 	if attr.ProgType != uint32(BPF_PROG_TYPE_EXT) || attr.ExpectedAttachType != 0 || attr.AttachBtfID != 7 ||
 		attr.AttachProgFD != 9 || attr.AttachBtfObjFD != 0 {
 		t.Fatalf("attr = %+v, want type EXT, attach type 0, BTF id 7, program fd 9 and no object fd", *attr)
