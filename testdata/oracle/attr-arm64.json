@@ -1,0 +1,26 @@
+{
+  "case": "map_create",
+  "arch": "aarch64",
+  "kernel": "6.17.0-41-generic",
+  "input": {
+    "map_type": 2,
+    "name": "gobpfgo-test",
+    "key_size": 4,
+    "value_size": 8,
+    "max_entries": 16,
+    "map_flags": 0,
+    "btf_fd": 0,
+    "btf_key_type_id": 0,
+    "btf_value_type_id": 0,
+    "btf_vmlinux_value_type_id": 0,
+    "inner_map_fd": 0,
+    "map_extra": 0,
+    "numa_node": 0,
+    "map_ifindex": 0,
+    "value_type_btf_obj_fd": 0,
+    "token_fd": 0,
+    "excl_prog_hash_size": 0
+  },
+  "size": 92,
+  "hex": "02000000040000000800000010000000000000000000000000000000676f627066676f2d7465737400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+}

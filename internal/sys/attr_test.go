@@ -10,8 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"os"
-	"runtime"
 	"testing"
 )
 
@@ -43,18 +41,13 @@ type attrFixture struct {
 }
 
 func TestMapCreateAttr(t *testing.T) {
-	data, err := os.ReadFile("../../testdata/oracle/attr.json")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
+	data, path, perArch := readOracleFixture(t, "attr")
 
 	var f attrFixture
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("parse fixture: %v", err)
 	}
-	if !archMatches(f.Arch) {
-		t.Skipf("fixture is for %s, running on %s", f.Arch, runtime.GOARCH)
-	}
+	checkFixtureArch(t, path, f.Arch, perArch)
 	if f.Size != MapCreateAttrSize {
 		t.Fatalf("fixture size = %d, Go size = %d", f.Size, MapCreateAttrSize)
 	}

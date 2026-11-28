@@ -9,8 +9,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"os"
-	"runtime"
 	"testing"
 )
 
@@ -53,18 +51,13 @@ type layoutFixture struct {
 func loadLayoutFixture(t *testing.T) layoutFixture {
 	t.Helper()
 
-	data, err := os.ReadFile("../../testdata/oracle/layout.json")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
+	data, path, perArch := readOracleFixture(t, "layout")
 
 	var f layoutFixture
 	if err := json.Unmarshal(data, &f); err != nil {
 		t.Fatalf("parse fixture: %v", err)
 	}
-	if !archMatches(f.Arch) {
-		t.Skipf("fixture is for %s, running on %s", f.Arch, runtime.GOARCH)
-	}
+	checkFixtureArch(t, path, f.Arch, perArch)
 	if f.LibbpfCommit == "" {
 		t.Fatal("fixture has no libbpf commit")
 	}

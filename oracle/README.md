@@ -40,6 +40,15 @@ make -C oracle fixtures
 
 This writes `layout.json`, `attr.json`, `open.json`, `open-global-data.json`, `open-kconfig.json`, `open-kconfig-types.json`, `open-ksyms.json`, `open-ksyms-addr.json`, `open-ksyms-weak.json`, `open-subprog-hidden.json`, `open-subprog-arg-ctx.json`, `kconfig.json`, the `dump` texts, `core.json`, `core-reloc.json`, `core-reloc-subprog.json` for `subprog_core.bpf.o`, whose CO-RE relocations sit in `.text` subprograms, `core-match.json` and `core-match-reloc.json` for the type-based records of `core_match.bpf.o` against `core_match_target.bpf.o`, `core-local-reloc.json` for the field records of `core_local.bpf.o` on a type `core_target.bpf.o` lacks, `core-amb-reloc.json` and `core-amb-single-reloc.json` for `core_amb.bpf.o` against two candidates at different field offsets in `core_cands_target.bpf.o` and against one in `core_amb_single.bpf.o`, `core-cands-reloc.json` for the narrowed candidate lists of `core_cands.bpf.o` against `core_cands_target.bpf.o`, `linfo.json`, `zip.json`, `dedup.json`, whose objects are listed in `DEDUP_OBJECTS` in the Makefile, and `sanitize.json`, whose objects are listed in `SANITIZE_OBJECTS`. Run it as a user without `CAP_BPF`, or the sanitize scenario fails.
 
+The `internal/sys` layout and attribute tests read `layout-<GOARCH>.json` and `attr-<GOARCH>.json` when they exist and fall back to `layout.json` and `attr.json`, which are for x86-64 and skip on other arches. `layout-arm64.json` and `attr-arm64.json` come from an oracle built on an aarch64 host:
+
+```sh
+make -C oracle
+cd oracle
+build/oracle layout > ../testdata/oracle/layout-arm64.json
+build/oracle attr > ../testdata/oracle/attr-arm64.json
+```
+
 ```sh
 make -C oracle linker-fixture
 ```
