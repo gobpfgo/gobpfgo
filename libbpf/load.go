@@ -206,8 +206,14 @@ func loadObject(obj *BpfObject) error {
 		return &Error{Op: "bpf_object__load", Errno: errnoFromError(err), Log: err.Error()}
 	}
 
-	logBuf := make([]byte, 64*1024)
-	btfFD, err := sys.BtfLoad(kernBTF, logBuf, 1)
+	var logBuf []byte
+	btfFD, err := sys.BtfLoad(kernBTF, nil, 0)
+	if err != nil {
+		// libbpf sends no log buffer first and retries with one only
+		// when the load fails.
+		logBuf = make([]byte, 64*1024)
+		btfFD, err = sys.BtfLoad(kernBTF, logBuf, 1)
+	}
 	if err != nil {
 		return &Error{
 			Op:    "bpf_btf_load",
@@ -267,8 +273,17 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 		p.expectedAttachType = BPF_TRACE_UPROBE_MULTI
 	}
 
-	attr := progLoadAttr(obj, code)
-	fd, err := sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
+	attr := progLoadAttr(obj, code, 0)
+	fd, err := sys.ProgLoad(attr, code.insns, license, nil, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
+	if err != nil {
+		// libbpf sends no verifier log first and retries with one only
+		// when the load fails.
+		if logBuf == nil {
+			logBuf = make([]byte, 64*1024)
+		}
+		attr.LogLevel = 1
+		fd, err = sys.ProgLoad(attr, code.insns, license, logBuf, code.funcInfo, code.lineInfo, fdArrayBytes(obj))
+	}
 	if err != nil {
 		fixupVerifierLog(obj, code, logBuf)
 		return &Error{
@@ -295,16 +310,16 @@ func loadProgram(obj *BpfObject, code *progCode, license, logBuf []byte) error {
 
 // progLoadAttr returns the BPF_PROG_LOAD attributes of code, the relocated
 // code of a main program of obj: the program's type, flags, name and attach
-// settings, the instruction count, verifier log level 1, the object BTF and
+// settings, the instruction count, the given verifier log level, the object BTF and
 // the function and line record counts, with a record size only for a kind
 // that has records, and obj's kern_version, as libbpf sends it. The caller
 // passes the instructions, license, log and records themselves.
-func progLoadAttr(obj *BpfObject, code *progCode) *sys.ProgLoadAttr {
+func progLoadAttr(obj *BpfObject, code *progCode, logLevel uint32) *sys.ProgLoadAttr {
 	p := code.prog
 	attr := &sys.ProgLoadAttr{
 		ProgType:           uint32(p.progType),
 		InsnCnt:            uint32(len(code.insns) / bpfInsnLength),
-		LogLevel:           1,
+		LogLevel:           logLevel,
 		KernVersion:        obj.kernVersion,
 		ProgFlags:          p.progFlags,
 		ExpectedAttachType: uint32(p.expectedAttachType),
