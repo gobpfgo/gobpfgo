@@ -7,7 +7,7 @@ CPPFLAGS += -I$(LIBBPF)/include/uapi -I$(LIBBPF)/include
 
 BUILD := build
 ORACLE := $(BUILD)/oracle
-ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c dedup.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c subprog.c
+ORACLE_SRCS := main.c json.c oracle.c layout.c attr.c open.c load.c attach.c dump.c ringbuf.c perfbuf.c probe.c linker.c dedup.c core.c linfo.c zip.c usdt.c usdt_notes.c kconfig.c subprog.c sanitize.c
 ORACLE_HDRS := json.h oracle.h usdt_notes.h
 LIBBPF_SRC := $(BUILD)/libbpf/src
 LIBBPF_OBJ := $(BUILD)/libbpf-obj
@@ -15,6 +15,9 @@ LIBBPF_A := $(LIBBPF_OBJ)/libbpf.a
 
 # The objects whose .BTF and .BTF.ext the dedup scenario deduplicates.
 DEDUP_OBJECTS := $(addprefix ../testdata/progs/,kprobe.bpf.o dump.bpf.o core.bpf.o core_kernel.bpf.o global_data.bpf.o kconfig_types.bpf.o link_a.bpf.o link_b.bpf.o link_text_a.bpf.o link_text_b.bpf.o ringbuf.bpf.o usdt_attach.bpf.o)
+
+# The objects whose BTF after open the sanitize scenario sanitizes.
+SANITIZE_OBJECTS := $(addprefix ../testdata/progs/,kprobe.bpf.o global_data.bpf.o kconfig_types.bpf.o link_ksyms.bpf.o subprog_arg_ctx.bpf.o sanitize_type_tag.bpf.o sanitize_enum64.bpf.o sanitize_float.bpf.o dump.bpf.o percpu.bpf.o)
 
 # The extra config of the linked .kconfig fixtures: CONFIG_TEST for
 # kconfig.bpf.o and CONFIG_GOBPFGO_LINKED for link_kconfig.bpf.o. printf turns
@@ -71,6 +74,7 @@ fixtures: $(ORACLE)
 	$(ORACLE) linfo > ../testdata/oracle/linfo.json
 	$(ORACLE) zip > ../testdata/oracle/zip.json
 	$(ORACLE) dedup $(DEDUP_OBJECTS) > ../testdata/oracle/dedup.json
+	$(ORACLE) sanitize $(SANITIZE_OBJECTS) > ../testdata/oracle/sanitize.json
 
 load-fixture: $(ORACLE)
 	mkdir -p ../testdata/oracle

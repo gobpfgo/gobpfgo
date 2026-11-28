@@ -103,15 +103,19 @@ func markBtfStatic(obj *BpfObject) error {
 // btfNeedsSanitization reports whether the kernel with the BTF features
 // kern lacks one that the load's BTF sanitizer rewrites.
 func btfNeedsSanitization(kern btf.KernelFeatures) bool {
-	return !kern.DeclTag || !kern.TypeTag || !kern.Enum64 || !kern.QmarkDatasec || !kern.Float
+	return !kern.Func || !kern.Datasec || !kern.GlobalFunc || !kern.Float ||
+		!kern.DeclTag || !kern.TypeTag || !kern.Enum64 || !kern.QmarkDatasec ||
+		!kern.Layout
 }
 
 // sanitizeBTF returns the BTF blob that the load passes to BPF_BTF_LOAD.
 // When kern lacks a feature that btfNeedsSanitization checks, it is a copy
-// of spec's blob with the types and names that need the feature rewritten,
-// as btf.Spec.Sanitize describes, in which every type keeps its ID;
-// otherwise it is spec's blob itself. Either way the blob carries the
-// fixups already applied to spec, and spec keeps its original types:
+// of spec's blob with the types, names and header fields that need the
+// feature rewritten, as btf.Spec.Sanitize describes, in which every type
+// keeps its ID; otherwise it is spec's blob itself. A kernel without the
+// layout section, any before Linux 7.1, always gets the copy, as with
+// libbpf. Either way the blob carries the fixups already applied to spec,
+// and spec keeps its original types:
 // BpfObjectBTF returns the object BTF unsanitized, and the descriptor of
 // the loaded blob is the object's BTF descriptor.
 func sanitizeBTF(spec *btf.Spec, kern btf.KernelFeatures) ([]byte, error) {

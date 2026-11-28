@@ -48,6 +48,7 @@ int oracle_zip(void);
 int oracle_usdt(const char *path);
 int oracle_kconfig(const char *path);
 int oracle_subprog(const char *const *paths, int count);
+int oracle_sanitize(const char *const *paths, int count);
 
 void oracle_meta(struct json *j, const struct oracle_meta *meta);
 void oracle_field_block(struct json *j, const char *name, const struct oracle_field *fields, size_t count, size_t size);

@@ -112,7 +112,7 @@ func TestBtfFloatProbeBTF(t *testing.T) {
 }
 
 // TestBtfNeedsSanitization checks that the load sanitizes the BTF for a
-// kernel that lacks any one of the five BTF features, and passes the object
+// kernel that lacks any one of the nine BTF features, and passes the object
 // BTF itself to a kernel that has them all.
 func TestBtfNeedsSanitization(t *testing.T) {
 	if btfNeedsSanitization(allBTFFeatures) {
@@ -127,6 +127,10 @@ func TestBtfNeedsSanitization(t *testing.T) {
 		{"enum64", func(k *btf.KernelFeatures) { k.Enum64 = false }},
 		{"qmark datasec", func(k *btf.KernelFeatures) { k.QmarkDatasec = false }},
 		{"float", func(k *btf.KernelFeatures) { k.Float = false }},
+		{"func", func(k *btf.KernelFeatures) { k.Func = false }},
+		{"datasec", func(k *btf.KernelFeatures) { k.Datasec = false }},
+		{"global func", func(k *btf.KernelFeatures) { k.GlobalFunc = false }},
+		{"layout", func(k *btf.KernelFeatures) { k.Layout = false }},
 	} {
 		kern := allBTFFeatures
 		tt.clear(&kern)
@@ -143,14 +147,16 @@ func TestBtfNeedsSanitization(t *testing.T) {
 }
 
 // sanitizeObjectBTF opens the fixture name, sanitizes its BTF for a kernel
-// without any of the five BTF features and returns the object BTF and the
-// copy, both parsed from their blobs. The object BTF must keep its bytes.
+// without DECL_TAG, TYPE_TAG, ENUM64, '?' DATASEC names and FLOAT, but with
+// FUNC, DATASEC, global functions and the layout section, and returns the
+// object BTF and the copy, both parsed from their blobs. The object BTF
+// must keep its bytes.
 func sanitizeObjectBTF(t *testing.T, name string) (orig, sanitized *btf.Spec) {
 	t.Helper()
 
 	obj := openSubprogObject(t, name)
 	opened := bytes.Clone(obj.btf.Raw())
-	raw, err := sanitizeBTF(obj.btf, btf.KernelFeatures{})
+	raw, err := sanitizeBTF(obj.btf, btf.KernelFeatures{Func: true, Datasec: true, GlobalFunc: true, Layout: true})
 	if err != nil {
 		t.Fatalf("sanitize: %v", err)
 	}
@@ -313,7 +319,7 @@ func TestSanitizeFloatLoad(t *testing.T) {
 }
 
 // testSanitizeLoad loads the fixture name and logs the kernel release and
-// the five BTF feature probes. The load must succeed, and the object BTF
+// the nine BTF feature probes. The load must succeed, and the object BTF
 // must keep its bytes and the type of kind named typeName. On a kernel with
 // every feature the uploaded BTF is the object BTF itself. On one without
 // the fixture's feature, which supported reads from the probes, the
@@ -332,8 +338,7 @@ func testSanitizeLoad(t *testing.T, name, typeName string, kind btf.Kind, suppor
 		t.Skipf("bpf() not permitted: %v", err)
 	}
 	kern := kernelBTFFeatures()
-	t.Logf("kernel %s: decl tag %v, type tag %v, enum64 %v, qmark datasec %v, float %v",
-		kernelRelease(t), kern.DeclTag, kern.TypeTag, kern.Enum64, kern.QmarkDatasec, kern.Float)
+	logBTFFeatures(t, kern)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
