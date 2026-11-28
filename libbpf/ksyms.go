@@ -289,12 +289,52 @@ func (s *kallsymsScanner) entry() (addr uint64, typ byte, name string, n int, eo
 	name = s.token(kallsymsNameMax)
 	n = 3
 
-	// %*[^\n] needs at least one character before the newline; without
-	// one the scan stops and the newline is left for the next entry.
+	s.endEntry()
+	return addr, typ, name, n, false
+}
+
+// addrNameEntry reads one entry the way fscanf("%llx %499s%*[^\n]\n") does,
+// the format of tracefs available_filter_functions_addrs, and returns the
+// number of fields it assigned. eof is set when the input ends before the
+// first field.
+func (s *kallsymsScanner) addrNameEntry() (addr uint64, name string, n int, eof bool) {
+	if !s.skipSpace() {
+		return 0, "", 0, true
+	}
+	addr, ok := s.hex()
+	if !ok {
+		return 0, "", 0, false
+	}
+	if !s.skipSpace() {
+		return addr, "", 1, false
+	}
+	name = s.token(kallsymsNameMax)
+
+	s.endEntry()
+	return addr, name, 2, false
+}
+
+// nameEntry reads one entry the way fscanf("%499s%*[^\n]\n") does, the
+// format of tracefs available_filter_functions. eof is set when the input
+// ends before the name.
+func (s *kallsymsScanner) nameEntry() (name string, eof bool) {
+	if !s.skipSpace() {
+		return "", true
+	}
+	name = s.token(kallsymsNameMax)
+
+	s.endEntry()
+	return name, false
+}
+
+// endEntry consumes what follows the last field, as %*[^\n]\n does.
+// %*[^\n] needs at least one character before the newline; without one the
+// scan stops and the newline is left for the next entry, whose first
+// conversion skips it.
+func (s *kallsymsScanner) endEntry() {
 	if s.skipLine() {
 		s.skipSpace()
 	}
-	return addr, typ, name, n, false
 }
 
 // skipSpace consumes white space and reports whether input remains.

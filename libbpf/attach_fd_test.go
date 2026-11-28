@@ -230,7 +230,7 @@ func TestKprobeMultiLink(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			attr, km, err := kprobeMultiLink(&BpfProgram{fd: 5}, tt.opts)
+			attr, km, err := kprobeMultiLink(&BpfProgram{fd: 5}, tt.opts, unexpectedKprobeResolve(t))
 			if !errors.Is(err, tt.err) {
 				t.Fatalf("kprobeMultiLink error = %v, want %v", err, tt.err)
 			}
