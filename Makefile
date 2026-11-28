@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-only
 
 CLANG_FORMAT ?= clang-format
-C_SRCS := oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
+C_SRCS := bench/bench.c oracle/main.c oracle/json.c oracle/oracle.c oracle/layout.c \
 	oracle/attr.c oracle/open.c oracle/load.c oracle/attach.c oracle/dump.c \
 	oracle/ringbuf.c oracle/perfbuf.c oracle/probe.c oracle/linker.c \
 	oracle/dedup.c oracle/core.c oracle/linfo.c oracle/zip.c oracle/usdt.c \
